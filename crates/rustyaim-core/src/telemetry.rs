@@ -32,6 +32,16 @@ pub struct EngineRun {
     /// (seconds, rating)
     pub rating_timeline: Vec<(f64, f64)>,
     pub workout: Option<String>,
+    /// The scenario's sub-skill (e.g. `static_clicking`).
+    pub skill: Option<String>,
+    /// Program name and weekday (`mon`…`sun`) when played as part of a program.
+    pub program: Option<String>,
+    pub program_day: Option<String>,
+    /// Rep number within its workout item, the item's rep count, and its block
+    /// (`warmup`, `main`, `secondary`, `maintenance`).
+    pub rep: Option<i64>,
+    pub reps: Option<i64>,
+    pub block: Option<String>,
     /// Little-endian f32 triples (seconds, yaw°, pitch°).
     pub trace: Vec<u8>,
     pub targets: Vec<TargetRow>,
@@ -158,6 +168,17 @@ CREATE TABLE engine_samples (
 CREATE INDEX engine_samples_run ON engine_samples (run_id);
 "#;
 
+/// Schema v5: skills, programs and reps.
+pub(crate) const MIGRATION_PROGRAMS: &str = r#"
+ALTER TABLE engine_runs ADD COLUMN skill TEXT;
+ALTER TABLE engine_runs ADD COLUMN program TEXT;
+ALTER TABLE engine_runs ADD COLUMN program_day TEXT;
+ALTER TABLE engine_runs ADD COLUMN rep INTEGER;
+ALTER TABLE engine_runs ADD COLUMN reps INTEGER;
+ALTER TABLE engine_runs ADD COLUMN block TEXT;
+CREATE INDEX engine_runs_program ON engine_runs (program, program_day);
+"#;
+
 /// Schema v4: adaptive ratings in real units replace levels.
 pub(crate) const MIGRATION_RATINGS: &str = r#"
 ALTER TABLE engine_runs ADD COLUMN knob TEXT;
@@ -203,8 +224,9 @@ impl Db {
         let changed = tx.execute(
             "INSERT OR IGNORE INTO engine_runs (run_id, base_scenario, category, adaptive, goal, success_rate,
                 level_timeline, workout, trace, knob, rating, rating_low, rating_high, start_rating, theta, slope,
-                rating_sd, fastest, mix)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+                rating_sd, fastest, mix, skill, program, program_day, rep, reps, block)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
+                     ?21, ?22, ?23, ?24, ?25)",
             params![
                 run_id,
                 e.base_scenario,
@@ -225,6 +247,12 @@ impl Db {
                 e.rating_sd,
                 e.fastest,
                 e.mix,
+                e.skill,
+                e.program,
+                e.program_day,
+                e.rep,
+                e.reps,
+                e.block,
             ],
         )?;
         if changed == 0 {

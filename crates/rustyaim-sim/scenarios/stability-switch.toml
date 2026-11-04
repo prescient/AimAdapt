@@ -1,0 +1,41 @@
+name = "Stability Switch"
+description = "Three slow strafing targets that each need a long, steady beam to finish. Stay on each one, then move to the next. Trains stability switching."
+author = "RustyAim"
+category = "switching"
+skill = "stability_switching"
+tags = ["switching", "stability", "tracking"]
+
+[timing]
+duration_s = 60.0
+
+[weapon]
+kind = "beam"
+trigger = "hold"
+damage_per_s = 100.0
+
+[targets]
+count = 3
+radius = 0.45
+health = 150.0
+color = "#c38bff"
+
+[targets.spawn]
+distance = [11.0, 13.0]
+yaw = [-45.0, 45.0]
+pitch = [-6.0, 16.0]
+min_separation = 15.0
+
+[targets.movement]
+kind = "strafe"
+speed = [1.5, 2.5]
+change_every_s = [0.6, 1.4]
+
+[scoring]
+per_kill = 100.0
+
+[adaptive]
+goal = 0.85
+knob = "target_speed"
+easy = 4.0
+hard = 100.0
+start = 12.0

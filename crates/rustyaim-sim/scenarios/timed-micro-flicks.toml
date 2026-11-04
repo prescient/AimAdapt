@@ -2,6 +2,7 @@ name = "Timed Micro Flicks"
 description = "Small targets close to the last one that time out quickly. Trains quick, precise corrections."
 author = "RustyAim"
 category = "clicking"
+skill = "static_clicking"
 tags = ["flick", "micro", "timed", "precision"]
 
 [timing]

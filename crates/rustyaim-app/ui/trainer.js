@@ -23,7 +23,7 @@ const CATEGORIES = [
   ["mine", "Yours"],
 ];
 
-const TRAINER_VIEWS = ["play", "edit", "workout", "settings"];
+const TRAINER_VIEWS = ["play", "edit", "workout", "settings", "program"];
 
 async function loadTrainer() {
   try {
@@ -101,6 +101,7 @@ function play() {
     ${d.playing ? `<section class="banner info"><div><div class="banner-title">The trainer is open</div><div class="banner-body">Finish or press Esc to come back. Each run is saved when its timer ends.</div></div></section>` : ""}
     ${tr.message ? `<section class="banner"><div class="banner-body">${esc(tr.message)}</div></section>` : ""}
     ${profileBar()}
+    ${typeof todayCard === "function" ? todayCard() : ""}
     <section class="banner info"><div><div class="banner-title">Adaptive mode keeps you at about 85%</div>
       <div class="banner-body">Adaptive mode rates you in real units: the target lifetime (or tracking speed) you hit 85% of the time. It finds that in the first 15–25 targets, then mixes targets near your rating with harder stretch targets and a few easy ones (change the mix in Settings). Hitting a stretch target faster than ever is a breakthrough. Standard mode plays the scenario exactly as written.</div></div></section>
     ${workoutsCard()}

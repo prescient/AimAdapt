@@ -1,0 +1,39 @@
+name = "Core Week: Wednesday"
+description = "Switching. Speed and evasive switching for five reps each, then stability switching and fast static clicks, with a little smooth tracking."
+author = "RustyAim"
+
+[[items]]
+scenario = "builtin:static-grid"
+runs = 2
+mode = "standard"
+block = "warmup"
+
+[[items]]
+scenario = "builtin:speed-switch"
+runs = 5
+mode = "adaptive"
+block = "main"
+
+[[items]]
+scenario = "builtin:switch-track"
+runs = 5
+mode = "adaptive"
+block = "main"
+
+[[items]]
+scenario = "builtin:stability-switch"
+runs = 4
+mode = "adaptive"
+block = "secondary"
+
+[[items]]
+scenario = "builtin:timed-grid"
+runs = 4
+mode = "adaptive"
+block = "secondary"
+
+[[items]]
+scenario = "builtin:float-track"
+runs = 3
+mode = "adaptive"
+block = "maintenance"

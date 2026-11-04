@@ -2,6 +2,7 @@ name = "Timed Flicks"
 description = "One target at a time that disappears if you're too slow. Hit it before it times out. In adaptive mode the time limit shrinks as you improve, so speed is the difficulty."
 author = "RustyAim"
 category = "clicking"
+skill = "static_clicking"
 tags = ["flick", "timed", "speed"]
 
 [timing]

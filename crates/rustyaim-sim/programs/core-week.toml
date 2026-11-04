@@ -1,0 +1,32 @@
+name = "Core Week"
+description = "Monday to Saturday, about 30 minutes a day. Each day works one skill group with few exercises and lots of reps: a warm-up, two main drills for five reps each, two related drills for four, and one from another group so it doesn't fade. Saturday is built from your weakest skills. Sunday is rest."
+
+[[days]]
+day = "mon"
+focus = "Static clicking"
+workout = "builtin:core-mon"
+
+[[days]]
+day = "tue"
+focus = "Reactive tracking"
+workout = "builtin:core-tue"
+
+[[days]]
+day = "wed"
+focus = "Switching"
+workout = "builtin:core-wed"
+
+[[days]]
+day = "thu"
+focus = "Precise and dynamic clicking"
+workout = "builtin:core-thu"
+
+[[days]]
+day = "fri"
+focus = "Smooth and precise tracking"
+workout = "builtin:core-fri"
+
+[[days]]
+day = "sat"
+focus = "Weak spots"
+weak_spots = true

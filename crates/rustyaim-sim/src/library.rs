@@ -21,6 +21,12 @@ const BUILTIN: &[(&str, &str)] = &[
     ("timed-micro-flicks", include_str!("../scenarios/timed-micro-flicks.toml")),
     ("timed-grid", include_str!("../scenarios/timed-grid.toml")),
     ("timed-strafe-clicks", include_str!("../scenarios/timed-strafe-clicks.toml")),
+    ("linear-clicks", include_str!("../scenarios/linear-clicks.toml")),
+    ("close-strafe-track", include_str!("../scenarios/close-strafe-track.toml")),
+    ("precise-track", include_str!("../scenarios/precise-track.toml")),
+    ("control-track", include_str!("../scenarios/control-track.toml")),
+    ("speed-switch", include_str!("../scenarios/speed-switch.toml")),
+    ("stability-switch", include_str!("../scenarios/stability-switch.toml")),
 ];
 
 #[derive(Debug, Clone)]

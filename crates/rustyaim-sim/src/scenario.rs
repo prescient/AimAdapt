@@ -39,6 +39,8 @@ pub struct Scenario {
     pub description: String,
     pub author: String,
     pub category: Category,
+    /// The sub-skill it trains, for skill profiles and programs.
+    pub skill: Skill,
     pub tags: Vec<String>,
     pub timing: Timing,
     pub arena: Arena,
@@ -57,6 +59,7 @@ impl Default for Scenario {
             description: String::new(),
             author: String::new(),
             category: Category::Clicking,
+            skill: Skill::None,
             tags: Vec::new(),
             timing: Timing::default(),
             arena: Arena::default(),
@@ -75,6 +78,89 @@ pub enum Category {
     Clicking,
     Tracking,
     Switching,
+}
+
+/// Nine sub-skills in three groups, the split the Voltaic benchmarks use.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Skill {
+    #[default]
+    None,
+    /// Flicking to still targets quickly and accurately.
+    StaticClicking,
+    /// Clicking on targets that change direction.
+    DynamicClicking,
+    /// Clicking on targets moving in straight lines.
+    LinearClicking,
+    /// Staying on small, slow, smooth targets.
+    PreciseTracking,
+    /// Following sudden direction changes.
+    ReactiveTracking,
+    /// Smooth, controlled tracking of predictable paths.
+    ControlTracking,
+    /// Moving between targets that die quickly.
+    SpeedSwitching,
+    /// Switching between dodging targets.
+    EvasiveSwitching,
+    /// Staying on each target long enough to finish it.
+    StabilitySwitching,
+}
+
+impl Skill {
+    pub const ALL: [Skill; 9] = [
+        Skill::StaticClicking,
+        Skill::DynamicClicking,
+        Skill::LinearClicking,
+        Skill::PreciseTracking,
+        Skill::ReactiveTracking,
+        Skill::ControlTracking,
+        Skill::SpeedSwitching,
+        Skill::EvasiveSwitching,
+        Skill::StabilitySwitching,
+    ];
+
+    pub fn id(self) -> &'static str {
+        match self {
+            Skill::None => "none",
+            Skill::StaticClicking => "static_clicking",
+            Skill::DynamicClicking => "dynamic_clicking",
+            Skill::LinearClicking => "linear_clicking",
+            Skill::PreciseTracking => "precise_tracking",
+            Skill::ReactiveTracking => "reactive_tracking",
+            Skill::ControlTracking => "control_tracking",
+            Skill::SpeedSwitching => "speed_switching",
+            Skill::EvasiveSwitching => "evasive_switching",
+            Skill::StabilitySwitching => "stability_switching",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Skill> {
+        Skill::ALL.into_iter().find(|s| s.id() == id)
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Skill::None => "None",
+            Skill::StaticClicking => "Static clicking",
+            Skill::DynamicClicking => "Dynamic clicking",
+            Skill::LinearClicking => "Linear clicking",
+            Skill::PreciseTracking => "Precise tracking",
+            Skill::ReactiveTracking => "Reactive tracking",
+            Skill::ControlTracking => "Control tracking",
+            Skill::SpeedSwitching => "Speed switching",
+            Skill::EvasiveSwitching => "Evasive switching",
+            Skill::StabilitySwitching => "Stability switching",
+        }
+    }
+
+    pub fn group(self) -> Option<Category> {
+        Some(match self {
+            Skill::None => return None,
+            Skill::StaticClicking | Skill::DynamicClicking | Skill::LinearClicking => Category::Clicking,
+            Skill::PreciseTracking | Skill::ReactiveTracking | Skill::ControlTracking => Category::Tracking,
+            Skill::SpeedSwitching | Skill::EvasiveSwitching | Skill::StabilitySwitching => Category::Switching,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -337,6 +423,10 @@ impl Scenario {
 
         check(self.schema <= SCHEMA_VERSION, "made for a newer version of RustyAim");
         check(!self.name.trim().is_empty(), "name is empty");
+        check(
+            self.skill.group().is_none_or(|g| g == self.category),
+            "the skill doesn't belong to the category (e.g. a tracking skill on a clicking scenario)",
+        );
         check(self.timing.duration_s > 0.0 && self.timing.duration_s <= 3600.0, "duration must be 0–3600 seconds");
         check(self.timing.countdown_s >= 0.0 && self.timing.countdown_s <= 30.0, "countdown must be 0–30 seconds");
         check(self.arena.size.iter().all(|v| *v >= 2.0 && *v <= 1000.0), "arena size must be 2–1000 m per side");

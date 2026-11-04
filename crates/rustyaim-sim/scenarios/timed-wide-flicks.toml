@@ -2,6 +2,7 @@ name = "Timed Wide Flicks"
 description = "Targets far from the last one, each on a timer. Trains fast, committed wide flicks."
 author = "RustyAim"
 category = "clicking"
+skill = "static_clicking"
 tags = ["flick", "wide", "timed"]
 
 [timing]

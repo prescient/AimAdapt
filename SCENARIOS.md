@@ -51,6 +51,7 @@ per_miss = -30.0
 | `description` | `""` | What the scenario trains and how to play it. |
 | `author` | `""` | Who made it. |
 | `category` | `"clicking"` | `clicking`, `tracking` or `switching`. |
+| `skill` | `"none"` | The sub-skill it trains, for your skill profile and programs: `static_clicking`, `dynamic_clicking`, `linear_clicking`, `precise_tracking`, `reactive_tracking`, `control_tracking`, `speed_switching`, `evasive_switching` or `stability_switching`. It must match the category. |
 | `tags` | `[]` | Short words for searching. |
 
 ### `[timing]`
@@ -190,10 +191,30 @@ scenario = "builtin:strafe-track"
 
 Each run is saved on its own, with the workout's name attached.
 
+## Programs
+
+A program maps weekdays to workouts. Built-ins live in [`crates/rustyaim-sim/programs`](crates/rustyaim-sim/programs). Days that aren't listed are rest days. A day can be `weak_spots = true` instead of naming a workout. That day is then built from your skill profile: a standard warm-up, your two weakest skills ×5, the next two ×4, and your strongest ×3. Untrained skills count as weakest.
+
+```toml
+name = "Core Week"
+
+[[days]]
+day = "mon"
+focus = "Static clicking"
+workout = "builtin:core-mon"
+
+[[days]]
+day = "sat"
+focus = "Weak spots"
+weak_spots = true
+```
+
+Workout items can carry a `block` (`warmup`, `main`, `secondary` or `maintenance`). The Program page groups drills by block and compares each day's main drills with the same day last week.
+
 ## Playing from the command line
 
 ```bash
 cargo run -p rustyaim-engine -- builtin:static-grid --windowed
 ```
 
-The argument can be `builtin:<name>`, `user:<file name without .toml>`, or a path to any `.toml` file. Options: `--adaptive`, `--workout <id>` (instead of a scenario), `--windowed`, `--no-save`, `--db <file>` and `--seed <n>`. The same seed with the same mouse input replays the same run.
+The argument can be `builtin:<name>`, `user:<file name without .toml>`, or a path to any `.toml` file. Options: `--adaptive`, `--workout <id>` or `--program <id> [--day mon…sun]` (instead of a scenario), `--windowed`, `--no-save`, `--db <file>` and `--seed <n>`. The same seed with the same mouse input replays the same run.

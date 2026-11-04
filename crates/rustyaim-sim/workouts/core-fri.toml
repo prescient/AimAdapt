@@ -1,0 +1,39 @@
+name = "Core Week: Friday"
+description = "Smooth and precise tracking. Small slow targets and long arcs for five reps each, then smooth and reactive tracking, with a little clicking."
+author = "RustyAim"
+
+[[items]]
+scenario = "builtin:float-track"
+runs = 2
+mode = "standard"
+block = "warmup"
+
+[[items]]
+scenario = "builtin:precise-track"
+runs = 5
+mode = "adaptive"
+block = "main"
+
+[[items]]
+scenario = "builtin:control-track"
+runs = 5
+mode = "adaptive"
+block = "main"
+
+[[items]]
+scenario = "builtin:float-track"
+runs = 4
+mode = "adaptive"
+block = "secondary"
+
+[[items]]
+scenario = "builtin:strafe-track"
+runs = 4
+mode = "adaptive"
+block = "secondary"
+
+[[items]]
+scenario = "builtin:timed-flicks"
+runs = 3
+mode = "adaptive"
+block = "maintenance"

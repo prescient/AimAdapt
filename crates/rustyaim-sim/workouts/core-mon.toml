@@ -1,0 +1,39 @@
+name = "Core Week: Monday"
+description = "Static clicking. Two timed flicking drills for five reps each, then wide flicks and reflexes, with a little tracking so it doesn't fade."
+author = "RustyAim"
+
+[[items]]
+scenario = "builtin:static-grid"
+runs = 2
+mode = "standard"
+block = "warmup"
+
+[[items]]
+scenario = "builtin:timed-flicks"
+runs = 5
+mode = "adaptive"
+block = "main"
+
+[[items]]
+scenario = "builtin:timed-grid"
+runs = 5
+mode = "adaptive"
+block = "main"
+
+[[items]]
+scenario = "builtin:timed-wide-flicks"
+runs = 4
+mode = "adaptive"
+block = "secondary"
+
+[[items]]
+scenario = "builtin:shrink-reflex"
+runs = 4
+mode = "adaptive"
+block = "secondary"
+
+[[items]]
+scenario = "builtin:strafe-track"
+runs = 3
+mode = "adaptive"
+block = "maintenance"

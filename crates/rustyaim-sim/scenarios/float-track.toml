@@ -2,6 +2,7 @@ name = "Float Track"
 description = "A ball drifting smoothly in every direction. Hold fire and stay on it. Trains smooth tracking."
 author = "RustyAim"
 category = "tracking"
+skill = "control_tracking"
 tags = ["tracking", "smooth"]
 
 [timing]

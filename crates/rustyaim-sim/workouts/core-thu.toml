@@ -1,0 +1,39 @@
+name = "Core Week: Thursday"
+description = "Precise and dynamic clicking. Micro flicks and strafing targets for five reps each, then linear movers and untimed strafes, with a little tracking."
+author = "RustyAim"
+
+[[items]]
+scenario = "builtin:timed-flicks"
+runs = 2
+mode = "standard"
+block = "warmup"
+
+[[items]]
+scenario = "builtin:timed-micro-flicks"
+runs = 5
+mode = "adaptive"
+block = "main"
+
+[[items]]
+scenario = "builtin:timed-strafe-clicks"
+runs = 5
+mode = "adaptive"
+block = "main"
+
+[[items]]
+scenario = "builtin:linear-clicks"
+runs = 4
+mode = "adaptive"
+block = "secondary"
+
+[[items]]
+scenario = "builtin:strafe-clicks"
+runs = 4
+mode = "adaptive"
+block = "secondary"
+
+[[items]]
+scenario = "builtin:strafe-track"
+runs = 3
+mode = "adaptive"
+block = "maintenance"

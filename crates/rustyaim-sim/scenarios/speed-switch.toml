@@ -1,0 +1,44 @@
+name = "Speed Switch"
+description = "Four targets that barely move and melt in a short burst of beam, each on a timer. Kill one, snap to the next. Trains speed switching."
+author = "RustyAim"
+category = "switching"
+skill = "speed_switching"
+tags = ["switching", "speed"]
+
+[timing]
+duration_s = 60.0
+
+[weapon]
+kind = "beam"
+trigger = "hold"
+damage_per_s = 200.0
+
+[targets]
+count = 4
+radius = 0.4
+health = 30.0
+color = "#c38bff"
+lifetime_s = 1.5
+
+[targets.spawn]
+distance = [11.0, 13.0]
+yaw = [-45.0, 45.0]
+pitch = [-6.0, 18.0]
+min_separation = 15.0
+
+[targets.movement]
+kind = "random"
+speed = [0.5, 1.0]
+change_every_s = [1.0, 2.0]
+vertical = 0.5
+
+[scoring]
+per_kill = 100.0
+per_timeout = -50.0
+
+[adaptive]
+goal = 0.85
+knob = "lifetime"
+easy = 3.0
+hard = 0.5
+start = 1.5

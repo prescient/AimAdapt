@@ -307,3 +307,93 @@ pub fn play_workout(
     }
     launch(app, &state, &t, &["--workout", id.as_str()])
 }
+
+#[derive(Serialize)]
+pub struct ProgramDay {
+    day: &'static str,
+    name: &'static str,
+    focus: Option<String>,
+    weak_spots: bool,
+    /// The day's workout (built from the skill profile for weak-spots days).
+    workout: Option<Workout>,
+    runs: u32,
+    minutes: f64,
+}
+
+#[derive(Serialize)]
+pub struct ProgramPage {
+    id: String,
+    name: String,
+    description: String,
+    today: &'static str,
+    days: Vec<ProgramDay>,
+    progress: rustyaim_core::programs::ProgramProgress,
+    playing: bool,
+}
+
+#[tauri::command]
+pub fn program(state: State<'_, AppData>, t: State<'_, TrainerState>) -> Result<ProgramPage, String> {
+    build_program(&state, &t)
+}
+
+pub fn build_program(state: &AppData, t: &TrainerState) -> Result<ProgramPage, String> {
+    use rustyaim_sim::program::{self, Weekday};
+    let id = "builtin:core-week";
+    let prog = program::resolve(id)?;
+    let db = state.db.lock().map_err(err)?;
+    let durations: HashMap<String, f64> = library::load_all(&t.scenarios_dir())
+        .into_iter()
+        .filter_map(|e| e.scenario.ok().map(|s| (e.id, f64::from(s.timing.duration_s + s.timing.countdown_s))))
+        .collect();
+    let days: Vec<ProgramDay> = Weekday::ALL
+        .into_iter()
+        .map(|d| {
+            let pd = prog.day(d);
+            let workout =
+                pd.and_then(|_| rustyaim_engine::workout_for_day(&prog, d, Some(&db), &t.workouts_dir()).ok());
+            let runs = workout.as_ref().map_or(0, Workout::total_runs);
+            // About 12 s per run for the results screen and loading.
+            let seconds: f64 = workout.as_ref().map_or(0.0, |w| {
+                w.items
+                    .iter()
+                    .map(|i| (durations.get(&i.scenario).copied().unwrap_or(63.0) + 12.0) * f64::from(i.runs))
+                    .sum()
+            });
+            ProgramDay {
+                day: d.id(),
+                name: d.name(),
+                focus: pd.map(|p| p.focus.clone()),
+                weak_spots: pd.is_some_and(|p| p.weak_spots),
+                workout,
+                runs,
+                minutes: seconds / 60.0,
+            }
+        })
+        .collect();
+    let plan: Vec<(String, u32)> = days.iter().map(|d| (d.day.to_string(), d.runs)).collect();
+    let now = chrono::Local::now().naive_local();
+    let progress = rustyaim_core::programs::progress(&db, &prog.name, now, &plan).map_err(err)?;
+    Ok(ProgramPage {
+        id: id.into(),
+        name: prog.name.clone(),
+        description: prog.description.clone(),
+        today: rustyaim_engine::today().id(),
+        days,
+        progress,
+        playing: t.playing.load(Ordering::SeqCst),
+    })
+}
+
+/// Starts a program day in the trainer (today if `day` is empty).
+#[tauri::command]
+pub fn play_program(
+    app: AppHandle,
+    state: State<'_, AppData>,
+    t: State<'_, TrainerState>,
+    id: String,
+    day: Option<String>,
+) -> Result<(), String> {
+    rustyaim_sim::program::resolve(&id)?;
+    let day = day.unwrap_or_else(|| rustyaim_engine::today().id().to_string());
+    launch(app, &state, &t, &["--program", id.as_str(), "--day", day.as_str()])
+}

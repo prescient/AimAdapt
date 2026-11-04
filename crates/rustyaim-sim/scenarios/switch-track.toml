@@ -2,6 +2,7 @@ name = "Switch Track"
 description = "Three moving targets that each take half a second of beam. Destroy one, then move to the next. Trains target switching."
 author = "RustyAim"
 category = "switching"
+skill = "evasive_switching"
 tags = ["switching", "tracking"]
 
 [timing]

@@ -45,6 +45,36 @@ pub struct Item {
     pub runs: u32,
     #[serde(default)]
     pub mode: Mode,
+    /// Which part of the session this is, for display and progress.
+    #[serde(default, skip_serializing_if = "Block::is_none")]
+    pub block: Block,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Block {
+    #[default]
+    None,
+    Warmup,
+    Main,
+    Secondary,
+    Maintenance,
+}
+
+impl Block {
+    fn is_none(&self) -> bool {
+        *self == Block::None
+    }
+
+    pub fn id(self) -> &'static str {
+        match self {
+            Block::None => "none",
+            Block::Warmup => "warmup",
+            Block::Main => "main",
+            Block::Secondary => "secondary",
+            Block::Maintenance => "maintenance",
+        }
+    }
 }
 
 fn one() -> u32 {
@@ -64,6 +94,7 @@ pub enum Mode {
 pub struct Step {
     pub scenario: String,
     pub mode: Mode,
+    pub block: Block,
     /// 1-based run number within its item, and that item's run count.
     pub run: u32,
     pub of: u32,
@@ -104,7 +135,13 @@ impl Workout {
         self.items
             .iter()
             .flat_map(|it| {
-                (1..=it.runs).map(move |run| Step { scenario: it.scenario.clone(), mode: it.mode, run, of: it.runs })
+                (1..=it.runs).map(move |run| Step {
+                    scenario: it.scenario.clone(),
+                    mode: it.mode,
+                    block: it.block,
+                    run,
+                    of: it.runs,
+                })
             })
             .collect()
     }
@@ -119,6 +156,11 @@ const BUILTIN: &[(&str, &str)] = &[
     ("quick-warmup", include_str!("../workouts/quick-warmup.toml")),
     ("clicking-focus", include_str!("../workouts/clicking-focus.toml")),
     ("tracking-focus", include_str!("../workouts/tracking-focus.toml")),
+    ("core-mon", include_str!("../workouts/core-mon.toml")),
+    ("core-tue", include_str!("../workouts/core-tue.toml")),
+    ("core-wed", include_str!("../workouts/core-wed.toml")),
+    ("core-thu", include_str!("../workouts/core-thu.toml")),
+    ("core-fri", include_str!("../workouts/core-fri.toml")),
 ];
 
 #[derive(Debug, Clone)]
@@ -234,7 +276,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let w = Workout {
             name: "Morning".into(),
-            items: vec![Item { scenario: "builtin:timed-flicks".into(), runs: 3, mode: Mode::Adaptive }],
+            items: vec![Item {
+                scenario: "builtin:timed-flicks".into(),
+                runs: 3,
+                mode: Mode::Adaptive,
+                block: Block::None,
+            }],
             ..Default::default()
         };
         let id = save_user(dir.path(), &w, None).unwrap();

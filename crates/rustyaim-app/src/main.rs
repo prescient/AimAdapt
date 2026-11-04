@@ -138,6 +138,7 @@ fn dump_snapshot(state: &AppData, path: &std::path::Path) -> Result<(), String> 
         playing: std::sync::atomic::AtomicBool::new(false),
     };
     let trainer = trainer::build_trainer(state, &t)?;
+    let program = trainer::build_program(state, &t)?;
     let db = state.db.lock().map_err(err)?;
     let overview = rustyaim_core::insights::overview(&db).map_err(err)?;
     let mut insights = std::collections::BTreeMap::new();
@@ -152,6 +153,7 @@ fn dump_snapshot(state: &AppData, path: &std::path::Path) -> Result<(), String> 
         snapshot: &'a Snapshot,
         scenarios: &'a std::collections::BTreeMap<String, ScenarioDetail>,
         trainer: &'a trainer::Trainer,
+        program: &'a trainer::ProgramPage,
         insights_overview: &'a [rustyaim_core::insights::ScenarioSummary],
         insights: &'a std::collections::BTreeMap<String, rustyaim_core::insights::Insights>,
     }
@@ -159,6 +161,7 @@ fn dump_snapshot(state: &AppData, path: &std::path::Path) -> Result<(), String> 
         snapshot: &snapshot,
         scenarios: &scenarios,
         trainer: &trainer,
+        program: &program,
         insights_overview: &overview,
         insights: &insights,
     };
@@ -265,6 +268,8 @@ fn main() {
             trainer::insights,
             trainer::play,
             trainer::play_workout,
+            trainer::program,
+            trainer::play_program,
         ])
         .run(tauri::generate_context!())
         .expect("error while running RustyAim");

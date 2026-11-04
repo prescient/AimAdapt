@@ -1,0 +1,42 @@
+name = "Precise Track"
+description = "A small ball drifting slowly and smoothly. Keep the crosshair centered on it. Trains precise tracking."
+author = "RustyAim"
+category = "tracking"
+skill = "precise_tracking"
+tags = ["tracking", "precise", "smooth", "small"]
+
+[timing]
+duration_s = 60.0
+
+[weapon]
+kind = "beam"
+trigger = "always"
+damage_per_s = 100.0
+
+[targets]
+count = 1
+radius = 0.2
+health = 1000000.0
+color = "#4ec3ff"
+
+[targets.spawn]
+distance = [12.0, 12.0]
+yaw = [-30.0, 30.0]
+pitch = [-5.0, 15.0]
+
+[targets.movement]
+kind = "random"
+speed = [1.2, 2.0]
+change_every_s = [1.2, 2.5]
+vertical = 0.6
+
+[scoring]
+per_kill = 0.0
+per_damage = 1.0
+
+[adaptive]
+goal = 0.85
+knob = "target_speed"
+easy = 3.0
+hard = 80.0
+start = 9.0

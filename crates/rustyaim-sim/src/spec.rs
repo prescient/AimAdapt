@@ -78,6 +78,19 @@ const CATEGORY: &[Choice] = &[
     Choice { value: "switching", label: "Switching", help: "Moving quickly between several targets." },
 ];
 
+const SKILLS: &[Choice] = &[
+    Choice { value: "none", label: "None", help: "Not counted in your skill profile." },
+    Choice { value: "static_clicking", label: "Static clicking", help: "Flicking to still targets." },
+    Choice { value: "dynamic_clicking", label: "Dynamic clicking", help: "Clicking targets that change direction." },
+    Choice { value: "linear_clicking", label: "Linear clicking", help: "Clicking targets moving in straight lines." },
+    Choice { value: "precise_tracking", label: "Precise tracking", help: "Small, slow, smooth targets." },
+    Choice { value: "reactive_tracking", label: "Reactive tracking", help: "Sudden direction changes." },
+    Choice { value: "control_tracking", label: "Control tracking", help: "Smooth, predictable paths." },
+    Choice { value: "speed_switching", label: "Speed switching", help: "Targets that die quickly." },
+    Choice { value: "evasive_switching", label: "Evasive switching", help: "Dodging targets." },
+    Choice { value: "stability_switching", label: "Stability switching", help: "Staying on each target to finish it." },
+];
+
 const WEAPON_KIND: &[Choice] = &[
     Choice { value: "hitscan", label: "Hitscan", help: "Instant shots along the crosshair." },
     Choice { value: "beam", label: "Beam", help: "Continuous damage while on target, sampled 60 times a second." },
@@ -120,6 +133,13 @@ pub const FIELDS: &[Field] = &[
     f("description", "About", "Description", "What the scenario trains and how to play it.", Kind::LongText),
     f("author", "About", "Author", "", Kind::Text),
     f("category", "About", "Category", "The skill it trains.", Kind::Choice { options: CATEGORY }),
+    f(
+        "skill",
+        "About",
+        "Sub-skill",
+        "Which of the nine sub-skills it trains. Used for your skill profile and programs.",
+        Kind::Choice { options: SKILLS },
+    ),
     f("tags", "About", "Tags", "Short words for searching, like micro or wide.", Kind::Tags),
     f("timing.duration_s", "Timing", "Duration", "Length of the run.", num(5.0, 3600.0, 5.0, "s")),
     f(

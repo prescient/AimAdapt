@@ -164,6 +164,8 @@ Layout: `rustyaim-sim` (scenario format, field descriptions, simulation; no grap
 - [x] `done` Insights screen: level by run and within the last run, speed vs. difficulty (Fitts' law fit and throughput in bits/s), success and time by flick direction and distance, shot placement map (overshoot vs. stopping short, vertical bias), reaction histogram, tracking by target speed and after direction changes (recovery time), lead/lag, success by 10-second segment, and coaching notes generated from all of it.
 - [x] `done` Settings tab with profiles (one per game): sensitivity in the game's own units (Overwatch 2, Valorant, CS2, Apex, Call of Duty, or cm/360), DPI, FOV with each game's usual value, crosshair with preview, and display options. Switch profiles from the Play screen; `--profile <name>` in the engine.
 - [ ] `todo` More games in the profile list (Fortnite, Rainbow Six Siege, Marvel Rivals, The Finals) once their sensitivity formulas are checked.
+- [x] `done` Core Week program (Mon–Sat, ~30 min, 5 drills with 3–5 reps each, Saturday built from weak spots, Sunday rest); nine sub-skill tags; six new scenarios (Linear Clicks, Close Strafe Track, Precise Track, Control Track, Speed Switch, Stability Switch); Program page with week grid, skill profile, weekly summary, streak, and per-drill rep and carry-over gains; Today card on Play.
+- [ ] `todo` More programs (e.g. a clicking- or tracking-heavy week) and a program editor; pick the active program.
 - [x] `done` `--smoke` bot that plays like a person (reaction delay, aim error, corrections), for end-to-end checks and preview data.
 
 ### E4. Plans with the engine

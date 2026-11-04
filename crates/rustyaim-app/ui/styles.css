@@ -230,3 +230,22 @@ svg text { font-family: var(--font); }
 .link-btn { border: 0; background: none; padding: 0; color: var(--rust-text); font-size: 12px; text-decoration: underline; }
 .crosshair-preview { display: flex; align-items: center; gap: 12px; }
 .crosshair-preview svg { border-radius: 8px; image-rendering: pixelated; }
+
+/* Program */
+.today-card { border-color: var(--rust-border); }
+.blocks { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.block-row { display: flex; gap: 12px; }
+.block-label { width: 96px; flex: none; color: var(--dim); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; padding-top: 1px; }
+.week-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 900px) { .week-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.week-day { padding: 12px; border-radius: 10px; background: var(--surface-2); display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.week-day.rest { background: #121317; }
+.week-day.is-today { outline: 2px solid var(--rust); outline-offset: -2px; }
+.week-day .tag { align-self: flex-start; }
+.wd-name { font-weight: 600; color: var(--text-strong); }
+.wd-focus { min-height: 32px; }
+.hbar .lbl.skill-lbl { width: 140px; font-size: 13px; }
+.hbar .track.diverge { position: relative; background: var(--surface-2); }
+.hbar .track.diverge::before { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; border-left: 1px solid var(--control); }
+.hbar .track.diverge .fill { position: absolute; top: 0; bottom: 0; }
+.neg-fill { background: #c65a5a !important; }

@@ -2,6 +2,7 @@ name = "Timed Strafe Clicks"
 description = "A strafing body that times out. Read its movement and click before it's gone."
 author = "RustyAim"
 category = "clicking"
+skill = "dynamic_clicking"
 tags = ["moving", "strafe", "timed"]
 
 [timing]

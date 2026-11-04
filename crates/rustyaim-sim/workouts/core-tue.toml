@@ -1,0 +1,39 @@
+name = "Core Week: Tuesday"
+description = "Reactive tracking. Strafing targets far and close for five reps each, then evasive switching and precise tracking, with a little clicking."
+author = "RustyAim"
+
+[[items]]
+scenario = "builtin:float-track"
+runs = 2
+mode = "standard"
+block = "warmup"
+
+[[items]]
+scenario = "builtin:strafe-track"
+runs = 5
+mode = "adaptive"
+block = "main"
+
+[[items]]
+scenario = "builtin:close-strafe-track"
+runs = 5
+mode = "adaptive"
+block = "main"
+
+[[items]]
+scenario = "builtin:switch-track"
+runs = 4
+mode = "adaptive"
+block = "secondary"
+
+[[items]]
+scenario = "builtin:precise-track"
+runs = 4
+mode = "adaptive"
+block = "secondary"
+
+[[items]]
+scenario = "builtin:timed-flicks"
+runs = 3
+mode = "adaptive"
+block = "maintenance"

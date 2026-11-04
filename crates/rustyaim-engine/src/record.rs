@@ -32,6 +32,11 @@ pub struct RunInfo<'a> {
     pub avg_fps: Option<f32>,
     pub resolution: Option<String>,
     pub workout: Option<String>,
+    /// Program name and weekday id when played as part of a program.
+    pub program: Option<(String, String)>,
+    pub rep: Option<u32>,
+    pub reps: Option<u32>,
+    pub block: Option<rustyaim_sim::workout::Block>,
 }
 
 /// Name a run is stored and charted under.
@@ -168,6 +173,12 @@ pub fn to_engine_run(info: &RunInfo) -> EngineRun {
         success_rate: a.and_then(|a| a.success_rate).map(f),
         rating_timeline: a.map(|a| a.timeline.iter().map(|(t, l)| (f(*t), f(*l))).collect()).unwrap_or_default(),
         workout: info.workout.clone(),
+        skill: Some(info.scenario.skill).filter(|s| *s != rustyaim_sim::scenario::Skill::None).map(|s| s.id().into()),
+        program: info.program.as_ref().map(|p| p.0.clone()),
+        program_day: info.program.as_ref().map(|p| p.1.clone()),
+        rep: info.rep.map(i64::from),
+        reps: info.reps.map(i64::from),
+        block: info.block.filter(|b| *b != rustyaim_sim::workout::Block::None).map(|b| b.id().into()),
         trace: tel.trace_bytes(),
         targets: tel
             .targets
@@ -320,6 +331,10 @@ mod tests {
             avg_fps: Some(500.0),
             resolution: Some("2560x1440".into()),
             workout: (n == 2).then(|| "Daily Fundamentals".into()),
+            program: (n == 2).then(|| ("Core Week".into(), "mon".into())),
+            rep: Some(1),
+            reps: Some(5),
+            block: Some(rustyaim_sim::workout::Block::Main),
         }
     }
 

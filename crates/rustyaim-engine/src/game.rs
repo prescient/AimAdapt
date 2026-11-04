@@ -36,12 +36,18 @@ pub struct PlayStep {
     pub adaptive: bool,
     /// Shown with the run, e.g. "2 of 3".
     pub label: Option<String>,
+    /// Rep number within its workout item, the item's rep count, and its block.
+    pub rep: u32,
+    pub reps: u32,
+    pub block: rustyaim_sim::workout::Block,
 }
 
 pub struct PlayOptions {
     pub steps: Vec<PlayStep>,
     /// Set when the steps come from a workout; saved with each run.
     pub workout: Option<String>,
+    /// Program name and weekday id (`mon`…) when playing a program day.
+    pub program: Option<(String, String)>,
     pub settings: PlayerSettings,
     /// Where finished runs are saved. `None` plays without saving.
     pub db_path: Option<PathBuf>,
@@ -74,6 +80,7 @@ pub fn run(opts: PlayOptions) -> AppExit {
         sim: Sim::new(Scenario::default(), opts.seed),
         seed: opts.seed,
         workout: opts.workout,
+        program: opts.program,
         settings: opts.settings,
         db_path: opts.db_path,
         look: Look::default(),
@@ -137,6 +144,7 @@ struct Game {
     sim: Sim,
     seed: u64,
     workout: Option<String>,
+    program: Option<(String, String)>,
     settings: PlayerSettings,
     db_path: Option<PathBuf>,
     look: Look,
@@ -710,6 +718,10 @@ fn save_run(game: &mut Game, resolution: String) {
         avg_fps,
         resolution: Some(resolution),
         workout: game.workout.clone(),
+        program: game.program.clone(),
+        rep: Some(game.step_info().rep),
+        reps: Some(game.step_info().reps),
+        block: Some(game.step_info().block),
     };
     game.saved = Some(record::save(&path, &info));
 }

@@ -2,6 +2,7 @@ name = "Shrink Reflex"
 description = "Targets shrink and vanish after 1.2 seconds. Hit them before they go. Trains reaction speed."
 author = "RustyAim"
 category = "clicking"
+skill = "static_clicking"
 tags = ["reaction", "timing"]
 
 [timing]

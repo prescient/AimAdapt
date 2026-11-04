@@ -2,6 +2,7 @@ name = "Strafe Clicks"
 description = "A body-sized target strafing side to side. Click it as it changes direction. Trains reading movement."
 author = "RustyAim"
 category = "clicking"
+skill = "dynamic_clicking"
 tags = ["moving", "strafe"]
 
 [timing]

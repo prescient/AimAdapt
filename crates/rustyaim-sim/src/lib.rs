@@ -9,10 +9,12 @@
 //! - [`adaptive`]: the difficulty level and the staircase that keeps success near 85%.
 //! - [`telemetry`]: per-target, per-shot and tracking records for analytics.
 //! - [`workout`]: lists of scenarios played back to back.
+//! - [`program`]: weekly plans that map weekdays to workouts.
 
 pub mod adaptive;
 pub mod library;
 pub mod profiles;
+pub mod program;
 pub mod scenario;
 pub mod settings;
 pub mod sim;

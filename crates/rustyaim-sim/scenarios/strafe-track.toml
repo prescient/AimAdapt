@@ -2,6 +2,7 @@ name = "Strafe Track"
 description = "Keep your crosshair on a strafing body. The beam is always on, so only your aim counts."
 author = "RustyAim"
 category = "tracking"
+skill = "reactive_tracking"
 tags = ["tracking", "reactive", "strafe"]
 
 [timing]

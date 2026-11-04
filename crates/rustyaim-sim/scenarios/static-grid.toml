@@ -2,6 +2,7 @@ name = "Static Grid"
 description = "Three still targets in front of you. Clear them as fast as you can; a new one appears as each goes. Trains speed and click timing."
 author = "RustyAim"
 category = "clicking"
+skill = "static_clicking"
 tags = ["static", "speed", "beginner"]
 
 [timing]

@@ -2,6 +2,7 @@ name = "Timed Grid"
 description = "Three targets on screen, each on its own timer. Clear them before they vanish. Trains speed across several targets."
 author = "RustyAim"
 category = "clicking"
+skill = "static_clicking"
 tags = ["static", "timed", "speed"]
 
 [timing]
