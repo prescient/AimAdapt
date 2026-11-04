@@ -2,7 +2,7 @@
 
 Tracks your KovaaK's aim training: imports the per-run stats files into a local SQLite database, then reports progress and training time. See [BACKLOG.md](BACKLOG.md) for the plan and [TESTING.md](TESTING.md) for how it's tested.
 
-Windows only for now. Installers are attached to [releases](../../releases) once a version is tagged.
+Windows only for now. Download `RustyAim_<version>_x64-portable.exe` from [releases](../../releases) and run it; there is nothing to install. Installers (setup .exe and .msi) are attached too if you prefer a Start menu entry and uninstaller. Needs the WebView2 runtime, which ships with Windows 11 and current Windows 10.
 
 ## Layout
 
@@ -89,4 +89,4 @@ cargo test --workspace
 
 If the repo lives in a synced folder like OneDrive, move build output out of it with a local, gitignored `.cargo/config.toml` containing `[build]` and `target-dir = "C:/some/other/folder"`.
 
-To publish installers, push a version tag (for example `git tag v0.1.0` then `git push origin v0.1.0`). `.github/workflows/release.yml` builds the MSI and NSIS installers and attaches them to a GitHub release.
+To publish a release, push a version tag (for example `git tag v0.1.0` then `git push origin v0.1.0`). `.github/workflows/release.yml` builds the portable exe and the MSI and NSIS installers and attaches them to a GitHub release.

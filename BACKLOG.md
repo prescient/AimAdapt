@@ -89,7 +89,7 @@ The app imports on startup, watches the stats folder, and refreshes when new run
 - [ ] `doing` Library & import: folder, counts, errors, rescan, rules (read-only), sensitivity history, FPS/resolution. Still to do: editable rules (needs the settings file), a folder picker, and the tags table (Epic 4).
 - [ ] `todo` Today's plan screen (Epic 6)
 - [x] `done` Coach notes: repeat-before-switching, warm-up, plateau and settings-change notes, from the stats.
-- [ ] `todo` Packaging: install `tauri-cli` (`cargo install tauri-cli`) and run `cargo tauri build` for a Windows installer.
+- [x] `done` Packaging: portable single exe plus MSI and NSIS installers, built by the release workflow.
 - [ ] `todo` Date range control on the dashboard (7 days / 30 days / all time) from the mockup.
 
 ## Epic 6: Adaptive daily training plans (P2, headline feature)
@@ -130,7 +130,7 @@ The plan is in [TESTING.md](TESTING.md).
 
 - [x] `done` Pre-commit hook (`.githooks/pre-commit`): formatting, clippy with warnings as errors, tests, release build to `dist/RustyAim.exe`.
 - [x] `done` CI on every push/PR (`.github/workflows/ci.yml`), with the exe uploaded as an artifact.
-- [x] `done` Installer workflow on version tags (`.github/workflows/release.yml`). It hasn't been run yet.
+- [x] `done` Release workflow on version tags (`.github/workflows/release.yml`): portable exe plus installers. First run published v0.1.0.
 - [ ] `todo` Treat files missing `Score:`/`Challenge Start:` as incomplete and retry them (half-written file risk), with a fixture test.
 - [ ] `todo` Golden snapshot tests of the reports with `insta`.
 - [ ] `todo` Ignored real-data test over the local stats folder (`cargo test -- --ignored`).
@@ -144,6 +144,6 @@ The plan is in [TESTING.md](TESTING.md).
 
 - [ ] `todo` Session notes: sleep, energy, mood, hardware changes, linked to sessions so you can see how they relate to scores.
 - [ ] `todo` Export to CSV and database backup/restore.
-- [ ] `todo` Windows installer and auto-update.
+- [ ] `todo` Auto-update, and code signing so SmartScreen stops warning.
 - [ ] `todo` Import older history from other trackers' exports, if needed.
 - [ ] `spike` Use the per-kill data (TTK spread, overshots) for richer insights, e.g. "you overflick on small targets".
