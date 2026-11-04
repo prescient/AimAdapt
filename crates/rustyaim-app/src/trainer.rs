@@ -140,10 +140,12 @@ pub fn build_trainer(state: &AppData, t: &TrainerState) -> Result<Trainer, Strin
         })
         .collect();
 
+    // Play time plus about 12 s per run for the results screen and loading, the
+    // same estimate the Program page uses.
     let duration: HashMap<&str, f64> = scenarios
         .iter()
         .filter_map(|e| {
-            e.scenario.as_ref().map(|s| (e.id.as_str(), f64::from(s.timing.duration_s + s.timing.countdown_s)))
+            e.scenario.as_ref().map(|s| (e.id.as_str(), f64::from(s.timing.duration_s + s.timing.countdown_s) + 12.0))
         })
         .collect();
     let workouts = workout::load_all(&t.workouts_dir())
@@ -152,7 +154,7 @@ pub fn build_trainer(state: &AppData, t: &TrainerState) -> Result<Trainer, Strin
             let seconds = e.workout.as_ref().map_or(0.0, |w| {
                 w.items
                     .iter()
-                    .map(|i| duration.get(i.scenario.as_str()).copied().unwrap_or(60.0) * f64::from(i.runs))
+                    .map(|i| duration.get(i.scenario.as_str()).copied().unwrap_or(75.0) * f64::from(i.runs))
                     .sum()
             });
             let (workout, error) = match e.workout {

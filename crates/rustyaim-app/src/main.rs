@@ -213,6 +213,7 @@ fn main() {
         std::process::exit(rustyaim_engine::run_from_args(&args[1..]));
     }
 
+    let no_import = args.iter().any(|a| a == "--no-import");
     // `--db <file>` uses another database, e.g. a test one.
     let db_path = match args.iter().position(|a| a == "--db").and_then(|i| args.get(i + 1)) {
         Some(p) => std::path::PathBuf::from(p),
@@ -222,7 +223,8 @@ fn main() {
     let data = AppData {
         db: Mutex::new(db),
         db_path,
-        stats_dir: discover::find_stats_dir(),
+        // `--no-import` leaves KovaaK's out entirely (demo and test databases).
+        stats_dir: if no_import { None } else { discover::find_stats_dir() },
         last_import: Mutex::new(None),
         time: TimeSettings::default(),
         progress: ProgressSettings::default(),

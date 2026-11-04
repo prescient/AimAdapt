@@ -1,106 +1,162 @@
 # RustyAim
 
-Tracks your aim training. RustyAim imports KovaaK's per-run stats files into a local SQLite database and reports progress and training time. It also has its own built-in aim trainer, with scenarios you can edit. See [BACKLOG.md](BACKLOG.md) for the plan, [SCENARIOS.md](SCENARIOS.md) for the scenario format and [TESTING.md](TESTING.md) for how it's tested.
+An aim trainer for Windows. It rates you in real units (target lifetime in seconds, tracking speed in degrees per second), keeps each drill at the difficulty you hit about 85% of the time, runs a weekly training program, and records every target and shot for analytics. It can also import KovaaK's stats files.
 
-Windows only for now. Download `RustyAim_<version>_x64-portable.exe` from [releases](../../releases) and run it; there is nothing to install. Installers (setup .exe and .msi) are attached too if you prefer a Start menu entry and uninstaller. Needs the WebView2 runtime, which ships with Windows 11 and current Windows 10.
+Screenshots use demo data played by the built-in test bot.
 
-## Layout
+![Timed Flicks in the trainer](docs/screenshots/game-clicking.jpg)
 
-- `crates/rustyaim-core` handles parsing, storage, import and summaries.
-- `crates/rustyaim-sim` holds the trainer's rules: the scenario format, a description of every field (used to build the editor), and the simulation (spawning, movement, hits, scoring). It has no graphics, so it's fully unit-tested.
-- `crates/rustyaim-engine` is the trainer itself: a Bevy window with raw mouse input and no frame cap. It saves finished runs to the same database.
-- `crates/rustyaim-cli` is the `rustyaim-cli` command line front end.
-- `crates/rustyaim-app` is the Tauri desktop app. Its UI is plain HTML/CSS/JS in `ui/`, with no build step. Run with `--play <scenario>`, the same exe runs the trainer instead, which keeps the download a single file.
+## Download
 
-## Desktop app
+Download `RustyAim_<version>_x64-portable.exe` from [releases](../../releases) and run it. There's nothing to install. A setup .exe and an .msi are attached too, if you want a Start menu entry and an uninstaller.
+
+Requirements: Windows 10 or 11 with the WebView2 runtime (included with Windows 11 and current Windows 10), and a GPU that supports Vulkan or DirectX 12.
+
+## Trainer
+
+- Separate full-screen window with raw mouse input and no frame cap.
+- Sensitivity in cm/360 and DPI, or in a game's own units (Overwatch 2, Valorant, Counter-Strike 2, Apex Legends, Call of Duty).
+- FOV is horizontal at 16:9.
+- Display: borderless, exclusive full screen at any resolution and refresh rate the monitor supports (for example stretched 4:3), or windowed.
+- Optional centered play area, so a large monitor can play at the size of a smaller one.
+- 19 built-in scenarios across nine sub-skills:
+  - **Clicking:** static, dynamic, linear.
+  - **Tracking:** precise, reactive, control.
+  - **Switching:** speed, evasive, stability.
+- Hitscan and beam weapons; click, hold or always-on triggers.
+- Sphere and capsule targets, with optional lifetime, shrink and health regeneration.
+- Movement: still, strafing or random.
+
+![Results screen](docs/screenshots/game-results.jpg)
+
+## Adaptive mode
+
+Each scenario has one difficulty setting: target lifetime for timed clicking, target speed for tracking. Adaptive mode estimates the value you succeed at 85% of the time, along with how certain that estimate is.
+
+- **How it updates:** a Bayesian estimate similar to Glicko. A surprising result moves the rating more than an expected one. It settles within about 15–25 targets.
+- **Next run:** starts from your last rating. The uncertainty grows with the days since you last played.
+- **Target mix:** each target's difficulty is picked by chance of success:
+
+  | Pick | Chance of success | Balanced |
+  |---|---|---|
+  | Near your rating | 80–90% | 65% |
+  | Stretch | 45–70% | 20% |
+  | Easy | 95%+ | 15% |
+
+  The Steady and Push mixes change these shares.
+- **Breakthroughs:** hitting a target faster than your previous best is recorded as a new fastest hit.
+- **What counts:**
+  - **Clicking:** a target is a success if it's destroyed before it times out, with at most one miss on it.
+  - **Tracking:** each 2-second segment is scored by the share of time spent on target.
+
+Standard mode plays a scenario exactly as written and scores points.
+
+![Tracking](docs/screenshots/game-tracking.jpg)
+
+## Program
+
+Core Week is a six-day plan. Each day takes about 29 minutes.
+
+| Day | Focus |
+|---|---|
+| Monday | Static clicking |
+| Tuesday | Reactive tracking |
+| Wednesday | Switching |
+| Thursday | Precise and dynamic clicking |
+| Friday | Smooth and precise tracking |
+| Saturday | Weak spots |
+| Sunday | Rest |
+
+Every day uses five drills, with reps instead of variety:
+
+| Block | Drills | Reps each |
+|---|---|---|
+| Warm-up | 1 | 2 |
+| Main | 2 | 5 |
+| Secondary | 2 | 4 |
+| Maintenance | 1 (another skill group) | 3 |
+
+Saturday's drills are chosen from your weakest sub-skills.
+
+![Program](docs/screenshots/program.png)
+
+The Program page shows:
+- **This week:** each day as done, partial or missed, with minutes, and the day's main drills compared with the same day last week. A missed day can be made up later in the week.
+- **Skill profile:** the change in each of the nine sub-skills, each group and overall. It's measured from the end of your first day on each drill.
+- **Weekly summary:** days done, minutes, streak, biggest gain, the skill furthest behind, and skills not trained in a week.
+- **Reps and carry-over:** rep 1 vs. the last rep of each drill, and how much of the previous session's rating carried over.
+
+The Play screen shows today's workout with a Start button.
+
+![Play](docs/screenshots/play.png)
+
+## Insights
+
+Every run stores each target, each shot, tracking samples 30 times a second, and a 240 Hz aim trace. Insights shows, per scenario:
+
+- **Rating by run** with its likely range, and how it moved during the last run.
+- **Speed vs. hit rate curve:** where you're reliable (95%), your 85% rating, and the coin-flip point (50%), with observed hit rates.
+- **Flick speed:** time to kill vs. difficulty, as a Fitts' law fit and throughput in bits per second.
+- **By direction and distance:** hit rate and median time in 8 flick directions and 5 distance bands.
+- **Shot placement** relative to the target, aligned to the flick direction: overshooting vs. stopping short, and any vertical bias.
+- **Reaction time:** a histogram, with the median compared with earlier runs.
+- **Tracking:** time on target by target speed, recovery after direction changes, and how far ahead of or behind the target you are.
+- **Within a run:** success in 10-second segments.
+- **Notes** generated from the figures above.
+
+![Insights for a clicking scenario](docs/screenshots/insights.png)
+
+![Insights for a tracking scenario](docs/screenshots/insights-tracking.png)
+
+## Scenarios, workouts and settings
+
+- **Scenarios** are TOML files. The editor is a form built from the engine's list of supported fields, and checks values as you type. Built-in scenarios are copied before editing. [SCENARIOS.md](SCENARIOS.md) documents every field, the adaptive settings, workouts and programs.
+- **Workouts** are lists of scenarios with a run count and a mode for each, played back to back in one session.
+- **Settings profiles** each hold sensitivity, DPI, FOV, adaptive mix, crosshair and display settings, typically one per game. The first profile is matched to your latest KovaaK's run, if there is one.
+
+![Scenario editor](docs/screenshots/editor.png)
+
+![Settings](docs/screenshots/settings.png)
+
+## KovaaK's import
+
+If KovaaK's is installed, RustyAim imports its per-run stats files from your Steam libraries, and keeps importing new ones while it's open. The Dashboard, Progress, Training time and Benchmarks screens cover those runs together with standard-mode trainer runs:
+- Personal bests, trends and plateaus.
+- Sessions and active time.
+- Streaks and a daily goal.
+- Sensitivity history.
+
+The `rustyaim-cli` command line tool shows the same reports.
+
+## Data
+
+Everything is stored locally in `%APPDATA%\RustyAim`:
+- `rustyaim.db`: SQLite.
+- `engine.toml`: settings profiles.
+- `scenarios\` and `workouts\`: your own files.
+
+Nothing is sent anywhere.
+
+## Development
+
+Needs Rust (stable, MSVC toolchain) and the Visual Studio C++ build tools.
+
+| Crate | Contents |
+|---|---|
+| `rustyaim-core` | KovaaK's parsing, SQLite storage, reports, Insights and program progress |
+| `rustyaim-sim` | Scenario format, field list, simulation, adaptive rating, workouts and programs. No graphics. |
+| `rustyaim-engine` | The Bevy trainer window and saving runs |
+| `rustyaim-app` | The Tauri desktop app. The UI is plain HTML/CSS/JS in `ui/`. |
+| `rustyaim-cli` | Command line reports |
+
+Running the app with `--play`, `--workout` or `--program` starts the trainer instead, so the release is a single exe.
 
 ```bash
 cargo run -p rustyaim-app
 ```
 
-It imports new runs on startup, watches the stats folder while open, and refreshes the screens when new runs arrive. It uses the same database as the CLI.
-
-The **Play** screen lists the built-in and your own scenarios and workouts.
-
-- **Adaptive** (the default) rates you in real units: the target lifetime you hit 85% of the time on timed clicking scenarios (for example "0.62 s"), or the target speed you stay on 85% of the time when tracking (for example "48 °/s"). It finds your rating within the first 15–25 targets, then mixes targets near your rating with harder stretch targets and a few easy ones. Hitting a stretch target faster than ever is a breakthrough. The next run starts from your rating, and the trainer re-checks faster after time away. **Standard** plays the scenario exactly as written and scores points.
-- **Workouts** play several scenarios back to back in one session. There are built-ins, and you can build your own.
-- **Program** is a weekly plan. The built-in **Core Week** runs Monday to Saturday, about 30 minutes a day. Each day focuses on one skill group with few exercises and lots of reps: a warm-up, two main drills ×5, two related drills ×4, and one maintenance drill ×3. Saturday is rebuilt each week from your weakest skills, and Sunday is rest. The Play screen shows today's workout with a Start button. The Program page shows the week (done, partial or missed, minutes, and each day vs. the same day last week), your skill profile across the nine sub-skills (clicking: static, dynamic, linear; tracking: precise, reactive, control; switching: speed, evasive, stability) as % change since you started, a weekly summary with your streak, and per-drill reps (rep 1 vs. last rep, and how much carried over from last time).
-- **Copy & edit** opens a form with every setting the engine supports, including what adaptive mode makes harder.
-- The Play screen shows which settings profile you're playing with and lets you switch.
-
-**Settings** holds your profiles, usually one per game. A profile takes your sensitivity in that game's own units (Overwatch 2, Valorant, Counter-Strike 2, Apex Legends and Call of Duty, or cm/360 directly) and converts it. Each profile also has its own DPI, FOV (with each game's usual value one click away), crosshair (with a live preview), display mode (borderless, exclusive at any resolution and refresh rate, or windowed) and a centered play area. The play area lets a big monitor play like a smaller one, and a helper sizes it from screen diagonals. Your first profile is matched to your latest KovaaK's run. Adding a profile for another game converts your current sensitivity, so it feels the same.
-
-**Insights** shows what the trainer measured: your rating over time, your speed vs. hit-rate curve (where you're reliable and where it's a coin flip), flick speed for size and distance (Fitts' law throughput), success by direction and distance, where shots land relative to the target, reaction time, tracking accuracy by target speed and after direction changes, whether you trail or lead targets, and coaching notes. RustyAim runs also show up in Progress and Training time next to your KovaaK's runs. Adaptive runs are listed as "<scenario> (Adaptive)" and charted in Insights, not on Progress, because their result is a time or speed rather than points.
-
-To run the trainer on its own while developing:
-
 ```bash
-cargo run -p rustyaim-engine -- builtin:static-grid --windowed
-```
-
-Add `--adaptive` for adaptive mode, or use `--workout builtin:daily-fundamentals` instead of a scenario. `--smoke <folder>` makes a bot that plays like a person run short versions (`--smoke-seconds`, default 4), saves screenshots there, and exits. It's a quick check that rendering, input and saving work on a machine; add `--db <file>` to keep test runs out of your history. The app also takes `--db <file>`, so you can open a test database.
-
-To preview the UI in a browser against your real data, dump a snapshot next to the UI files and serve the folder (the dump is gitignored):
-
-```bash
-cargo run -p rustyaim-app -- --dump-snapshot crates/rustyaim-app/ui/dev-snapshot.json
-```
-
-```bash
-python -m http.server 8765 --directory crates/rustyaim-app/ui
-```
-
-
-## Usage
-
-```bash
-cargo run -p rustyaim-cli -- import
-```
-
-```bash
-cargo run -p rustyaim-cli -- summary
-```
-
-```bash
-cargo run -p rustyaim-cli -- time
-```
-
-```bash
-cargo run -p rustyaim-cli -- progress
-```
-
-```bash
-cargo run -p rustyaim-cli -- progress "vt ww5t novice s5"
-```
-
-```bash
-cargo run -p rustyaim-cli -- sens
-```
-
-```bash
-cargo run -p rustyaim-cli -- watch
-```
-
-`progress` lists scenarios with best score, change since the first run, trend, and runs since the last personal best, plus cold-start and fatigue summaries. Sort with `--sort played|improved|recent|name`. Give a scenario name (or part of one) to see its full run history. `sens` lists your sensitivity and FOV changes with cm/360.
-
-`time` shows training time: active vs. session time, sessions, days, streak, weekday averages and runs by hour. Options: `--gap 15` (break in minutes that starts a new session), `--day-start 4` (hour a training day begins), `--goal 30` (daily goal in minutes).
-
-The stats folder is found in your Steam libraries automatically; override it with `--stats <dir>`. The database defaults to `%APPDATA%\RustyAim\rustyaim.db`; override it with `--db <file>`. `errors` lists files that couldn't be imported.
-
-## Development
-
-Needs Rust (stable, MSVC toolchain) and the Visual Studio C++ build tools. WebView2 ships with Windows 11.
-
-Enable the pre-commit hook once per clone. It checks formatting, runs clippy and the tests, and builds `dist/RustyAim.exe`:
-
-```bash
-git config core.hooksPath .githooks
-```
-
-Build the release executable by hand:
-
-```bash
-sh scripts/release-exe.sh
+cargo run -p rustyaim-engine -- builtin:timed-flicks --adaptive --windowed
 ```
 
 Run the tests:
@@ -109,6 +165,19 @@ Run the tests:
 cargo test --workspace
 ```
 
-If the repo lives in a synced folder like OneDrive, move build output out of it with a local, gitignored `.cargo/config.toml` containing `[build]` and `target-dir = "C:/some/other/folder"`.
+Enable the pre-commit hook once per clone. It checks formatting, runs clippy and the tests, and builds `dist/RustyAim.exe`:
 
-To publish a release, push a version tag (for example `git tag v0.1.0` then `git push origin v0.1.0`). `.github/workflows/release.yml` builds the portable exe and the MSI and NSIS installers and attaches them to a GitHub release.
+```bash
+git config core.hooksPath .githooks
+```
+
+Testing tools:
+- **Bot test:** `--smoke <folder>` has a bot play short runs and save screenshots. `--smoke-seconds` sets the run length.
+- **Separate database:** `--db <file>` keeps test runs out of your own data. The app also takes `--no-import` to skip KovaaK's.
+- **Browser preview:** `cargo run -p rustyaim-app -- --dump-snapshot crates/rustyaim-app/ui/dev-snapshot.json`, then `python -m http.server 8765 --directory crates/rustyaim-app/ui`.
+
+[TESTING.md](TESTING.md) has the test plan and [BACKLOG.md](BACKLOG.md) has the roadmap.
+
+Pushing a version tag (`git tag v0.2.0` then `git push origin v0.2.0`) runs `.github/workflows/release.yml`. It builds the portable exe and both installers and attaches them to a GitHub release.
+
+If the repo is in a synced folder like OneDrive, move build output out of it with a local, gitignored `.cargo/config.toml` containing `[build]` and `target-dir = "C:/some/other/folder"`.
