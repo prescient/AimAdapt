@@ -93,6 +93,16 @@ CREATE TABLE import_errors (
 );
 "#];
 
+/// `%APPDATA%\RustyAim\rustyaim.db`, creating the folder if needed. Shared by the CLI and app.
+pub fn default_path() -> std::io::Result<std::path::PathBuf> {
+    let base = std::env::var_os("APPDATA")
+        .map(std::path::PathBuf::from)
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "APPDATA isn't set"))?;
+    let dir = base.join("RustyAim");
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir.join("rustyaim.db"))
+}
+
 pub struct Db {
     conn: Connection,
 }

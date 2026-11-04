@@ -26,7 +26,7 @@ The stats file name holds the scenario name, the mode (`Challenge`) and the fini
 
 ## Epic 0: Foundations (P0)
 
-- [ ] `todo` **Pick the UI stack.** Recommendation: **Tauri** (Rust backend, web frontend), so the HTML/CSS mockup carries straight over. Alternative: `egui`, which is pure Rust and simpler to ship but means rebuilding the UI.
+- [x] `done` **Pick the UI stack:** Tauri 2 (`crates/rustyaim-app`). The frontend is plain HTML/CSS/JS in `crates/rustyaim-app/ui` with no Node or bundler; it talks to Rust through `window.__TAURI__`.
 - [x] `done` Set up a Cargo workspace: `crates/rustyaim-core` (parsing, database, stats logic) and `crates/rustyaim-cli` (command line for now; the UI app comes later). All logic lives in core so it can be tested without a UI.
 - [x] `done` SQLite database (`rusqlite`, migrations tracked in `PRAGMA user_version`). Schema v1 has `runs`, `run_fields`, `kills`, `weapons` and `import_errors`. `sessions`, `tags`, `plans` and `plan_items` get added in later migrations.
 - [ ] `todo` Config file: stats folder path, session gap, daily goal, time a training day starts. (For now the CLI takes `--stats` and `--db` options.)
@@ -80,13 +80,17 @@ All in `crates/rustyaim-core/src/progress.rs`. Reported by `rustyaim-cli progres
 
 ## Epic 5: UI screens (P1)
 
-- [ ] `todo` Dashboard
-- [ ] `todo` Progress (scenario list + detail chart)
-- [ ] `todo` Training time (calendar, weekday averages, session timeline, runs by hour, active vs. idle)
-- [ ] `todo` Benchmarks
-- [ ] `todo` Library & import (folder, rules, sensitivity history, tags)
+The app imports on startup, watches the stats folder, and refreshes when new runs arrive (`runs-imported` event). Commands: `snapshot`, `scenario`, `rescan`.
+
+- [x] `done` Dashboard: totals, streak banner, 7-day chart against the daily goal, most played, recent sessions, most improved, coach notes. The skill split waits on tags (Epic 4).
+- [x] `done` Progress: searchable, sortable scenario list and a detail view with score chart (PBs, 3-run average, day and settings-change markers), runs table and insights.
+- [x] `done` Training time: calendar heatmap with month navigation, weekday averages, 7-day session timeline, runs by hour, active vs. idle.
+- [ ] `doing` Benchmarks: lists your Voltaic S5 bests for now. Ranks need Epic 4.
+- [ ] `doing` Library & import: folder, counts, errors, rescan, rules (read-only), sensitivity history, FPS/resolution. Still to do: editable rules (needs the settings file), a folder picker, and the tags table (Epic 4).
 - [ ] `todo` Today's plan screen (Epic 6)
-- [ ] `todo` Coach notes: rule-based insights generated from the stats
+- [x] `done` Coach notes: repeat-before-switching, warm-up, plateau and settings-change notes, from the stats.
+- [ ] `todo` Packaging: install `tauri-cli` (`cargo install tauri-cli`) and run `cargo tauri build` for a Windows installer.
+- [ ] `todo` Date range control on the dashboard (7 days / 30 days / all time) from the mockup.
 
 ## Epic 6: Adaptive daily training plans (P2, headline feature)
 

@@ -15,6 +15,7 @@ pub enum ImportError {
     Db(#[from] DbError),
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct ImportReport {
     /// Stats files found in the folder.

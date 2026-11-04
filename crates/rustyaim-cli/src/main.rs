@@ -84,7 +84,7 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     let db_path = match cli.db {
         Some(p) => p,
-        None => default_db_path()?,
+        None => rustyaim_core::db::default_path().context("finding the default database location; pass --db")?,
     };
     let mut db = Db::open(&db_path).with_context(|| format!("opening database {}", db_path.display()))?;
 
@@ -123,13 +123,6 @@ fn main() -> Result<()> {
         }
     }
     Ok(())
-}
-
-fn default_db_path() -> Result<PathBuf> {
-    let base = std::env::var_os("APPDATA").map(PathBuf::from).context("APPDATA isn't set; pass --db")?;
-    let dir = base.join("RustyAim");
-    std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
-    Ok(dir.join("rustyaim.db"))
 }
 
 fn stats_dir(given: Option<PathBuf>) -> Result<PathBuf> {

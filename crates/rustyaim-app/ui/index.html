@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RustyAim</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+  <nav class="sidebar" aria-label="Main">
+    <div class="brand">
+      <svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><circle cx="14" cy="14" r="9" fill="none" stroke="#f0783c" stroke-width="2"></circle><circle cx="14" cy="14" r="2.5" fill="#f0783c"></circle><path d="M14 1v6M14 21v6M1 14h6M21 14h6" stroke="#f0783c" stroke-width="2" stroke-linecap="round"></path></svg>
+      RustyAim
+    </div>
+    <a class="nav" href="#dashboard" data-view="dashboard">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="3" width="7" height="7" rx="1.5"></rect><rect x="3" y="14" width="7" height="7" rx="1.5"></rect><rect x="14" y="14" width="7" height="7" rx="1.5"></rect></svg>Dashboard</a>
+    <a class="nav" href="#progress" data-view="progress">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 17l6-6 4 4 8-8"></path><path d="M15 7h6v6"></path></svg>Progress</a>
+    <a class="nav" href="#training" data-view="training">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>Training time</a>
+    <a class="nav" href="#benchmarks" data-view="benchmarks">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 4h8v5a4 4 0 0 1-8 0z"></path><path d="M8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4"></path><path d="M12 13v4M8 21h8M10 17h4"></path></svg>Benchmarks</a>
+    <a class="nav" href="#library" data-view="library">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke-width="2" aria-hidden="true"><ellipse cx="12" cy="6" rx="8" ry="3"></ellipse><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6"></path><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"></path></svg>Library &amp; import</a>
+    <div class="status" id="status">
+      <div class="status-title"><span class="dot off"></span>Loading…</div>
+    </div>
+  </nav>
+  <main class="content" id="main" tabindex="-1">
+    <div class="empty-state">Loading your training data…</div>
+  </main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

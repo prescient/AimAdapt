@@ -5,6 +5,7 @@ use rusqlite::params;
 
 use crate::db::{Db, DbError};
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Totals {
     pub runs: i64,
@@ -14,6 +15,7 @@ pub struct Totals {
     pub run_seconds: f64,
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct DayTotal {
     /// `YYYY-MM-DD`, by the run's finish time.
@@ -22,6 +24,7 @@ pub struct DayTotal {
     pub run_seconds: f64,
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScenarioTotal {
     pub scenario: String,

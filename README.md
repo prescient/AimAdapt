@@ -6,6 +6,25 @@ Tracks your KovaaK's aim training: imports the per-run stats files into a local 
 
 - `crates/rustyaim-core` handles parsing, storage, import and summaries. All logic lives here.
 - `crates/rustyaim-cli` is the `rustyaim-cli` command line front end.
+- `crates/rustyaim-app` is the Tauri desktop app. Its UI is plain HTML/CSS/JS in `ui/`, with no build step.
+
+## Desktop app
+
+```bash
+cargo run -p rustyaim-app
+```
+
+It imports new runs on startup, watches the stats folder while open, and refreshes the screens when new runs arrive. It uses the same database as the CLI.
+
+To preview the UI in a browser against your real data, dump a snapshot next to the UI files and serve the folder (the dump is gitignored):
+
+```bash
+cargo run -p rustyaim-app -- --dump-snapshot crates/rustyaim-app/ui/dev-snapshot.json
+```
+
+```bash
+python -m http.server 8765 --directory crates/rustyaim-app/ui
+```
 
 
 ## Usage

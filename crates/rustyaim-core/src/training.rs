@@ -15,6 +15,7 @@ use crate::db::{Db, DbError};
 
 const TIME_FORMAT: &str = "%Y-%m-%dT%H:%M:%S%.3f";
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct TimeSettings {
     /// A break longer than this (minutes) between runs starts a new session.
@@ -41,6 +42,7 @@ impl TimeSettings {
     }
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunTiming {
     pub run_id: i64,
@@ -53,6 +55,7 @@ pub struct RunTiming {
     pub restarted: bool,
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Session {
     pub day: NaiveDate,
@@ -69,6 +72,7 @@ impl Session {
     }
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct DayStat {
     pub day: NaiveDate,
@@ -79,6 +83,7 @@ pub struct DayStat {
     pub goal_met: bool,
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct WeekStat {
     /// The Monday the week starts on.
@@ -88,6 +93,7 @@ pub struct WeekStat {
     pub session_s: f64,
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Streak {
     /// Consecutive training days up to today, or up to yesterday if today isn't done yet.
@@ -96,6 +102,7 @@ pub struct Streak {
     pub trained_today: bool,
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct TrainingReport {
     pub today: NaiveDate,

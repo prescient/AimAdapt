@@ -13,6 +13,7 @@ use crate::training::{self, TimeSettings};
 
 const TIME_FORMAT: &str = "%Y-%m-%dT%H:%M:%S%.3f";
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProgressSettings {
     /// Number of recent runs compared against the runs before them for the trend.
@@ -32,6 +33,7 @@ impl Default for ProgressSettings {
 }
 
 /// The sensitivity-related settings a run was played with.
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct SensSettings {
     pub sens_scale: Option<String>,
@@ -78,6 +80,7 @@ pub fn cm_per_360(scale: &str, sens: f64, dpi: i64) -> Option<f64> {
     (dpi > 0 && sens > 0.0).then(|| counts / dpi as f64 * 2.54)
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScenarioRun {
     pub run_id: i64,
@@ -97,14 +100,18 @@ pub struct ScenarioRun {
     pub sens_period: usize,
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct SensPeriod {
     pub from: NaiveDateTime,
     pub to: NaiveDateTime,
     pub settings: SensSettings,
     pub runs: usize,
+    /// [`SensSettings::cm_per_360`], stored so it's available after serializing.
+    pub cm_per_360: Option<f64>,
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScenarioStats {
     pub scenario: String,
@@ -130,6 +137,7 @@ pub struct ScenarioStats {
     pub plateau: bool,
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct ColdStart {
     pub scenario: String,
@@ -142,6 +150,7 @@ pub struct ColdStart {
     pub vs_rest_of_day_pct: Option<f64>,
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct FatigueBucket {
     pub from_min: i64,
@@ -151,6 +160,7 @@ pub struct FatigueBucket {
     pub relative_score_pct: f64,
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Progress {
     /// Every run, oldest first.
@@ -364,7 +374,13 @@ pub fn load(db: &Db, time: &TimeSettings) -> Result<Progress, DbError> {
                 p.to = finished_at;
                 p.runs += 1;
             }
-            _ => periods.push(SensPeriod { from: started_at, to: finished_at, settings: sens, runs: 1 }),
+            _ => periods.push(SensPeriod {
+                from: started_at,
+                to: finished_at,
+                cm_per_360: sens.cm_per_360(),
+                settings: sens,
+                runs: 1,
+            }),
         }
 
         let mut is_pb = false;

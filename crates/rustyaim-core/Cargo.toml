@@ -6,7 +6,12 @@ edition = "2024"
 [dependencies]
 chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }
 rusqlite = { version = "0.41.1", features = ["bundled"] }
+serde = { version = "1.0.229", features = ["derive"], optional = true }
 thiserror = "2.0.21"
 
 [dev-dependencies]
 tempfile = "3.27.0"
+
+[features]
+# Serialize report types (used by the desktop app to send data to its UI).
+serde = ["dep:serde", "chrono/serde"]

@@ -1,0 +1,15 @@
+[package]
+name = "rustyaim-app"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+chrono = { version = "0.4.45", default-features = false, features = ["std", "clock", "serde"] }
+notify = "8.2.1"
+rustyaim-core = { version = "0.1.0", path = "../rustyaim-core", features = ["serde"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tauri = "2"
+
+[build-dependencies]
+tauri-build = "2"

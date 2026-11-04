@@ -1,5 +1,7 @@
 /target
+/crates/rustyaim-app/gen
 *.db
 *.db-journal
 *.db-wal
 *.db-shm
+/crates/rustyaim-app/ui/dev-snapshot.json
