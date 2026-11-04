@@ -106,7 +106,7 @@ function route() {
 
 function render() {
   const { view, arg } = route();
-  const navView = view === "edit" ? "play" : view;
+  const navView = view === "edit" || view === "workout" ? "play" : view;
   document.querySelectorAll(".nav").forEach((a) => {
     const on = a.dataset.view === navView;
     a.classList.toggle("active", on);
@@ -119,7 +119,7 @@ function render() {
     return;
   }
   if (!ui.snap) return;
-  const views = { dashboard, play, edit, progress, training, benchmarks, library };
+  const views = { dashboard, play, edit, workout, insights, progress, training, benchmarks, library };
   main.innerHTML = (views[view] || dashboard)(arg);
   if (view === "progress") afterProgress(arg);
 }

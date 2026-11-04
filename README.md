@@ -20,7 +20,14 @@ cargo run -p rustyaim-app
 
 It imports new runs on startup, watches the stats folder while open, and refreshes the screens when new runs arrive. It uses the same database as the CLI.
 
-The **Play** screen lists the built-in and your own scenarios, with your best for each. Play opens the trainer full screen (Esc quits, R restarts, Space plays again). Copy & edit opens a form with every setting the engine supports. Your sensitivity and FOV start from your latest KovaaK's run. RustyAim runs show up in Progress and Training time next to your KovaaK's runs.
+The **Play** screen lists the built-in and your own scenarios and workouts.
+
+- **Adaptive** (the default) finds your level and keeps the difficulty where you hit about 85% of targets, or stay on target 85% of the time when tracking. Your result is a level from 0 to 100, and the next run starts from it. **Standard** plays the scenario exactly as written and scores points.
+- **Workouts** play several scenarios back to back in one session. There are four built-ins, and you can build your own.
+- **Copy & edit** opens a form with every setting the engine supports, including what adaptive mode makes harder.
+- **Your settings** cover sensitivity (cm/360 and DPI, matched to your latest KovaaK's run), FOV, crosshair, display mode (borderless, exclusive at any resolution and refresh rate, or windowed) and a centered play area. The play area lets a big monitor play like a smaller one; a helper sizes it from screen diagonals.
+
+**Insights** shows what the trainer measured: your level over time, flick speed for size and distance (Fitts' law throughput), success by direction and distance, where shots land relative to the target, reaction time, tracking accuracy by target speed and after direction changes, whether you trail or lead targets, and coaching notes. RustyAim runs also show up in Progress and Training time next to your KovaaK's runs. Adaptive runs are listed as "<scenario> (Adaptive)" so levels and scores stay on separate charts.
 
 To run the trainer on its own while developing:
 
@@ -28,7 +35,7 @@ To run the trainer on its own while developing:
 cargo run -p rustyaim-engine -- builtin:static-grid --windowed
 ```
 
-`--smoke <folder>` makes a bot play a 4-second version, saves `play.png` and `results.png` there, and exits. It's a quick check that rendering, input and saving work on a machine; add `--db <file>` to keep the test run out of your history.
+Add `--adaptive` for adaptive mode, or use `--workout builtin:daily-fundamentals` instead of a scenario. `--smoke <folder>` makes a bot that plays like a person run short versions (`--smoke-seconds`, default 4), saves screenshots there, and exits. It's a quick check that rendering, input and saving work on a machine; add `--db <file>` to keep test runs out of your history. The app also takes `--db <file>`, so you can open a test database.
 
 To preview the UI in a browser against your real data, dump a snapshot next to the UI files and serve the folder (the dump is gitignored):
 

@@ -20,3 +20,10 @@ min_separation = 30.0
 [scoring]
 per_kill = 100.0
 per_miss = -25.0
+
+[adaptive]
+goal = 0.85
+knobs = [
+    { knob = "lifetime", easy = 2.8, hard = 0.6 },
+    { knob = "radius", easy = 0.38, hard = 0.2 },
+]

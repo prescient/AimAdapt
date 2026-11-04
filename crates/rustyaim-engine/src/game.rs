@@ -1,27 +1,46 @@
 //! The Bevy side: window, mouse look, drawing the room and targets, the HUD and
 //! the results screen. Game rules live in `rustyaim_sim`; this module only feeds it
 //! input and draws what it reports.
+//!
+//! A session plays one or more steps: a single scenario, or each run of a workout
+//! in turn. The room is rebuilt whenever the scenario changes.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 
 use bevy::asset::RenderAssetUsages;
+use bevy::camera::{ClearColorConfig, Viewport};
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::math::Affine2;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::text::FontSize;
-use bevy::window::{CursorGrabMode, CursorOptions, MonitorSelection, PresentMode, WindowMode};
+use bevy::window::{
+    CursorGrabMode, CursorOptions, Monitor, MonitorSelection, PresentMode, PrimaryMonitor, VideoMode,
+    VideoModeSelection, WindowMode,
+};
 use chrono::{Local, NaiveDateTime};
 use rustyaim_sim::scenario::{Shape, parse_color};
+use rustyaim_sim::settings::DisplayMode;
 use rustyaim_sim::sim::from_angles;
 use rustyaim_sim::{Event, Input, Phase, PlayerSettings, Scenario, Sim};
 
 use crate::record::{self, RunInfo};
 
-pub struct PlayOptions {
+/// One run to play.
+#[derive(Clone)]
+pub struct PlayStep {
     pub scenario: Scenario,
+    pub adaptive: bool,
+    /// Shown with the run, e.g. "2 of 3".
+    pub label: Option<String>,
+}
+
+pub struct PlayOptions {
+    pub steps: Vec<PlayStep>,
+    /// Set when the steps come from a workout; saved with each run.
+    pub workout: Option<String>,
     pub settings: PlayerSettings,
     /// Where finished runs are saved. `None` plays without saving.
     pub db_path: Option<PathBuf>,
@@ -31,46 +50,60 @@ pub struct PlayOptions {
 }
 
 pub fn run(opts: PlayOptions) -> AppExit {
+    let d = &opts.settings.display;
+    let title = match &opts.workout {
+        Some(w) => format!("RustyAim — {w}"),
+        None => format!("RustyAim — {}", opts.steps.first().map_or("", |s| s.scenario.name.as_str())),
+    };
+    let size = d.resolution.unwrap_or([1600, 900]);
     let window = Window {
-        title: format!("RustyAim — {}", opts.scenario.name),
+        title,
         present_mode: PresentMode::AutoNoVsync,
-        mode: if opts.settings.fullscreen {
-            WindowMode::BorderlessFullscreen(MonitorSelection::Current)
-        } else {
-            WindowMode::Windowed
+        // Exclusive full screen is switched to once the monitor's video modes are known.
+        mode: match d.mode {
+            DisplayMode::Windowed => WindowMode::Windowed,
+            _ => WindowMode::BorderlessFullscreen(MonitorSelection::Current),
         },
-        resolution: (1600, 900).into(),
+        resolution: (size[0], size[1]).into(),
         ..default()
     };
-    let best = opts
-        .db_path
-        .as_deref()
-        .and_then(|p| rustyaim_core::Db::open(p).ok())
-        .and_then(|db| record::best_score(&db, &opts.scenario));
-    let sim = Sim::new(opts.scenario.clone(), opts.seed);
+    let mut game = Game {
+        steps: opts.steps,
+        index: 0,
+        sim: Sim::new(Scenario::default(), opts.seed),
+        seed: opts.seed,
+        workout: opts.workout,
+        settings: opts.settings,
+        db_path: opts.db_path,
+        look: Look::default(),
+        started_at: None,
+        frames: 0,
+        run_time: 0.0,
+        fps: 0.0,
+        best: None,
+        saved: None,
+        flashes: HashMap::new(),
+        done: Vec::new(),
+        world_dirty: true,
+        display_note: None,
+        video_mode_set: false,
+        smoke: opts.smoke.map(|dir| Smoke { dir, taken: 0, after_finish: 0.0 }),
+        bot: crate::bot::Bot::new(opts.seed),
+    };
+    game.begin_step(0);
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin { primary_window: Some(window), ..default() }))
         .insert_resource(ClearColor(Color::srgb(0.05, 0.06, 0.08)))
         .insert_resource(GlobalAmbientLight { color: Color::WHITE, brightness: 600.0, ..default() })
-        .insert_resource(Game {
-            sim,
-            seed: opts.seed,
-            settings: opts.settings,
-            db_path: opts.db_path,
-            look: Look::default(),
-            started_at: None,
-            frames: 0,
-            run_time: 0.0,
-            fps: 0.0,
-            best,
-            saved: None,
-            flashes: HashMap::new(),
-            smoke: opts.smoke.map(|dir| Smoke { dir, taken: 0, after_finish: 0.0 }),
-        })
-        .add_systems(Startup, (setup_world, setup_hud))
+        .insert_resource(game)
+        .add_systems(Startup, (setup_cameras, setup_hud))
         .add_systems(
             Update,
-            (keys, cursor, look, step, sync_targets, update_hud, update_overlay, smoke_capture).chain(),
+            (
+                (exclusive_video_mode, play_area, rebuild_world),
+                (keys, cursor, look, step, sync_targets, update_hud, update_overlay, smoke_capture),
+            )
+                .chain(),
         )
         .run()
 }
@@ -89,10 +122,19 @@ impl Look {
     }
 }
 
+/// What a finished step reported, for the workout summary.
+struct Done {
+    name: String,
+    line: String,
+}
+
 #[derive(Resource)]
 struct Game {
+    steps: Vec<PlayStep>,
+    index: usize,
     sim: Sim,
     seed: u64,
+    workout: Option<String>,
     settings: PlayerSettings,
     db_path: Option<PathBuf>,
     look: Look,
@@ -102,42 +144,94 @@ struct Game {
     run_time: f32,
     /// Smoothed frames per second.
     fps: f32,
-    /// Best earlier score for this exact scenario.
+    /// Best earlier score (standard) or level (adaptive) for this scenario.
     best: Option<f64>,
     /// What happened when the finished run was saved.
     saved: Option<Result<(), String>>,
     /// Seconds of hit flash left, by target id.
     flashes: HashMap<u64, f32>,
+    done: Vec<Done>,
+    world_dirty: bool,
+    display_note: Option<String>,
+    video_mode_set: bool,
     smoke: Option<Smoke>,
+    bot: crate::bot::Bot,
 }
 
 struct Smoke {
     dir: PathBuf,
-    /// Screenshots taken so far.
+    /// Screenshots taken in the current step.
     taken: u8,
     /// Seconds since the run finished.
     after_finish: f32,
 }
 
 impl Game {
-    fn restart(&mut self) {
+    fn step_info(&self) -> &PlayStep {
+        &self.steps[self.index]
+    }
+
+    fn is_last(&self) -> bool {
+        self.index + 1 >= self.steps.len()
+    }
+
+    /// Starts step `i` (or restarts the current one), reading the last adaptive
+    /// level and the best so far from the database.
+    fn begin_step(&mut self, i: usize) {
+        let changed = *self.sim.scenario() != self.steps[i].scenario;
+        self.index = i;
         self.seed = self.seed.wrapping_add(1);
-        if let Some(Ok(())) = self.saved {
-            let score = f64::from(self.sim.score());
-            self.best = Some(self.best.map_or(score, |b| b.max(score)));
-        }
-        self.sim = Sim::new(self.sim.scenario().clone(), self.seed);
+        let step = self.steps[i].clone();
+        let db = self.db_path.as_deref().and_then(|p| rustyaim_core::Db::open(p).ok());
+        let s = step.scenario.clone();
+        self.sim = if step.adaptive {
+            let start = db.as_ref().and_then(|db| db.last_adaptive_level(&s.name).ok().flatten());
+            self.best = db.as_ref().and_then(|db| record::best_level(db, &s));
+            Sim::adaptive(s, self.seed, start.map(|l| l as f32))
+        } else {
+            self.best = db.as_ref().and_then(|db| record::best_score(db, &s));
+            Sim::new(s, self.seed)
+        };
         self.look = Look::default();
         self.started_at = None;
         self.frames = 0;
         self.run_time = 0.0;
         self.saved = None;
         self.flashes.clear();
+        if changed {
+            self.world_dirty = true;
+        }
+        if let Some(s) = &mut self.smoke {
+            s.taken = 0;
+            s.after_finish = 0.0;
+        }
+    }
+
+    fn record_done(&mut self) {
+        let r = self.sim.result();
+        let line = match &r.adaptive {
+            Some(a) => format!(
+                "Level {:.0} ({:+.0}), hit {:.0}%",
+                a.level,
+                a.level - a.start_level,
+                a.success_rate.unwrap_or(0.0) * 100.0
+            ),
+            None => format!(
+                "Score {:.0}, accuracy {}",
+                r.score,
+                r.stats.accuracy().map_or("-".into(), |a| format!("{:.0}%", a * 100.0))
+            ),
+        };
+        self.done.push(Done { name: self.sim.scenario().name.clone(), line });
     }
 }
 
 #[derive(Component)]
 struct PlayerCamera;
+
+/// Everything that belongs to the current scenario's room.
+#[derive(Component)]
+struct WorldItem;
 
 #[derive(Component)]
 struct TargetView {
@@ -166,6 +260,9 @@ struct CenterText;
 
 #[derive(Component)]
 struct FpsText;
+
+#[derive(Component)]
+struct StepText;
 
 #[derive(Component)]
 struct Overlay;
@@ -205,13 +302,38 @@ fn grid_texture() -> Image {
     image
 }
 
-fn setup_world(
+fn setup_cameras(mut commands: Commands, game: Res<Game>) {
+    // Clears the whole window to black, so a smaller play area has a black border.
+    commands.spawn((Camera2d, Camera { order: -1, clear_color: ClearColorConfig::Custom(Color::BLACK), ..default() }));
+    commands.spawn((
+        PlayerCamera,
+        Camera3d::default(),
+        Camera { order: 0, ..default() },
+        IsDefaultUiCamera,
+        Projection::from(PerspectiveProjection { fov: game.settings.vertical_fov(), near: 0.05, ..default() }),
+        Transform::IDENTITY,
+    ));
+}
+
+/// Entities that belong to the current scenario and go when it changes.
+type RoomEntities<'w, 's> = Query<'w, 's, Entity, Or<(With<WorldItem>, With<TargetView>)>>;
+
+/// Builds the room and target mesh for the current scenario when it changes.
+fn rebuild_world(
     mut commands: Commands,
-    game: Res<Game>,
+    mut game: ResMut<Game>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
+    old: RoomEntities,
 ) {
+    if !game.world_dirty {
+        return;
+    }
+    game.world_dirty = false;
+    for e in &old {
+        commands.entity(e).despawn();
+    }
     let s = game.sim.scenario();
     let [w, h, d] = s.arena.size;
     let eye = s.arena.eye_height;
@@ -238,6 +360,7 @@ fn setup_world(
             ..default()
         });
         commands.spawn((
+            WorldItem,
             Mesh3d(meshes.add(Cuboid::from_size(size))),
             MeshMaterial3d(mat),
             Transform::from_translation(center),
@@ -253,13 +376,14 @@ fn setup_world(
         });
         let inset = -center.normalize_or_zero() * 0.01;
         commands.spawn((
+            WorldItem,
             Mesh3d(meshes.add(Cuboid::from_size(size * 0.999))),
             MeshMaterial3d(lines),
             Transform::from_translation(center + inset),
         ));
     }
-
     commands.spawn((
+        WorldItem,
         DirectionalLight { illuminance: 6000.0, shadow_maps_enabled: false, ..default() },
         Transform::from_xyz(4.0, 10.0, 6.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
@@ -270,13 +394,51 @@ fn setup_world(
         Shape::Capsule => meshes.add(Capsule3d::new(tc.radius, (tc.height - 2.0 * tc.radius).max(0.0))),
     };
     commands.insert_resource(TargetAssets { mesh, base: color(&tc.color), radius: tc.radius });
+}
 
-    commands.spawn((
-        PlayerCamera,
-        Camera3d::default(),
-        Projection::from(PerspectiveProjection { fov: game.settings.vertical_fov(), near: 0.05, ..default() }),
-        Transform::IDENTITY,
-    ));
+/// Switches to exclusive full screen at the chosen resolution and refresh rate once
+/// the monitor's video modes are known.
+fn exclusive_video_mode(
+    mut game: ResMut<Game>,
+    mut window: Single<&mut Window>,
+    monitors: Query<&Monitor, With<PrimaryMonitor>>,
+) {
+    if game.video_mode_set || game.settings.display.mode != DisplayMode::Exclusive {
+        return;
+    }
+    let Some(monitor) = monitors.iter().next() else { return };
+    game.video_mode_set = true;
+    let d = &game.settings.display;
+    let want = d.resolution.unwrap_or([monitor.physical_width, monitor.physical_height]);
+    let fits: Vec<&VideoMode> =
+        monitor.video_modes.iter().filter(|m| m.physical_size.x == want[0] && m.physical_size.y == want[1]).collect();
+    let pick = match d.refresh_hz {
+        Some(hz) => fits.iter().min_by_key(|m| (i64::from(m.refresh_rate_millihertz) - i64::from(hz) * 1000).abs()),
+        None => fits.iter().max_by_key(|m| (m.refresh_rate_millihertz, m.bit_depth)),
+    };
+    match pick {
+        Some(m) => {
+            window.mode = WindowMode::Fullscreen(MonitorSelection::Current, VideoModeSelection::Specific(**m));
+        }
+        None => {
+            game.display_note =
+                Some(format!("Your monitor doesn't offer {}x{}; using borderless full screen.", want[0], want[1]));
+        }
+    }
+}
+
+/// Keeps the 3D view (and the HUD with it) in the centered play area, if one is set.
+fn play_area(game: Res<Game>, window: Single<&Window>, mut camera: Single<&mut Camera, With<PlayerCamera>>) {
+    let size = [window.physical_width(), window.physical_height()];
+    let viewport = game.settings.display.play_area_in(size).map(|(pos, area)| Viewport {
+        physical_position: UVec2::new(pos[0], pos[1]),
+        physical_size: UVec2::new(area[0], area[1]),
+        ..default()
+    });
+    let key = |v: &Option<Viewport>| v.as_ref().map(|v| (v.physical_position, v.physical_size));
+    if key(&camera.viewport) != key(&viewport) {
+        camera.viewport = viewport;
+    }
 }
 
 fn setup_hud(mut commands: Commands, game: Res<Game>) {
@@ -293,7 +455,7 @@ fn setup_hud(mut commands: Commands, game: Res<Game>) {
             ..default()
         })
         .with_child((TimerText, Text::new(""), text(34.0), shadow));
-    // Score, top left.
+    // Score or level, top left.
     commands.spawn((
         ScoreText,
         Text::new(""),
@@ -309,6 +471,15 @@ fn setup_hud(mut commands: Commands, game: Res<Game>) {
         TextLayout::justify(Justify::Right),
         shadow,
         Node { position_type: PositionType::Absolute, top: px(18), right: px(24), ..default() },
+    ));
+    // Workout progress, bottom left.
+    commands.spawn((
+        StepText,
+        Text::new(""),
+        text(15.0),
+        TextColor(Color::srgba(1.0, 1.0, 1.0, 0.75)),
+        shadow,
+        Node { position_type: PositionType::Absolute, bottom: px(10), left: px(14), ..default() },
     ));
     commands.spawn((
         FpsText,
@@ -348,12 +519,12 @@ fn setup_hud(mut commands: Commands, game: Res<Game>) {
         .with_child((
             Node {
                 padding: UiRect::all(px(32)),
-                min_width: px(420),
+                min_width: px(460),
                 border_radius: BorderRadius::all(px(14)),
                 ..default()
             },
             BackgroundColor(Color::srgb(0.09, 0.1, 0.13)),
-            children![(OverlayText, Text::new(""), text(22.0), TextLayout::justify(Justify::Center))],
+            children![(OverlayText, Text::new(""), text(21.0), TextLayout::justify(Justify::Center))],
         ));
 }
 
@@ -393,8 +564,19 @@ fn keys(keys: Res<ButtonInput<KeyCode>>, mut game: ResMut<Game>, mut exit: Messa
         exit.write(AppExit::Success);
     }
     let finished = game.sim.phase() == Phase::Finished;
-    if keys.just_pressed(KeyCode::KeyR) || (finished && keys.just_pressed(KeyCode::Space)) {
-        game.restart();
+    let i = game.index;
+    if keys.just_pressed(KeyCode::KeyR) {
+        game.begin_step(i);
+    } else if finished && keys.just_pressed(KeyCode::Space) {
+        if game.is_last() {
+            if game.steps.len() == 1 {
+                game.begin_step(i);
+            } else {
+                exit.write(AppExit::Success);
+            }
+        } else {
+            game.begin_step(i + 1);
+        }
     }
     if keys.just_pressed(KeyCode::F2) {
         game.settings.show_fps = !game.settings.show_fps;
@@ -444,6 +626,7 @@ fn step(
     time: Res<Time>,
     mouse: Res<ButtonInput<MouseButton>>,
     cursor: Single<&CursorOptions>,
+    camera: Single<&Camera, With<PlayerCamera>>,
     window: Single<&Window>,
     mut game: ResMut<Game>,
 ) {
@@ -459,13 +642,8 @@ fn step(
         fire_held: locked && mouse.pressed(MouseButton::Left),
     };
     if game.smoke.is_some() {
-        // The smoke-test bot snaps to the first target and clicks every 12 frames.
-        if let Some(t) = game.sim.targets().first() {
-            let (yaw, pitch) = rustyaim_sim::sim::angles(t.pos);
-            game.look = Look { yaw: f64::from(yaw), pitch: f64::from(pitch) };
-        }
-        let fire = game.frames.is_multiple_of(12);
-        input = Input { aim: game.look.aim(), fire_pressed: fire, fire_held: true };
+        let Game { bot, sim, look, .. } = &mut *game;
+        input = bot.input(sim, &mut look.yaw, &mut look.pitch, dt);
     }
     let was = game.sim.phase();
     let events = game.sim.step(dt, input);
@@ -483,8 +661,11 @@ fn step(
                 game.flashes.insert(id, 0.06);
             }
             Event::Finished => {
-                let res = format!("{}x{}", window.physical_width(), window.physical_height());
-                save_run(&mut game, res);
+                let size = camera
+                    .physical_viewport_size()
+                    .unwrap_or(UVec2::new(window.physical_width(), window.physical_height()));
+                save_run(&mut game, format!("{}x{}", size.x, size.y));
+                game.record_done();
             }
             _ => {}
         }
@@ -511,6 +692,7 @@ fn save_run(game: &mut Game, resolution: String) {
         finished_at,
         avg_fps,
         resolution: Some(resolution),
+        workout: game.workout.clone(),
     };
     game.saved = Some(record::save(&path, &info));
 }
@@ -518,10 +700,14 @@ fn save_run(game: &mut Game, resolution: String) {
 fn sync_targets(
     mut commands: Commands,
     game: Res<Game>,
-    assets: Res<TargetAssets>,
+    assets: Option<Res<TargetAssets>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut views: Query<(Entity, &TargetView, &mut Transform)>,
 ) {
+    let Some(assets) = assets else { return };
+    if game.world_dirty {
+        return;
+    }
     let live: HashMap<u64, &rustyaim_sim::sim::Target> = game.sim.targets().iter().map(|t| (t.id, t)).collect();
     let mut shown = Vec::new();
     for (entity, view, mut tf) in &mut views {
@@ -558,6 +744,10 @@ fn target_color(base: Color, health: f32, flash: bool) -> Color {
     if flash { faded.mix(&Color::WHITE, 0.55) } else { faded }
 }
 
+fn mode_name(adaptive: bool) -> &'static str {
+    if adaptive { "adaptive" } else { "standard" }
+}
+
 #[allow(clippy::type_complexity)]
 fn update_hud(
     game: Res<Game>,
@@ -567,19 +757,39 @@ fn update_hud(
         Single<&mut Text, With<StatsText>>,
         Single<&mut Text, With<CenterText>>,
         Single<&mut Text, With<FpsText>>,
+        Single<&mut Text, With<StepText>>,
     )>,
 ) {
     let sim = &game.sim;
     let st = sim.stats();
     texts.p0().0 = format!("{:.1}", sim.time_left().max(0.0));
-    texts.p1().0 = format!("{:.0}", sim.score());
-    let acc = st.accuracy().map_or("–".into(), |a| format!("{:.1}%", a * 100.0));
-    texts.p2().0 = format!("Accuracy {acc}\nKills {}", st.kills);
+    let acc = st.accuracy().map_or("-".into(), |a| format!("{:.1}%", a * 100.0));
+    match sim.level() {
+        Some((level, rate)) => {
+            texts.p1().0 = format!("Level {level:.1}");
+            let goal = sim.scenario().adaptive.goal * 100.0;
+            let rate = rate.map_or("-".into(), |r| format!("{:.0}%", r * 100.0));
+            texts.p2().0 = format!("Hit rate {rate} (goal {goal:.0}%)\nKills {}", st.kills);
+        }
+        None => {
+            texts.p1().0 = format!("{:.0}", sim.score());
+            texts.p2().0 = format!("Accuracy {acc}\nKills {}", st.kills);
+        }
+    }
     texts.p3().0 = match sim.phase() {
         Phase::Countdown => format!("{}", sim.countdown_left().ceil() as u32),
         _ => String::new(),
     };
     texts.p4().0 = if game.settings.show_fps { format!("{:.0} fps", game.fps) } else { String::new() };
+    let step = game.step_info();
+    let mut line = format!("{} | {}", sim.scenario().name, mode_name(step.adaptive));
+    if let Some(l) = &step.label {
+        line = format!("{line} | {l}");
+    }
+    if let Some(w) = &game.workout {
+        line = format!("{w} | {} of {} | {line}", game.index + 1, game.steps.len());
+    }
+    texts.p5().0 = line;
 }
 
 fn update_overlay(
@@ -594,47 +804,92 @@ fn update_overlay(
     }
     let r = game.sim.result();
     let st = &r.stats;
-    let score = f64::from(r.score);
-    let best = match game.best {
-        None => "First run of this scenario".to_string(),
-        Some(b) if score > b => format!("New best! (was {b:.0})"),
-        Some(b) => format!("Best {b:.0}"),
+    let acc = st.accuracy().map_or("-".into(), |a| format!("{:.1}%", a * 100.0));
+    let ttk = r.avg_ttk_s().map_or("-".into(), |t| format!("{:.0} ms", t * 1000.0));
+    let headline = match &r.adaptive {
+        Some(a) => {
+            let best = match game.best {
+                None => "First adaptive run".to_string(),
+                Some(b) if f64::from(a.level) > b => format!("New best level! (was {b:.0})"),
+                Some(b) => format!("Best level {b:.0}"),
+            };
+            format!(
+                "Level {:.1}   ({:+.1} from {:.0})\n{best}\nHit rate {:.0}% | goal {:.0}%",
+                a.level,
+                a.level - a.start_level,
+                a.start_level,
+                a.success_rate.unwrap_or(0.0) * 100.0,
+                a.goal * 100.0
+            )
+        }
+        None => {
+            let score = f64::from(r.score);
+            let best = match game.best {
+                None => "First run of this scenario".to_string(),
+                Some(b) if score > b => format!("New best! (was {b:.0})"),
+                Some(b) => format!("Best {b:.0}"),
+            };
+            format!("Score {:.0}\n{best}", r.score)
+        }
     };
-    let acc = st.accuracy().map_or("–".into(), |a| format!("{:.1}%", a * 100.0));
-    let ttk = r.avg_ttk_s().map_or("–".into(), |t| format!("{:.0} ms", t * 1000.0));
     let saved = match &game.saved {
         Some(Ok(())) => "Saved to your history".to_string(),
         Some(Err(e)) => format!("Couldn't save: {e}"),
         None => String::new(),
     };
+    let note = game.display_note.as_deref().map(|n| format!("\n{n}")).unwrap_or_default();
+    let keys = if game.steps.len() == 1 {
+        "Space: play again    R: restart    Esc: quit".to_string()
+    } else if game.is_last() {
+        let summary: Vec<String> = game.done.iter().map(|d| format!("{}: {}", d.name, d.line)).collect();
+        format!("Workout complete\n{}\n\nSpace or Esc: finish    R: replay this one", summary.join("\n"))
+    } else {
+        let next = &game.steps[game.index + 1];
+        format!(
+            "Next ({} of {}): {} | {}\n\nSpace: continue    R: replay this one    Esc: end workout",
+            game.index + 2,
+            game.steps.len(),
+            next.scenario.name,
+            mode_name(next.adaptive)
+        )
+    };
     text.0 = format!(
-        "{}\n\nScore {:.0}\n{best}\n\nAccuracy {acc}   Kills {}   Avg TTK {ttk}\n\n{saved}\n\nSpace: play again    Esc: quit",
+        "{}\n\n{headline}\n\nAccuracy {acc}   Kills {}   Timeouts {}   Avg TTK {ttk}\n\n{saved}{note}\n\n{keys}",
         game.sim.scenario().name,
-        r.score,
         st.kills,
+        st.timeouts,
     );
 }
 
-/// Smoke test: screenshot mid-run and on the results screen, then quit.
+/// Smoke test: screenshot mid-run and on the results screen, move to the next
+/// step, and quit after the last.
 fn smoke_capture(mut commands: Commands, time: Res<Time>, mut game: ResMut<Game>, mut exit: MessageWriter<AppExit>) {
     use bevy::render::view::screenshot::{Screenshot, save_to_disk};
     let elapsed = game.sim.elapsed();
     let finished = game.sim.phase() == Phase::Finished;
+    let (i, last) = (game.index, game.is_last());
     let Some(smoke) = game.smoke.as_mut() else { return };
+    let suffix = if i == 0 { String::new() } else { format!("-{}", i + 1) };
     let mut shot = |name: &str, smoke: &mut Smoke| {
-        commands.spawn(Screenshot::primary_window()).observe(save_to_disk(smoke.dir.join(name)));
+        commands
+            .spawn(Screenshot::primary_window())
+            .observe(save_to_disk(smoke.dir.join(format!("{name}{suffix}.png"))));
         smoke.taken += 1;
     };
     if smoke.taken == 0 && elapsed >= 1.5 {
-        shot("play.png", smoke);
+        shot("play", smoke);
     }
     if finished {
         smoke.after_finish += time.delta_secs();
         if smoke.taken == 1 && smoke.after_finish >= 0.5 {
-            shot("results.png", smoke);
+            shot("results", smoke);
         }
         if smoke.after_finish >= 1.5 {
-            exit.write(AppExit::Success);
+            if last {
+                exit.write(AppExit::Success);
+            } else {
+                game.begin_step(i + 1);
+            }
         }
     }
 }

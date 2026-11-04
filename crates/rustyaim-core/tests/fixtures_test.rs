@@ -148,8 +148,8 @@ fn reopening_database_keeps_schema() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("test.db");
     let version = Db::open(&path).unwrap().schema_version().unwrap();
-    assert_eq!(version, 2);
-    assert_eq!(Db::open(&path).unwrap().schema_version().unwrap(), 2);
+    assert_eq!(version, 3);
+    assert_eq!(Db::open(&path).unwrap().schema_version().unwrap(), 3);
 }
 
 fn run_kills(name: &str) -> i64 {

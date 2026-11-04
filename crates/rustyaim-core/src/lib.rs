@@ -4,9 +4,11 @@
 pub mod db;
 pub mod discover;
 pub mod import;
+pub mod insights;
 pub mod parse;
 pub mod progress;
 pub mod summary;
+pub mod telemetry;
 pub mod training;
 
 pub use db::Db;

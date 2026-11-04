@@ -117,6 +117,33 @@ Score = kills × `per_kill` + hits × `per_hit` + misses × `per_miss` + damage 
 | `scoring.per_damage` | `0.0` | Points per point of damage. Tracking scenarios use 1. |
 | `scoring.per_timeout` | `0.0` | Usually 0 or negative. |
 
+### `[adaptive]`
+
+Every scenario can be played in **Standard** mode, at the difficulty written in the file, or **Adaptive** mode. In adaptive mode, difficulty is a single level from 0 (easy) to 100 (hard). The level sets the knobs listed here, and it moves after every outcome so you succeed about `goal` of the time:
+
+- **Clicking:** a kill is a success. A miss or a timeout is a failure.
+- **Tracking (beam):** every `window_s` seconds, the share of time the crosshair was on target. This counts whether or not you're firing, so firing only when on target doesn't help.
+
+The update is `level += step × (outcome − goal)`. With an 85% goal, a hit raises the level a little and a miss lowers it about five times as much. That's why it settles where you hit 85%. The step starts large, so a first run finds your level quickly. Each time the direction reverses, the step shrinks, so it narrows in on what you can reliably do. The run's result is the level it settled at, which is the average over its second half. The next adaptive run starts there.
+
+| Field | Default | Meaning |
+|---|---|---|
+| `adaptive.goal` | `0.85` | Success rate to hold (0.5–0.98). |
+| `adaptive.start_level` | `25.0` | Level for your first adaptive run. |
+| `adaptive.window_s` | `0.5` | Seconds of tracking judged as one outcome. |
+| `adaptive.knobs` | `[]` | What gets harder, as `{ knob, easy, hard }` rows. `easy` is the value at level 0 and `hard` the value at level 100, spaced geometrically in between. |
+
+Knobs: `lifetime` (seconds before a target times out), `radius` (m), `speed` (top movement speed in m/s; the bottom keeps its ratio), `change_every` (longest time between direction changes), `spread` (multiplier on the spawn area), `health` and `respawn_delay`. With no knobs listed, hitscan scenarios use lifetime and radius, adding a timeout if the scenario has none. Moving beam scenarios use speed and radius.
+
+```toml
+[adaptive]
+goal = 0.85
+knobs = [
+    { knob = "lifetime", easy = 2.2, hard = 0.45 },
+    { knob = "radius", easy = 0.38, hard = 0.22 },
+]
+```
+
 ### `[arena]`
 
 | Field | Default | Meaning |
@@ -130,10 +157,29 @@ Score = kills × `per_kill` + hits × `per_hit` + misses × `per_miss` + damage 
 
 Each finished run is saved to the same database as KovaaK's runs, with `source = 'rustyaim'` and KovaaK's field names. That includes score, hit and miss counts, kills with TTK, damage, sensitivity (as cm/360), DPI, FOV, average FPS and resolution. The `Hash` field holds the scenario's fingerprint, which changes when any gameplay setting changes. For beam weapons, hits and misses count 1/60 s ticks, which matches how KovaaK's reports tracking accuracy.
 
+## Workouts
+
+A workout is a TOML file listing scenarios to play back to back. Built-ins live in [`crates/rustyaim-sim/workouts`](crates/rustyaim-sim/workouts). Yours go in `%APPDATA%\RustyAim\workouts`, and the app's workout editor writes them there.
+
+```toml
+name = "Morning"
+description = "Clicking, then tracking."
+
+[[items]]
+scenario = "builtin:timed-flicks"   # or user:<file name>
+runs = 2                            # 1–20, default 1
+mode = "adaptive"                   # or "standard"; default adaptive
+
+[[items]]
+scenario = "builtin:strafe-track"
+```
+
+Each run is saved on its own, with the workout's name attached.
+
 ## Playing from the command line
 
 ```bash
 cargo run -p rustyaim-engine -- builtin:static-grid --windowed
 ```
 
-The argument can be `builtin:<name>`, `user:<file name without .toml>`, or a path to any `.toml` file. Options: `--windowed`, `--no-save`, `--db <file>`, `--seed <n>`. The same seed with the same mouse input replays the same run.
+The argument can be `builtin:<name>`, `user:<file name without .toml>`, or a path to any `.toml` file. Options: `--adaptive`, `--workout <id>` (instead of a scenario), `--windowed`, `--no-save`, `--db <file>` and `--seed <n>`. The same seed with the same mouse input replays the same run.

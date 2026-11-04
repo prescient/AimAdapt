@@ -33,3 +33,10 @@ change_every_s = [0.4, 1.4]
 [scoring]
 per_kill = 0.0
 per_damage = 1.0
+
+[adaptive]
+goal = 0.85
+knobs = [
+    { knob = "speed", easy = 2.5, hard = 10.0 },
+    { knob = "change_every", easy = 1.8, hard = 0.35 },
+]

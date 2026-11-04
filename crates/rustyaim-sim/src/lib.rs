@@ -6,12 +6,18 @@
 //! - [`sim`]: spawning, movement, hit detection and scoring.
 //! - [`settings`]: the player's sensitivity, field of view and crosshair.
 //! - [`library`]: built-in scenarios and the player's own scenario folder.
+//! - [`adaptive`]: the difficulty level and the staircase that keeps success near 85%.
+//! - [`telemetry`]: per-target, per-shot and tracking records for analytics.
+//! - [`workout`]: lists of scenarios played back to back.
 
+pub mod adaptive;
 pub mod library;
 pub mod scenario;
 pub mod settings;
 pub mod sim;
 pub mod spec;
+pub mod telemetry;
+pub mod workout;
 
 pub use glam::Vec3;
 pub use scenario::Scenario;

@@ -138,14 +138,31 @@ fn dump_snapshot(state: &AppData, path: &std::path::Path) -> Result<(), String> 
         playing: std::sync::atomic::AtomicBool::new(false),
     };
     let trainer = trainer::build_trainer(state, &t)?;
+    let db = state.db.lock().map_err(err)?;
+    let overview = rustyaim_core::insights::overview(&db).map_err(err)?;
+    let mut insights = std::collections::BTreeMap::new();
+    for o in &overview {
+        if let Some(i) = rustyaim_core::insights::scenario(&db, &o.scenario).map_err(err)? {
+            insights.insert(o.scenario.clone(), i);
+        }
+    }
+    drop(db);
     #[derive(Serialize)]
     struct Dump<'a> {
         snapshot: &'a Snapshot,
         scenarios: &'a std::collections::BTreeMap<String, ScenarioDetail>,
         trainer: &'a trainer::Trainer,
+        insights_overview: &'a [rustyaim_core::insights::ScenarioSummary],
+        insights: &'a std::collections::BTreeMap<String, rustyaim_core::insights::Insights>,
     }
-    let json =
-        serde_json::to_string(&Dump { snapshot: &snapshot, scenarios: &scenarios, trainer: &trainer }).map_err(err)?;
+    let dump = Dump {
+        snapshot: &snapshot,
+        scenarios: &scenarios,
+        trainer: &trainer,
+        insights_overview: &overview,
+        insights: &insights,
+    };
+    let json = serde_json::to_string(&dump).map_err(err)?;
     std::fs::write(path, json).map_err(err)
 }
 
@@ -193,7 +210,11 @@ fn main() {
         std::process::exit(rustyaim_engine::run_from_args(&args[1..]));
     }
 
-    let db_path = rustyaim_core::db::default_path().expect("couldn't find a folder for the database");
+    // `--db <file>` uses another database, e.g. a test one.
+    let db_path = match args.iter().position(|a| a == "--db").and_then(|i| args.get(i + 1)) {
+        Some(p) => std::path::PathBuf::from(p),
+        None => rustyaim_core::db::default_path().expect("couldn't find a folder for the database"),
+    };
     let db = Db::open(&db_path).expect("couldn't open the database");
     let data = AppData {
         db: Mutex::new(db),
@@ -237,7 +258,12 @@ fn main() {
             trainer::save_scenario,
             trainer::delete_scenario,
             trainer::save_engine_settings,
+            trainer::save_workout,
+            trainer::delete_workout,
+            trainer::insights_overview,
+            trainer::insights,
             trainer::play,
+            trainer::play_workout,
         ])
         .run(tauri::generate_context!())
         .expect("error while running RustyAim");

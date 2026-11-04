@@ -4,6 +4,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::adaptive::Adaptive;
+
 /// Current scenario file format version.
 pub const SCHEMA_VERSION: u32 = 1;
 
@@ -43,6 +45,8 @@ pub struct Scenario {
     pub weapon: Weapon,
     pub targets: Targets,
     pub scoring: Scoring,
+    /// How adaptive mode changes the difficulty.
+    pub adaptive: Adaptive,
 }
 
 impl Default for Scenario {
@@ -59,6 +63,7 @@ impl Default for Scenario {
             weapon: Weapon::default(),
             targets: Targets::default(),
             scoring: Scoring::default(),
+            adaptive: Adaptive::default(),
         }
     }
 }
@@ -383,6 +388,7 @@ impl Scenario {
         // Targets must fit in the room.
         let half_w = self.arena.size[0] / 2.0;
         check(sp.distance.1 + t.radius < half_w.max(self.arena.size[2] / 2.0), "spawn distance reaches past the walls");
+        p.extend(self.adaptive.problems());
         p
     }
 }

@@ -32,3 +32,10 @@ vertical = 0.8
 [scoring]
 per_kill = 0.0
 per_damage = 1.0
+
+[adaptive]
+goal = 0.85
+knobs = [
+    { knob = "speed", easy = 1.5, hard = 6.5 },
+    { knob = "radius", easy = 0.65, hard = 0.3 },
+]

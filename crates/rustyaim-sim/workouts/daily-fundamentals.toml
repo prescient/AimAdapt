@@ -1,0 +1,33 @@
+name = "Daily Fundamentals"
+description = "About 8 minutes covering clicking, tracking and switching, all adaptive so each one sits at your level."
+author = "RustyAim"
+
+[[items]]
+scenario = "builtin:timed-flicks"
+runs = 2
+mode = "adaptive"
+
+[[items]]
+scenario = "builtin:timed-micro-flicks"
+runs = 1
+mode = "adaptive"
+
+[[items]]
+scenario = "builtin:timed-wide-flicks"
+runs = 1
+mode = "adaptive"
+
+[[items]]
+scenario = "builtin:strafe-track"
+runs = 2
+mode = "adaptive"
+
+[[items]]
+scenario = "builtin:float-track"
+runs = 1
+mode = "adaptive"
+
+[[items]]
+scenario = "builtin:switch-track"
+runs = 1
+mode = "adaptive"

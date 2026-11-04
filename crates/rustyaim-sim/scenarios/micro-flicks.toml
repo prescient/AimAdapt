@@ -21,3 +21,10 @@ max_from_last = 6.0
 [scoring]
 per_kill = 100.0
 per_miss = -30.0
+
+[adaptive]
+goal = 0.85
+knobs = [
+    { knob = "lifetime", easy = 1.8, hard = 0.4 },
+    { knob = "radius", easy = 0.16, hard = 0.08 },
+]

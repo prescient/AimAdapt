@@ -1,0 +1,33 @@
+name = "Timed Micro Flicks"
+description = "Small targets close to the last one that time out quickly. Trains quick, precise corrections."
+author = "RustyAim"
+category = "clicking"
+tags = ["flick", "micro", "timed", "precision"]
+
+[timing]
+duration_s = 60.0
+
+[targets]
+count = 1
+radius = 0.14
+lifetime_s = 0.9
+respawn_delay_s = 0.05
+
+[targets.spawn]
+distance = [10.0, 10.0]
+yaw = [-14.0, 14.0]
+pitch = [-6.0, 12.0]
+min_separation = 2.0
+max_from_last = 7.0
+
+[scoring]
+per_kill = 100.0
+per_miss = -30.0
+per_timeout = -40.0
+
+[adaptive]
+goal = 0.85
+knobs = [
+    { knob = "lifetime", easy = 1.8, hard = 0.35 },
+    { knob = "radius", easy = 0.18, hard = 0.09 },
+]

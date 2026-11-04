@@ -98,6 +98,7 @@ CREATE TABLE import_errors (
 ALTER TABLE runs ADD COLUMN source TEXT NOT NULL DEFAULT 'kovaaks';
 CREATE INDEX runs_source ON runs (source, scenario);
 "#,
+    crate::telemetry::MIGRATION,
 ];
 
 /// Value of the `Source` field (and `runs.source`) for runs played in RustyAim's engine.
@@ -151,6 +152,10 @@ impl Db {
 
     pub fn conn(&self) -> &Connection {
         &self.conn
+    }
+
+    pub(crate) fn conn_mut(&mut self) -> &mut Connection {
+        &mut self.conn
     }
 
     pub fn schema_version(&self) -> Result<u32, DbError> {

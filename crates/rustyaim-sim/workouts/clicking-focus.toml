@@ -1,0 +1,28 @@
+name = "Clicking Focus"
+description = "Timed flicks at every distance, plus reaction and moving targets."
+author = "RustyAim"
+
+[[items]]
+scenario = "builtin:timed-flicks"
+runs = 3
+mode = "adaptive"
+
+[[items]]
+scenario = "builtin:timed-wide-flicks"
+runs = 2
+mode = "adaptive"
+
+[[items]]
+scenario = "builtin:timed-micro-flicks"
+runs = 2
+mode = "adaptive"
+
+[[items]]
+scenario = "builtin:shrink-reflex"
+runs = 2
+mode = "adaptive"
+
+[[items]]
+scenario = "builtin:timed-strafe-clicks"
+runs = 2
+mode = "adaptive"

@@ -51,6 +51,10 @@ pub enum Kind {
     Choice {
         options: &'static [Choice],
     },
+    /// The adaptive knobs: a list of `{ knob, easy, hard }` rows.
+    Knobs {
+        options: &'static [Choice],
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -98,6 +102,24 @@ const MOVEMENT: &[Choice] = &[
     Choice { value: "static", label: "Static", help: "Targets stay put." },
     Choice { value: "strafe", label: "Strafe", help: "Side to side, reversing at random intervals." },
     Choice { value: "random", label: "Random", help: "A new random direction at each change." },
+];
+
+const KNOBS: &[Choice] = &[
+    Choice {
+        value: "lifetime",
+        label: "Target lifetime (s)",
+        help: "Seconds before a target times out. Shorter is harder.",
+    },
+    Choice { value: "radius", label: "Target radius (m)", help: "Smaller is harder." },
+    Choice { value: "speed", label: "Target speed (m/s)", help: "Top movement speed; the bottom keeps its ratio." },
+    Choice {
+        value: "change_every",
+        label: "Direction change (s)",
+        help: "Longest time between direction changes. Shorter is harder.",
+    },
+    Choice { value: "spread", label: "Spawn spread (×)", help: "Multiplier on the spawn area's width and height." },
+    Choice { value: "health", label: "Target health", help: "More health means longer to destroy." },
+    Choice { value: "respawn_delay", label: "Respawn delay (s)", help: "Wait before the next target." },
 ];
 
 pub const FIELDS: &[Field] = &[
@@ -253,6 +275,34 @@ pub const FIELDS: &[Field] = &[
     ),
     f("scoring.per_timeout", "Scoring", "Per timeout", "Usually 0 or negative.", num(-10_000.0, 10_000.0, 1.0, "pts")),
     f(
+        "adaptive.goal",
+        "Adaptive",
+        "Success goal",
+        "Share of targets (or time on target) adaptive mode aims for. 0.85 means it settles where you hit 85%.",
+        num(0.5, 0.98, 0.01, ""),
+    ),
+    f(
+        "adaptive.start_level",
+        "Adaptive",
+        "First-run level",
+        "Where a first adaptive run starts, 0–100. Later runs start from your last level.",
+        num(0.0, 100.0, 1.0, ""),
+    ),
+    f(
+        "adaptive.window_s",
+        "Adaptive",
+        "Tracking window",
+        "Beam scenarios: seconds of tracking judged as one outcome.",
+        num(0.2, 5.0, 0.1, "s"),
+    ),
+    f(
+        "adaptive.knobs",
+        "Adaptive",
+        "What gets harder",
+        "Each setting runs from its easy value at level 0 to its hard value at level 100. Leave empty for a default that suits the scenario.",
+        Kind::Knobs { options: KNOBS },
+    ),
+    f(
         "arena.size",
         "Arena",
         "Room size",
@@ -289,8 +339,10 @@ mod tests {
         paths.retain(|p| p != "schema");
         let mut described: Vec<String> = FIELDS.iter().map(|f| f.path.to_string()).collect();
         // Empty lists aren't written out, so add the ones we know about.
-        if !paths.contains(&"tags".to_string()) {
-            paths.push("tags".into());
+        for list in ["tags", "adaptive.knobs"] {
+            if !paths.contains(&list.to_string()) {
+                paths.push(list.into());
+            }
         }
         paths.sort();
         described.sort();

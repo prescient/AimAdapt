@@ -16,6 +16,10 @@ pub fn scenarios_dir(data_dir: &Path) -> PathBuf {
     data_dir.join("scenarios")
 }
 
+pub fn workouts_dir(data_dir: &Path) -> PathBuf {
+    data_dir.join("workouts")
+}
+
 /// Saved settings, or ones matched to KovaaK's if there are none yet.
 pub fn load(data_dir: &Path, db: Option<&Db>) -> PlayerSettings {
     if let Ok(text) = std::fs::read_to_string(settings_path(data_dir))

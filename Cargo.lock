@@ -5728,6 +5728,7 @@ dependencies = [
  "chrono",
  "rustyaim-core",
  "rustyaim-sim",
+ "tempfile",
 ]
 
 [[package]]

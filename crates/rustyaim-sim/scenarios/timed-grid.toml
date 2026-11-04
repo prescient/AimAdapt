@@ -1,0 +1,31 @@
+name = "Timed Grid"
+description = "Three targets on screen, each on its own timer. Clear them before they vanish. Trains speed across several targets."
+author = "RustyAim"
+category = "clicking"
+tags = ["static", "timed", "speed"]
+
+[timing]
+duration_s = 60.0
+
+[targets]
+count = 3
+radius = 0.33
+lifetime_s = 2.0
+
+[targets.spawn]
+distance = [10.0, 10.0]
+yaw = [-22.0, 22.0]
+pitch = [-5.0, 14.0]
+min_separation = 7.0
+
+[scoring]
+per_kill = 100.0
+per_miss = -20.0
+per_timeout = -40.0
+
+[adaptive]
+goal = 0.85
+knobs = [
+    { knob = "lifetime", easy = 3.5, hard = 0.8 },
+    { knob = "radius", easy = 0.42, hard = 0.24 },
+]

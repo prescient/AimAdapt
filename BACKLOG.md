@@ -154,10 +154,22 @@ Layout: `rustyaim-sim` (scenario format, field descriptions, simulation; no grap
 - [ ] `todo` Time dilation (play at 80% speed) and a target-scale setting, like KovaaK's difficulty variants.
 - [ ] `todo` Visual themes: room colors, target outlines, high-contrast mode.
 
+### E1b. Adaptive training, workouts, display and analytics
+- [x] `done` Adaptive mode for every scenario: one difficulty level (0–100) drives knobs (lifetime, radius, speed, direction change, spread, health, respawn delay), adjusted by a weighted staircase to hold ~85% success (kills vs. misses and timeouts; on-target share for beams). Big first steps, shrinking on each reversal. The result is the settled level; the next run starts from it.
+- [x] `done` Timed scenarios where difficulty is speed: Timed Flicks, Timed Wide Flicks, Timed Micro Flicks, Timed Grid, Timed Strafe Clicks. Every built-in has its own adaptive knobs; user scenarios get sensible defaults.
+- [x] `done` Workouts: TOML lists of scenarios with runs and mode, played back to back in one trainer session with a summary at the end. Four built-ins, editor in the app.
+- [x] `done` Display: borderless, exclusive (any resolution and refresh rate the monitor offers, e.g. stretched 4:3) or windowed; a centered play area of any size with a helper to match a smaller screen (e.g. 24" on a 32" monitor).
+- [x] `done` Telemetry per run: every target (flick distance and direction, reaction, time to reach, overshoot, corrections, outcome, level), every shot (offset in target radii along/across the flick), tracking samples at 30 Hz (on target, error, target speed, lead/lag, time since direction change) and a 240 Hz aim trace.
+- [x] `done` Insights screen: level by run and within the last run, speed vs. difficulty (Fitts' law fit and throughput in bits/s), success and time by flick direction and distance, shot placement map (overshoot vs. stopping short, vertical bias), reaction histogram, tracking by target speed and after direction changes (recovery time), lead/lag, success by 10-second segment, and coaching notes generated from all of it.
+- [x] `done` `--smoke` bot that plays like a person (reaction delay, aim error, corrections), for end-to-end checks and preview data.
+
 ### E4. Plans with the engine
-- [ ] `todo` Generate difficulty variants automatically (smaller, faster, shorter lifetime) for Epic 6 ladders, since the engine's scenarios are fully under our control.
-- [ ] `todo` Playlists inside the app: run a list of scenarios back to back in one trainer session.
-- [ ] `todo` Record aim traces (view angles per frame) for replay and flick analysis.
+- [ ] `todo` Daily plan from Insights: pick the scenarios that train your weakest direction, distance or tracking speed, as a generated workout.
+- [ ] `todo` Replay a run from its aim trace, with targets, at any speed.
+- [ ] `todo` Flick shape analysis from the trace: peak speed, deceleration, and where corrections start.
+- [ ] `todo` Compare levels across scenarios on one skill profile (clicking, tracking, switching), and show how fast each is improving.
+- [ ] `todo` Per-run adaptive knobs in Insights (e.g. "you're reliable at 0.62 s lifetimes").
+- [ ] `todo` List the monitor's real video modes in the app (the engine can read them) instead of free-typed resolutions.
 
 ## Epic T: Testing and releases (P1)
 

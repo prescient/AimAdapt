@@ -1,0 +1,18 @@
+name = "Tracking Focus"
+description = "Reactive strafes, smooth tracking and switching."
+author = "RustyAim"
+
+[[items]]
+scenario = "builtin:strafe-track"
+runs = 3
+mode = "adaptive"
+
+[[items]]
+scenario = "builtin:float-track"
+runs = 3
+mode = "adaptive"
+
+[[items]]
+scenario = "builtin:switch-track"
+runs = 2
+mode = "adaptive"

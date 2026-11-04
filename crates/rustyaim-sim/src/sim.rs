@@ -1,17 +1,23 @@
-//! The simulation: target spawning, movement, hit detection and scoring. It knows
-//! nothing about rendering or input devices. The engine feeds it the aim direction
-//! and trigger state each frame and draws whatever targets it reports, which keeps
-//! all the rules testable without a window.
+//! The simulation: target spawning, movement, hit detection, scoring, adaptive
+//! difficulty and telemetry. It knows nothing about rendering or input devices. The
+//! engine feeds it the aim direction and trigger state each frame and draws whatever
+//! targets it reports, which keeps all the rules testable without a window.
 //!
 //! Coordinates: the player's eye is the origin, -Z is straight ahead, +Y is up and
 //! +X is right (the same as a Bevy camera with no rotation).
 
 use glam::Vec3;
 
+use crate::adaptive::{Adaptive, Controller};
 use crate::scenario::{Movement, MovementKind, Range, Scenario, Shape, Trigger, WeaponKind};
+use crate::telemetry::{Outcome, ShotRecord, TargetRecord, Telemetry, TrackSample, angle_deg, screen_offset};
 
 /// Beam damage and accuracy are sampled at this rate, independent of frame rate.
 pub const BEAM_TICK_HZ: f32 = 60.0;
+/// Tracking telemetry sample rate.
+const SAMPLE_HZ: f32 = 30.0;
+/// Aim trace rate.
+const TRACE_HZ: f32 = 240.0;
 
 /// What the player is doing this frame.
 #[derive(Debug, Clone, Copy)]
@@ -47,17 +53,110 @@ pub struct Target {
     /// Degrees per second of yaw and pitch.
     rate: [f32; 2],
     next_change: f32,
+    last_change: f32,
     age: f32,
     spawned_at: f32,
+    /// Lifetime and size it was given at spawn (adaptive mode changes them over time).
+    lifetime: f32,
+    base_radius: f32,
+    height: f32,
     shots: u32,
     hits: u32,
     damage: f32,
+    track: Track,
+}
+
+/// Telemetry for one target while it's alive.
+#[derive(Debug, Clone, PartialEq)]
+struct Track {
+    no: u32,
+    start_at: f32,
+    origin: Vec3,
+    distance_deg: f32,
+    /// Unit flick direction on screen.
+    flick: (f32, f32),
+    radius_deg: f32,
+    reaction_s: Option<f32>,
+    reach_s: Option<f32>,
+    inside: bool,
+    overshoot_deg: f32,
+    entries: u32,
+    level: Option<f32>,
+}
+
+impl Track {
+    fn begin(no: u32, now: f32, origin: Vec3, pos: Vec3, radius: f32, level: Option<f32>) -> Track {
+        let mut t = Track {
+            no,
+            start_at: now,
+            origin,
+            distance_deg: 0.0,
+            flick: (1.0, 0.0),
+            radius_deg: 0.0,
+            reaction_s: None,
+            reach_s: None,
+            inside: false,
+            overshoot_deg: 0.0,
+            entries: 0,
+            level,
+        };
+        t.restart(now, origin, pos, radius);
+        t
+    }
+
+    /// Starts timing the flick again from where the crosshair is now.
+    fn restart(&mut self, now: f32, origin: Vec3, pos: Vec3, radius: f32) {
+        let (x, y) = screen_offset(origin, pos);
+        let len = (x * x + y * y).sqrt();
+        self.start_at = now;
+        self.origin = origin;
+        self.distance_deg = angle_deg(origin, pos);
+        self.flick = if len > 1e-4 { (x / len, y / len) } else { (1.0, 0.0) };
+        self.radius_deg = (radius / pos.length().max(0.1)).atan().to_degrees();
+        self.reaction_s = None;
+        self.reach_s = None;
+        self.overshoot_deg = 0.0;
+        self.entries = u32::from(self.inside);
+    }
 }
 
 impl Target {
     /// Health left as a share of full health.
     pub fn health_fraction(&self) -> f32 {
         (self.health / self.max_health).clamp(0.0, 1.0)
+    }
+
+    /// Seconds of lifetime left, if it has one.
+    pub fn time_left(&self) -> Option<f32> {
+        (self.lifetime > 0.0).then(|| (self.lifetime - self.age).max(0.0))
+    }
+
+    fn hit_by(&self, aim: Vec3, shape: Shape) -> Option<f32> {
+        let h = self.height * self.radius / self.base_radius.max(1e-6);
+        ray_hit(aim, self.pos, self.radius, shape, h)
+    }
+
+    fn record(&self, ended_at: f32, outcome: Outcome) -> TargetRecord {
+        let k = &self.track;
+        let direction_deg = k.flick.1.atan2(k.flick.0).to_degrees();
+        TargetRecord {
+            no: k.no,
+            spawned_at: self.spawned_at,
+            start_at: k.start_at,
+            ended_at,
+            outcome,
+            distance_deg: k.distance_deg,
+            direction_deg,
+            radius_deg: k.radius_deg,
+            lifetime_s: self.lifetime,
+            reaction_s: k.reaction_s,
+            reach_s: k.reach_s,
+            overshoot_deg: k.overshoot_deg,
+            entries: k.entries,
+            shots: self.shots,
+            hits: self.hits,
+            level: k.level,
+        }
     }
 }
 
@@ -103,14 +202,32 @@ pub struct KillRecord {
     pub damage: f32,
 }
 
+/// How an adaptive run went.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AdaptiveSummary {
+    pub start_level: f32,
+    /// The run's result: the level it settled at.
+    pub level: f32,
+    /// Level at the very end.
+    pub final_level: f32,
+    pub goal: f32,
+    pub success_rate: Option<f32>,
+    pub outcomes: usize,
+    /// (seconds, level), thinned to at most 300 points.
+    pub timeline: Vec<(f32, f32)>,
+}
+
 /// The finished run, ready to save.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunResult {
+    /// Points, or the settled level for adaptive runs.
     pub score: f32,
     pub stats: Stats,
     pub kills: Vec<KillRecord>,
     /// Seconds of play (excludes the countdown).
     pub duration_s: f32,
+    pub adaptive: Option<AdaptiveSummary>,
+    pub telemetry: Telemetry,
 }
 
 impl RunResult {
@@ -120,37 +237,73 @@ impl RunResult {
 }
 
 pub struct Sim {
+    /// The scenario as written.
     scenario: Scenario,
+    /// What's being played: `scenario` with adaptive knobs applied.
+    current: Scenario,
+    adaptive: Option<(Adaptive, Controller)>,
     rng: Rng,
     /// Seconds since the countdown began.
     clock: f32,
     phase: Phase,
     targets: Vec<Target>,
     next_id: u64,
+    next_no: u32,
     /// Running-clock times at which a replacement target should appear.
     pending: Vec<f32>,
     last_killed_dir: Option<Vec3>,
+    last_aim: Vec3,
     stats: Stats,
     kills: Vec<KillRecord>,
     cooldown: f32,
     beam_acc: f32,
+    /// Ticks and on-target ticks in the current adaptive tracking window.
+    window: (u32, u32, f32),
+    telemetry: Telemetry,
+    next_sample: f32,
+    next_trace: f32,
 }
 
 impl Sim {
+    /// A standard run at the scenario's own difficulty.
     pub fn new(scenario: Scenario, seed: u64) -> Sim {
+        Sim::build(scenario, seed, None)
+    }
+
+    /// An adaptive run. `start` is the level the player reached last time; `None`
+    /// starts at the scenario's `adaptive.start_level` with a wider search.
+    pub fn adaptive(scenario: Scenario, seed: u64, start: Option<f32>) -> Sim {
+        let cfg = scenario.adaptive.clone();
+        let c = Controller::new(start.unwrap_or(cfg.start_level), cfg.goal, start.is_some());
+        Sim::build(scenario, seed, Some((cfg, c)))
+    }
+
+    fn build(base: Scenario, seed: u64, adaptive: Option<(Adaptive, Controller)>) -> Sim {
+        let current = match &adaptive {
+            Some((cfg, c)) => cfg.apply(&base, c.level),
+            None => base.clone(),
+        };
         let mut sim = Sim {
-            scenario,
+            scenario: base,
+            current,
+            adaptive,
             rng: Rng::new(seed),
             clock: 0.0,
             phase: Phase::Countdown,
             targets: Vec::new(),
             next_id: 1,
+            next_no: 1,
             pending: Vec::new(),
             last_killed_dir: None,
+            last_aim: Vec3::NEG_Z,
             stats: Stats::default(),
             kills: Vec::new(),
             cooldown: 0.0,
             beam_acc: 0.0,
+            window: (0, 0, 0.0),
+            telemetry: Telemetry::default(),
+            next_sample: 0.0,
+            next_trace: 0.0,
         };
         let mut events = Vec::new();
         for _ in 0..sim.scenario.targets.count {
@@ -162,8 +315,23 @@ impl Sim {
         sim
     }
 
+    /// The scenario as written (name, arena, timing).
     pub fn scenario(&self) -> &Scenario {
         &self.scenario
+    }
+
+    /// The scenario at the current difficulty.
+    pub fn current(&self) -> &Scenario {
+        &self.current
+    }
+
+    pub fn is_adaptive(&self) -> bool {
+        self.adaptive.is_some()
+    }
+
+    /// Current adaptive level and success rate so far.
+    pub fn level(&self) -> Option<(f32, Option<f32>)> {
+        self.adaptive.as_ref().map(|(_, c)| (c.level, c.success_rate()))
     }
 
     pub fn phase(&self) -> Phase {
@@ -191,6 +359,7 @@ impl Sim {
         (self.scenario.timing.countdown_s - self.clock).max(0.0)
     }
 
+    /// Points by the scenario's scoring rules (shown for standard runs).
     pub fn score(&self) -> f32 {
         let s = &self.scenario.scoring;
         let st = &self.stats;
@@ -202,11 +371,35 @@ impl Sim {
     }
 
     pub fn result(&self) -> RunResult {
+        let mut telemetry = self.telemetry.clone();
+        let now = self.elapsed();
+        telemetry.targets.extend(self.targets.iter().map(|t| t.record(now, Outcome::Open)));
+        telemetry.targets.sort_by_key(|t| t.no);
+        let adaptive = self.adaptive.as_ref().map(|(cfg, c)| {
+            let step = c.timeline.len().div_ceil(300).max(1);
+            let mut timeline: Vec<(f32, f32)> = c.timeline.iter().step_by(step).copied().collect();
+            if let Some(last) = c.timeline.last()
+                && timeline.last() != Some(last)
+            {
+                timeline.push(*last);
+            }
+            AdaptiveSummary {
+                start_level: c.timeline[0].1,
+                level: c.settled_level(),
+                final_level: c.level,
+                goal: cfg.goal,
+                success_rate: c.success_rate(),
+                outcomes: c.outcomes(),
+                timeline,
+            }
+        });
         RunResult {
-            score: self.score(),
+            score: adaptive.as_ref().map_or(self.score(), |a| a.level),
             stats: self.stats.clone(),
             kills: self.kills.clone(),
             duration_s: self.elapsed(),
+            adaptive,
+            telemetry,
         }
     }
 
@@ -218,10 +411,16 @@ impl Sim {
         }
         self.clock += dt;
         if self.phase == Phase::Countdown {
+            self.last_aim = input.aim.normalize_or(Vec3::NEG_Z);
             if self.clock < self.scenario.timing.countdown_s {
                 return events;
             }
             self.phase = Phase::Running;
+            // Flicks are timed from when the clock starts, not from the countdown.
+            let aim = self.last_aim;
+            for t in &mut self.targets {
+                t.track.restart(0.0, aim, t.pos, t.radius);
+            }
             // Only the part of this step past the countdown counts as play.
             let over = self.clock - self.scenario.timing.countdown_s;
             return self.run_step(over, input, events);
@@ -231,11 +430,12 @@ impl Sim {
 
     fn run_step(&mut self, dt: f32, input: Input, mut events: Vec<Event>) -> Vec<Event> {
         let aim = input.aim.normalize_or(Vec3::NEG_Z);
+        self.last_aim = aim;
         let now = self.elapsed();
 
         self.move_targets(dt, &mut events);
-
         self.spawn_due(now, &mut events);
+        self.track_aim(now, aim);
         match self.scenario.weapon.kind {
             WeaponKind::Hitscan => self.fire_hitscan(dt, aim, input, &mut events),
             WeaponKind::Beam => self.fire_beam(dt, aim, input, &mut events),
@@ -249,6 +449,68 @@ impl Sim {
             events.push(Event::Finished);
         }
         events
+    }
+
+    /// Feeds an outcome to the adaptive controller and re-applies the knobs.
+    fn outcome(&mut self, value: f32) {
+        let now = self.elapsed();
+        if let Some((cfg, c)) = &mut self.adaptive {
+            let level = c.update(now, value);
+            self.current = cfg.apply(&self.scenario, level);
+        }
+    }
+
+    /// Updates per-target flick telemetry, tracking samples and the aim trace.
+    fn track_aim(&mut self, now: f32, aim: Vec3) {
+        let shape = self.scenario.targets.shape;
+        for t in &mut self.targets {
+            let on = t.hit_by(aim, shape).is_some();
+            let k = &mut t.track;
+            let since = now - k.start_at;
+            if k.reaction_s.is_none() {
+                let moved = k.distance_deg - angle_deg(aim, t.pos);
+                if moved >= (0.1 * k.distance_deg).max(0.3) {
+                    k.reaction_s = Some(since);
+                }
+            }
+            if on && !k.inside {
+                k.entries += 1;
+                if k.reach_s.is_none() {
+                    k.reach_s = Some(since);
+                }
+            }
+            k.inside = on;
+            if k.reach_s.is_some() {
+                let (x, y) = screen_offset(t.pos.normalize(), aim);
+                let along = x * k.flick.0 + y * k.flick.1;
+                k.overshoot_deg = k.overshoot_deg.max(along - k.radius_deg);
+            }
+        }
+
+        if now >= self.next_trace {
+            self.next_trace = now + 1.0 / TRACE_HZ;
+            let (yaw, pitch) = angles(aim);
+            self.telemetry.trace.push([now, yaw, pitch]);
+        }
+
+        if self.scenario.weapon.kind == WeaponKind::Beam && now >= self.next_sample {
+            self.next_sample = now + 1.0 / SAMPLE_HZ;
+            let nearest = self.targets.iter().min_by(|a, b| angle_deg(aim, a.pos).total_cmp(&angle_deg(aim, b.pos)));
+            if let Some(t) = nearest {
+                let motion = (t.rate[0] * t.pitch.to_radians().cos(), t.rate[1]);
+                let speed = (motion.0 * motion.0 + motion.1 * motion.1).sqrt();
+                let (x, y) = screen_offset(t.pos.normalize(), aim);
+                let lead = if speed > 1e-3 { (x * motion.0 + y * motion.1) / speed } else { 0.0 };
+                self.telemetry.samples.push(TrackSample {
+                    t: now,
+                    on_target: t.hit_by(aim, shape).is_some(),
+                    error_deg: angle_deg(aim, t.pos),
+                    target_speed_dps: speed,
+                    lead_deg: lead,
+                    since_change_s: now - t.last_change,
+                });
+            }
+        }
     }
 
     /// Replaces destroyed targets whose delay is up.
@@ -276,17 +538,30 @@ impl Sim {
         let damage = w.damage;
         self.stats.shots += 1;
         self.stats.damage_possible += damage;
-        match self.pick(aim) {
-            Some(i) => {
-                self.targets[i].shots += 1;
-                self.damage(i, damage, events);
-            }
+        let hit = self.pick(aim);
+        if let Some(i) = hit.or_else(|| self.nearest_to(aim)) {
+            let t = &self.targets[i];
+            let (dx, dy) = screen_offset(t.pos.normalize(), aim);
+            let (fx, fy) = t.track.flick;
+            let r = t.track.radius_deg.max(1e-3);
+            self.telemetry.shots.push(ShotRecord {
+                t: self.elapsed(),
+                hit: hit.is_some(),
+                target_no: Some(t.track.no),
+                dx_deg: dx,
+                dy_deg: dy,
+                along: (dx * fx + dy * fy) / r,
+                across: (-dx * fy + dy * fx) / r,
+            });
+            self.targets[i].shots += 1;
+        }
+        match hit {
+            Some(i) => self.damage(i, damage, events),
             None => {
                 self.stats.misses += 1;
                 events.push(Event::Miss);
-                // A miss counts against whichever target is nearest the crosshair.
-                if let Some(i) = self.nearest_to(aim) {
-                    self.targets[i].shots += 1;
+                if !self.targets.is_empty() {
+                    self.outcome(0.0);
                 }
             }
         }
@@ -299,7 +574,7 @@ impl Sim {
         };
         let tick = 1.0 / BEAM_TICK_HZ;
         let per_tick = self.scenario.weapon.damage_per_s * tick;
-        let regen = self.scenario.targets.regen_per_s * dt;
+        let regen = self.current.targets.regen_per_s * dt;
         let on = self.pick(aim);
         if regen > 0.0 {
             for (i, t) in self.targets.iter_mut().enumerate() {
@@ -308,22 +583,38 @@ impl Sim {
                 }
             }
         }
-        if !firing {
-            self.beam_acc = 0.0;
-            return;
-        }
         self.beam_acc += dt;
         while self.beam_acc >= tick && self.phase == Phase::Running {
             self.beam_acc -= tick;
+            let on = self.pick(aim);
+            // Adaptive tracking judges aim, firing or not, so holding fire only when
+            // on target can't game the level.
+            self.adaptive_tick(on.is_some(), tick);
+            if !firing {
+                continue;
+            }
             self.stats.shots += 1;
             self.stats.damage_possible += per_tick;
-            match self.pick(aim) {
+            match on {
                 Some(i) => {
                     self.targets[i].shots += 1;
                     self.damage(i, per_tick, events);
                 }
                 None => self.stats.misses += 1,
             }
+        }
+    }
+
+    fn adaptive_tick(&mut self, on: bool, tick: f32) {
+        let Some((cfg, _)) = &self.adaptive else { return };
+        let window = cfg.window_s;
+        self.window.0 += 1;
+        self.window.1 += u32::from(on);
+        self.window.2 += tick;
+        if self.window.2 >= window {
+            let share = self.window.1 as f32 / self.window.0.max(1) as f32;
+            self.window = (0, 0, 0.0);
+            self.outcome(share);
         }
     }
 
@@ -349,19 +640,34 @@ impl Sim {
             hits: t.hits,
             damage: t.damage,
         });
+        self.telemetry.targets.push(t.record(now, Outcome::Killed));
         self.last_killed_dir = Some(t.pos.normalize());
         events.push(Event::Killed { id: t.id });
-        self.pending.push(now + self.scenario.targets.respawn_delay_s);
+        self.pending.push(now + self.current.targets.respawn_delay_s);
+        self.next_target(now);
+        if self.scenario.weapon.kind == WeaponKind::Hitscan {
+            self.outcome(1.0);
+        }
+    }
+
+    /// After a kill or timeout the player starts on the next target, so flicks to the
+    /// targets they haven't reached yet are timed from here.
+    fn next_target(&mut self, now: f32) {
+        let aim = self.last_aim;
+        for t in &mut self.targets {
+            if t.track.reach_s.is_none() {
+                t.track.restart(now, aim, t.pos, t.radius);
+            }
+        }
     }
 
     /// Index of the nearest target the ray along `aim` passes through.
     fn pick(&self, aim: Vec3) -> Option<usize> {
         let shape = self.scenario.targets.shape;
-        let height = self.scenario.targets.height;
         self.targets
             .iter()
             .enumerate()
-            .filter_map(|(i, t)| ray_hit(aim, t.pos, t.radius, shape, height).map(|d| (i, d)))
+            .filter_map(|(i, t)| t.hit_by(aim, shape).map(|d| (i, d)))
             .min_by(|a, b| a.1.total_cmp(&b.1))
             .map(|(i, _)| i)
     }
@@ -376,41 +682,58 @@ impl Sim {
 
     fn move_targets(&mut self, dt: f32, events: &mut Vec<Event>) {
         let now = self.elapsed();
-        let tc = self.scenario.targets.clone();
+        let tc = self.current.targets.clone();
         let mv = tc.movement.clone();
+        let shrink = tc.shrink_to;
+        let mut timed_out = 0;
         let mut i = 0;
         while i < self.targets.len() {
             let t = &mut self.targets[i];
             t.age += dt;
-            if tc.lifetime_s > 0.0 {
-                if t.age >= tc.lifetime_s {
+            if t.lifetime > 0.0 {
+                if t.age >= t.lifetime {
                     let t = self.targets.swap_remove(i);
                     self.stats.timeouts += 1;
+                    self.telemetry.targets.push(t.record(now, Outcome::TimedOut));
                     events.push(Event::TimedOut { id: t.id });
                     self.pending.push(now + tc.respawn_delay_s);
+                    timed_out += 1;
                     continue;
                 }
-                let k = t.age / tc.lifetime_s;
-                t.radius = tc.radius * (1.0 + (tc.shrink_to - 1.0) * k);
+                let k = t.age / t.lifetime;
+                t.radius = t.base_radius * (1.0 + (shrink - 1.0) * k);
             }
             if mv.kind != MovementKind::Static {
                 t.next_change -= dt;
                 if t.next_change <= 0.0 {
                     t.next_change = self.rng.range(mv.change_every_s);
                     t.rate = new_rate(&mut self.rng, &mv, t.distance, t.pitch, t.rate);
+                    t.last_change = now;
                 }
                 // Bounce off the edges of the spawn area.
-                let (yr, pr) = (tc.spawn.yaw, tc.spawn.pitch);
+                let (yr, pr) = (self.scenario.targets.spawn.yaw, self.scenario.targets.spawn.pitch);
+                let before = t.rate;
                 (t.yaw, t.rate[0]) = bounce(t.yaw + t.rate[0] * dt, t.rate[0], yr);
                 (t.pitch, t.rate[1]) = bounce(t.pitch + t.rate[1] * dt, t.rate[1], pr);
+                if before != t.rate {
+                    t.last_change = now;
+                }
                 t.pos = from_angles(t.yaw, t.pitch) * t.distance;
             }
             i += 1;
         }
+        if timed_out > 0 {
+            self.next_target(now);
+            if self.scenario.weapon.kind == WeaponKind::Hitscan {
+                for _ in 0..timed_out {
+                    self.outcome(0.0);
+                }
+            }
+        }
     }
 
     fn spawn(&mut self, events: &mut Vec<Event>) {
-        let tc = &self.scenario.targets;
+        let tc = &self.current.targets;
         let sp = &tc.spawn;
         let min_sep = sp.min_separation.to_radians().cos();
         let max_last = (sp.max_from_last > 0.0).then(|| sp.max_from_last.to_radians().cos());
@@ -431,11 +754,16 @@ impl Sim {
         let pos = self.fit_in_room(dir * distance);
         let id = self.next_id;
         self.next_id += 1;
-        let mv = tc.movement.clone();
+        let no = self.next_no;
+        self.next_no += 1;
+        let tc = self.current.targets.clone();
         let (yaw, pitch) = angles(pos);
         let distance = pos.length();
-        let rate = new_rate(&mut self.rng, &mv, distance, pitch, [0.0, 0.0]);
-        let next_change = self.rng.range(mv.change_every_s);
+        let rate = new_rate(&mut self.rng, &tc.movement, distance, pitch, [0.0, 0.0]);
+        let next_change = self.rng.range(tc.movement.change_every_s);
+        let now = self.elapsed();
+        let level = self.adaptive.as_ref().map(|(_, c)| c.level);
+        let height = tc.height * tc.radius / self.scenario.targets.radius.max(1e-6);
         self.targets.push(Target {
             id,
             pos,
@@ -447,18 +775,23 @@ impl Sim {
             distance,
             rate,
             next_change,
+            last_change: now,
             age: 0.0,
-            spawned_at: self.elapsed(),
+            spawned_at: now,
+            lifetime: tc.lifetime_s,
+            base_radius: tc.radius,
+            height,
             shots: 0,
             hits: 0,
             damage: 0.0,
+            track: Track::begin(no, now, self.last_aim, pos, tc.radius, level),
         });
         events.push(Event::Spawned { id });
     }
 
     fn fit_in_room(&self, p: Vec3) -> Vec3 {
         let a = &self.scenario.arena;
-        let r = self.scenario.targets.radius.max(self.scenario.targets.height / 2.0);
+        let r = self.current.targets.radius.max(self.current.targets.height / 2.0);
         let half = |v: f32| (v / 2.0 - r).max(0.0);
         Vec3::new(
             p.x.clamp(-half(a.size[0]), half(a.size[0])),
@@ -788,5 +1121,106 @@ mod tests {
             sim.result()
         };
         assert_eq!(run(5), run(5));
+    }
+
+    #[test]
+    fn adaptive_level_rises_for_hits_and_falls_for_timeouts() {
+        let mut s = no_countdown(Scenario::default());
+        s.timing.duration_s = 20.0;
+        // A perfect player: kills each target the frame it appears.
+        let mut sim = Sim::adaptive(s.clone(), 1, Some(40.0));
+        while sim.phase() != Phase::Finished {
+            let at = sim.targets()[0].pos;
+            sim.step(FRAME, shoot(at));
+            sim.step(FRAME, idle());
+        }
+        let r = sim.result();
+        let a = r.adaptive.clone().unwrap();
+        assert!(a.level > 60.0, "perfect play climbs: {a:?}");
+        assert_eq!(r.score, a.level, "the result is the level");
+        // Targets get shorter-lived as the level rises.
+        let first = r.telemetry.targets.first().unwrap().lifetime_s;
+        let last = r.telemetry.targets.last().unwrap().lifetime_s;
+        assert!(last < first, "{first} -> {last}");
+
+        // A player who never shoots only sees timeouts.
+        let mut sim = Sim::adaptive(s, 1, Some(40.0));
+        while sim.phase() != Phase::Finished {
+            sim.step(FRAME, idle());
+        }
+        let a = sim.result().adaptive.unwrap();
+        assert!(a.level < 10.0 && a.success_rate == Some(0.0), "{a:?}");
+    }
+
+    #[test]
+    fn adaptive_tracking_follows_time_on_target() {
+        let mut s = no_countdown(Scenario::default());
+        s.weapon.kind = WeaponKind::Beam;
+        s.weapon.trigger = Trigger::Always;
+        s.targets.health = 1e9;
+        s.targets.movement = Movement { kind: MovementKind::Strafe, ..Default::default() };
+        s.timing.duration_s = 10.0;
+        let mut sim = Sim::adaptive(s, 3, None);
+        while sim.phase() != Phase::Finished {
+            let at = sim.targets()[0].pos;
+            sim.step(FRAME, Input { aim: at.normalize(), fire_pressed: false, fire_held: false });
+        }
+        let a = sim.result().adaptive.unwrap();
+        assert_eq!(a.success_rate, Some(1.0));
+        assert!(a.level > a.start_level, "{a:?}");
+        assert!((19..=20).contains(&a.outcomes), "one outcome per 0.5 s window: {}", a.outcomes);
+    }
+
+    #[test]
+    fn flick_telemetry_measures_reaction_reach_and_overshoot() {
+        let mut s = no_countdown(Scenario::default());
+        s.targets.spawn.yaw = Range(20.0, 20.0);
+        s.targets.spawn.pitch = Range(0.0, 0.0);
+        let mut sim = Sim::new(s, 1);
+        // Wait 0.2 s, then sweep right at 100°/s past the target, then come back and shoot.
+        let mut yaw = 0.0f32;
+        for i in 0..240 {
+            if i >= 48 {
+                yaw = (yaw + 100.0 * FRAME).min(24.0);
+            }
+            sim.step(FRAME, Input { aim: from_angles(yaw, 0.0), fire_pressed: false, fire_held: false });
+        }
+        sim.step(FRAME, Input { aim: from_angles(20.5, 0.0), fire_pressed: true, fire_held: true });
+        let r = sim.result();
+        let t = &r.telemetry.targets[0];
+        assert_eq!(t.outcome, Outcome::Killed);
+        assert!((t.distance_deg - 20.0).abs() < 0.01 && t.direction_deg.abs() < 0.5, "{t:?}");
+        let reaction = t.reaction_s.unwrap();
+        assert!((0.2..0.24).contains(&reaction), "moved 2° after 0.2 s wait: {reaction}");
+        let reach = t.reach_s.unwrap();
+        assert!((0.36..0.40).contains(&reach), "{reach}");
+        assert!((t.overshoot_deg - (4.0 - t.radius_deg)).abs() < 0.05, "{t:?}");
+        assert_eq!(t.entries, 2, "went past and came back");
+        let shot = &r.telemetry.shots[0];
+        assert!(shot.hit && shot.along > 0.0 && shot.across.abs() < 0.01, "{shot:?}");
+    }
+
+    #[test]
+    fn tracking_samples_show_lead_and_lag() {
+        let mut s = no_countdown(Scenario::default());
+        s.weapon.kind = WeaponKind::Beam;
+        s.weapon.trigger = Trigger::Always;
+        s.targets.health = 1e9;
+        s.targets.spawn.yaw = Range(-30.0, 30.0);
+        s.targets.movement =
+            Movement { kind: MovementKind::Strafe, change_every_s: Range(30.0, 30.0), ..Default::default() };
+        let mut sim = Sim::new(s, 4);
+        for _ in 0..120 {
+            let t = &sim.targets()[0];
+            let (yaw, pitch) = angles(t.pos);
+            // Aim 1° behind the target's motion.
+            let behind = -t.rate[0].signum();
+            sim.step(FRAME, Input { aim: from_angles(yaw + behind, pitch), fire_pressed: false, fire_held: false });
+        }
+        let samples = &sim.result().telemetry.samples;
+        assert!(samples.len() >= 14, "{}", samples.len());
+        let lead: f32 = samples.iter().skip(1).map(|s| s.lead_deg).sum::<f32>() / (samples.len() - 1) as f32;
+        assert!(lead < -0.8, "behind the target reads as negative lead: {lead}");
+        assert!(samples[3].target_speed_dps > 10.0);
     }
 }
