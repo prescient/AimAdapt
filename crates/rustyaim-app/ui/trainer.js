@@ -12,8 +12,6 @@ ui.trainer = {
   filter: "all",
   edit: null, // scenario being edited: { forId, replace, builtin, scenario, problems }
   wedit: null, // workout being edited: { forId, replace, builtin, workout, problems }
-  settings: null, // draft of engine settings
-  sizeHelper: { monitor: 32, target: 24 },
   message: null,
 };
 
@@ -25,18 +23,13 @@ const CATEGORIES = [
   ["mine", "Yours"],
 ];
 
-const RESOLUTIONS = ["3840x2160", "2560x1440", "1920x1080", "1728x1080", "1680x1050", "1600x900", "1440x1080", "1280x960", "1280x1024", "1024x768"];
-
-const TRAINER_VIEWS = ["play", "edit", "workout"];
+const TRAINER_VIEWS = ["play", "edit", "workout", "settings"];
 
 async function loadTrainer() {
   try {
-    const data = await invoke("trainer");
-    // cm/360 converted from game sensitivity has long decimals; two places is plenty.
-    for (const s of [data.settings, data.kovaaks_settings]) if (s) s.cm_per_360 = Math.round(s.cm_per_360 * 100) / 100;
-    ui.trainer.data = data;
+    ui.trainer.data = await invoke("trainer");
     ui.trainer.error = null;
-    if (!ui.trainer.settings) ui.trainer.settings = structuredClone(ui.trainer.data.settings);
+    if (typeof settingsLoaded === "function") settingsLoaded();
   } catch (e) {
     ui.trainer.error = String(e);
   }
@@ -50,12 +43,6 @@ function setPath(obj, path, value) {
   const target = keys.reduce((o, k) => (o[k] ??= {}), obj);
   target[last] = value;
 }
-
-const parseSize = (s) => {
-  const m = String(s || "").trim().match(/^(\d{3,5})\s*[x×*]\s*(\d{3,5})$/i);
-  return m ? [Number(m[1]), Number(m[2])] : null;
-};
-const sizeText = (v) => (v ? `${v[0]}x${v[1]}` : "");
 
 // Angular width of a target in degrees at the middle of its spawn distance.
 function targetDegrees(s) {
@@ -101,6 +88,7 @@ function play() {
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>New scenario</button></span>`)}
     ${d.playing ? `<section class="banner info"><div><div class="banner-title">The trainer is open</div><div class="banner-body">Finish or press Esc to come back. Each run is saved when its timer ends.</div></div></section>` : ""}
     ${tr.message ? `<section class="banner"><div class="banner-body">${esc(tr.message)}</div></section>` : ""}
+    ${profileBar()}
     <section class="banner info"><div><div class="banner-title">Adaptive mode keeps you at about 85%</div>
       <div class="banner-body">It finds your level, then makes each target a little harder after a hit and easier after a miss or timeout, so you hit about 85% of targets (or stay on target 85% of the time when tracking). Your result is a level from 0 to 100, and the next run starts there. Standard mode plays the scenario exactly as written.</div></div></section>
     ${workoutsCard()}
@@ -108,7 +96,6 @@ function play() {
       ${CATEGORIES.map(([k, label]) => `<button class="chip ${tr.filter === k ? "on" : ""}" type="button" data-action="trainer-filter" data-filter="${k}" aria-pressed="${tr.filter === k}">${label}</button>`).join("")}
     </div>
     <div class="grid">${list.map(scenarioCard).join("") || `<div class="card note-body">No scenarios here yet. Use New scenario to make one.</div>`}</div>
-    ${settingsCard()}
     <div class="small muted">Your scenarios and workouts are TOML files in <span class="mono">${esc(d.scenarios_dir)}</span> and <span class="mono">${esc(d.workouts_dir)}</span>. See SCENARIOS.md for every setting.</div>
   </div>`;
 }
@@ -160,57 +147,6 @@ function scenarioCard(e) {
       <a class="btn" href="#edit/${encodeURIComponent(e.id)}">${e.builtin ? "Copy &amp; edit" : "Edit"}</a>
       ${e.runs || e.adaptive_runs ? `<a class="btn" href="#insights/${encodeURIComponent(s.name)}">Insights</a>` : ""}
     </div>
-  </section>`;
-}
-
-function settingsCard() {
-  const d = ui.trainer.data;
-  const s = ui.trainer.settings;
-  const k = d.kovaaks_settings;
-  const dirty = JSON.stringify(s) !== JSON.stringify(d.settings) || !d.settings_saved;
-  const field = (label, key, attrs, unit = "") =>
-    `<label class="form-row"><span>${label}</span><span class="field"><input type="number" data-setting="${key}" value="${esc(getPath(s, key) ?? "")}" ${attrs}>${unit ? `<span class="muted small">${unit}</span>` : ""}</span></label>`;
-  const disp = s.display;
-  const screen = [Math.round(window.screen.width * devicePixelRatio), Math.round(window.screen.height * devicePixelRatio)];
-  const h = ui.trainer.sizeHelper;
-  return `<section class="card">
-    <div class="card-head" style="align-items:center"><h2>Your settings</h2>
-      <span class="chips">
-        ${k ? `<button class="btn" type="button" data-action="match-kovaaks" title="${esc(`${k.cm_per_360.toFixed(1)} cm/360, ${k.dpi} DPI, FOV ${k.fov}`)}">Match KovaaK's</button>` : ""}
-        <button class="btn ${dirty ? "primary" : ""}" type="button" data-action="save-settings" ${dirty ? "" : "disabled"}>${d.settings_saved && !dirty ? "Saved" : "Save settings"}</button>
-      </span></div>
-    ${d.settings_saved ? "" : `<div class="small muted">${k ? "Matched to your latest KovaaK's run. Save to keep them." : "Defaults. Set your sensitivity and save."}</div>`}
-    <h3>Aim</h3>
-    <div class="form-grid">
-      ${field("Sensitivity", "cm_per_360", 'min="1" max="500" step="0.1"', "cm/360")}
-      ${field("Mouse DPI", "dpi", 'min="50" max="50000" step="50"')}
-      ${field("Field of view", "fov", 'min="30" max="150" step="1"', "° horizontal (16:9)")}
-      <label class="form-row"><span>Crosshair color</span><span class="field"><input type="color" data-setting="crosshair.color" value="${esc(s.crosshair.color)}"></span></label>
-      ${field("Crosshair size", "crosshair.size", 'min="0" max="40" step="1"', "px")}
-      <label class="form-row check"><input type="checkbox" data-setting="show_fps" ${s.show_fps ? "checked" : ""}><span>Show FPS (F2 in game)</span></label>
-    </div>
-    <h3>Display</h3>
-    <div class="form-grid">
-      <label class="form-row"><span>Mode</span><select class="select" data-setting="display.mode">
-        ${[["borderless", "Borderless full screen"], ["exclusive", "Exclusive full screen"], ["windowed", "Window"]].map(([v, l]) => `<option value="${v}" ${disp.mode === v ? "selected" : ""}>${l}</option>`).join("")}
-      </select><span class="help">Exclusive lets you use a different resolution, like stretched 4:3.</span></label>
-      <label class="form-row"><span>Resolution</span><span class="field"><input type="text" list="resolutions" data-setting="display.resolution" data-kind="size" placeholder="${disp.mode === "windowed" ? "1600x900" : `Desktop (${screen[0]}x${screen[1]})`}" value="${esc(sizeText(disp.resolution))}"></span>
-        <span class="help">${disp.mode === "borderless" ? "Borderless always uses the desktop resolution." : "Type any size, like 1440x1080."}</span></label>
-      ${disp.mode === "exclusive" ? field("Refresh rate", "display.refresh_hz", 'min="24" max="1000" step="1" placeholder="Highest"', "Hz") : ""}
-      <label class="form-row"><span>Play area</span><span class="field"><input type="text" list="resolutions" data-setting="display.play_area" data-kind="size" placeholder="Whole screen" value="${esc(sizeText(disp.play_area))}"></span>
-        <span class="help">Draws the game in a centered area with black around it, so a big monitor plays like a smaller one.</span></label>
-    </div>
-    <div class="size-helper">
-      <span>Fit the play area to a</span>
-      <span class="field small-field"><input type="number" min="10" max="100" step="0.5" data-helper="target" value="${h.target}"><span class="muted small">in</span></span>
-      <span>screen on my</span>
-      <span class="field small-field"><input type="number" min="10" max="120" step="0.5" data-helper="monitor" value="${h.monitor}"><span class="muted small">in</span></span>
-      <span>monitor (${screen[0]}x${screen[1]})</span>
-      <button class="btn" type="button" data-action="fit-play-area">Set play area</button>
-      ${disp.play_area ? `<button class="btn" type="button" data-action="clear-play-area">Use whole screen</button>` : ""}
-    </div>
-    <datalist id="resolutions">${RESOLUTIONS.map((r) => `<option value="${r}">`).join("")}</datalist>
-    <div class="small muted">Sensitivity is in degrees per mouse count, so it stays the same at any resolution or play-area size. FOV is horizontal on a 16:9 screen; 4:3 and smaller-than-16:9 areas see a little less at the sides, as in most shooters. In the trainer: Esc quits, R restarts, Space continues.</div>
   </section>`;
 }
 
@@ -472,17 +408,6 @@ async function startWorkout(id) {
   await loadTrainer();
 }
 
-function onSettingInput(el) {
-  const s = ui.trainer.settings;
-  const key = el.dataset.setting;
-  let v;
-  if (el.type === "checkbox") v = el.checked;
-  else if (el.dataset.kind === "size") v = parseSize(el.value);
-  else if (el.type === "number") v = el.value === "" ? null : Number(el.value);
-  else v = el.value;
-  setPath(s, key, v);
-}
-
 document.addEventListener("click", async (e) => {
   const btn = e.target.closest("[data-action]");
   if (!btn) return;
@@ -534,36 +459,12 @@ document.addEventListener("click", async (e) => {
     }
     location.hash = "#play";
     loadTrainer();
-  } else if (action === "match-kovaaks") {
-    const k = tr.data.kovaaks_settings;
-    Object.assign(tr.settings, { cm_per_360: Math.round(k.cm_per_360 * 10) / 10, dpi: k.dpi, fov: k.fov });
-    render();
-  } else if (action === "fit-play-area") {
-    const h = tr.sizeHelper;
-    const px = [Math.round(window.screen.width * devicePixelRatio), Math.round(window.screen.height * devicePixelRatio)];
-    const k = Math.min(1, Math.max(0.1, h.target / h.monitor));
-    tr.settings.display.play_area = k >= 0.999 ? null : [Math.round(px[0] * k), Math.round(px[1] * k)];
-    render();
-  } else if (action === "clear-play-area") {
-    tr.settings.display.play_area = null;
-    render();
-  } else if (action === "save-settings") {
-    try {
-      await invoke("save_engine_settings", { settings: tr.settings });
-      tr.message = "Settings saved.";
-      tr.settings = null;
-    } catch (err) {
-      tr.message = String(err);
-    }
-    loadTrainer();
   }
 });
 
 document.addEventListener("input", (e) => {
   const el = e.target;
   if (el.dataset.path || el.dataset.knob !== undefined) onEditorInput(el);
-  else if (el.dataset.setting) onSettingInput(el);
-  else if (el.dataset.helper) ui.trainer.sizeHelper[el.dataset.helper] = Number(el.value);
   else if (el.dataset.wfield) ui.trainer.wedit.workout[el.dataset.wfield] = el.value;
   else if (el.dataset.witem !== undefined) {
     const it = ui.trainer.wedit.workout.items[Number(el.dataset.witem)];
@@ -572,10 +473,7 @@ document.addEventListener("input", (e) => {
 });
 
 document.addEventListener("change", (e) => {
-  if (e.target.dataset.setting) {
-    onSettingInput(e.target);
-    if (route().view === "play") render();
-  } else if (e.target.dataset.witem !== undefined && route().view === "workout") render();
+  if (e.target.dataset.witem !== undefined && route().view === "workout") render();
 });
 
 if (tauri) {

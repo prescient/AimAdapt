@@ -35,7 +35,7 @@ These cover pure logic with small, hand-built inputs, one behaviour per test. To
 
 ### 1b. Trainer rules (`rustyaim-sim`)
 
-These are 42 tests over the scenario format, simulation, adaptive difficulty, telemetry, workouts and settings. Each one steps the simulation at 240 Hz with scripted aim, so no window is needed:
+These are 47 tests over the scenario format, simulation, adaptive difficulty, telemetry, workouts, settings and profiles. Each one steps the simulation at 240 Hz with scripted aim, so no window is needed:
 
 - **Format:** an empty file gives the defaults, TOML round-trips, unknown fields are rejected, bad values get plain messages, and the fingerprint ignores the description but not the difficulty.
 - **Field list:** every scenario field is described exactly once, every choice parses, every default is within its limits, and SCENARIOS.md mentions every field.
@@ -44,6 +44,7 @@ These are 42 tests over the scenario format, simulation, adaptive difficulty, te
 - **Adaptive:** knob values are geometric between easy and hard, defaults add a timeout to clicking, and spread scales around the middle. A simulated player whose success falls with level settles within 7 points of 85% from far above or below. Perfect play climbs, idling drops to the bottom, and tracking gives one outcome per window.
 - **Telemetry:** reaction, time to reach, overshoot and corrections for a scripted flick. Shots past the target read as positive "along", and aiming behind a strafing target reads as negative lead.
 - **Workouts and settings:** built-in workouts only use real scenarios, steps expand in order, display settings round-trip, and the play area is centered and clamped. A 24" area on a 42" 4K screen comes out at 2194x1234.
+- **Profiles:** game sensitivities convert to the known cm/360 (Overwatch 5.3 at 400 DPI is 65.35, Valorant 0.35 at 800 is 46.65, CS2 1.0 at 800 is 51.95). Profiles round-trip, bad ones are explained, and old single-settings files become a Default profile. The engine tests saving profiles and loading the active one or one by name.
 - **Insights** (`rustyaim-core`): synthetic runs with a known weak direction, overshooting, low shots, tracking lag and a 200 ms recovery after direction changes produce those exact figures and coaching notes.
 - **Engine record** (`rustyaim-engine`): an engine run saved through `insert_runs` gets the right score, accuracy, length and `source`, keeps separate bests for variants, and is ignored when matching KovaaK's settings.
 

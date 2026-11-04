@@ -12,8 +12,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use rustyaim_core::db::SOURCE_RUSTYAIM;
 use rustyaim_core::insights;
+use rustyaim_sim::profiles::{self, Profile, Profiles};
 use rustyaim_sim::workout::{self, Workout};
-use rustyaim_sim::{PlayerSettings, Scenario, library, spec};
+use rustyaim_sim::{Scenario, library, spec};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
@@ -67,11 +68,13 @@ pub struct TrainerWorkout {
 pub struct Trainer {
     scenarios: Vec<TrainerScenario>,
     workouts: Vec<TrainerWorkout>,
-    settings: PlayerSettings,
-    /// Whether `engine.toml` exists; if not, `settings` came from KovaaK's or defaults.
+    profiles: Profiles,
+    /// Games whose sensitivity can be typed in their own units.
+    games: &'static [profiles::Game],
+    /// Whether `engine.toml` exists; if not, `profiles` came from KovaaK's or defaults.
     settings_saved: bool,
-    /// Sensitivity and FOV matched to the latest KovaaK's run, if known.
-    kovaaks_settings: Option<PlayerSettings>,
+    /// A profile matched to the latest KovaaK's run, if known.
+    kovaaks_profile: Option<Profile>,
     fields: &'static [spec::Field],
     scenarios_dir: String,
     workouts_dir: String,
@@ -158,9 +161,10 @@ pub fn build_trainer(state: &AppData, t: &TrainerState) -> Result<Trainer, Strin
     Ok(Trainer {
         scenarios,
         workouts,
-        settings: rustyaim_engine::load_settings(&t.data_dir, Some(&db)),
+        profiles: rustyaim_engine::load_profiles(&t.data_dir, Some(&db)),
+        games: profiles::GAMES,
         settings_saved: rustyaim_engine::settings_path(&t.data_dir).exists(),
-        kovaaks_settings: rustyaim_engine::from_kovaaks(&db),
+        kovaaks_profile: rustyaim_engine::kovaaks_profile(&db),
         fields: spec::FIELDS,
         scenarios_dir: t.scenarios_dir().display().to_string(),
         workouts_dir: t.workouts_dir().display().to_string(),
@@ -214,10 +218,20 @@ pub fn delete_workout(t: State<'_, TrainerState>, id: String) -> Result<(), Stri
     workout::delete_user(&t.workouts_dir(), &id)
 }
 
+/// Saves every settings profile and which one is active.
 #[tauri::command]
-pub fn save_engine_settings(t: State<'_, TrainerState>, settings: serde_json::Value) -> Result<(), String> {
-    let s: PlayerSettings = serde_json::from_value(settings).map_err(err)?;
-    rustyaim_engine::save_settings(&t.data_dir, &s)
+pub fn save_profiles(t: State<'_, TrainerState>, profiles: serde_json::Value) -> Result<(), String> {
+    let p: Profiles = serde_json::from_value(profiles).map_err(err)?;
+    rustyaim_engine::save_profiles(&t.data_dir, &p)
+}
+
+/// Problems with profiles being edited, in plain words, plus each one's cm/360.
+#[tauri::command]
+pub fn check_profiles(profiles: serde_json::Value) -> (Vec<String>, Vec<f32>) {
+    match serde_json::from_value::<Profiles>(profiles) {
+        Ok(p) => (p.problems(), p.profiles.iter().map(Profile::cm_per_360).collect()),
+        Err(e) => (vec![e.to_string()], Vec::new()),
+    }
 }
 
 #[derive(Serialize)]

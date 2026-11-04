@@ -12,6 +12,7 @@
 
 pub mod adaptive;
 pub mod library;
+pub mod profiles;
 pub mod scenario;
 pub mod settings;
 pub mod sim;

@@ -119,7 +119,7 @@ function render() {
     return;
   }
   if (!ui.snap) return;
-  const views = { dashboard, play, edit, workout, insights, progress, training, benchmarks, library };
+  const views = { dashboard, play, edit, workout, insights, progress, training, benchmarks, library, settings };
   main.innerHTML = (views[view] || dashboard)(arg);
   if (view === "progress") afterProgress(arg);
 }

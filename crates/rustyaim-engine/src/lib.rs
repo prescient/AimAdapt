@@ -16,7 +16,8 @@ use rustyaim_sim::settings::DisplayMode;
 use rustyaim_sim::workout::{self, Mode};
 
 pub use config::{
-    from_kovaaks, load as load_settings, save as save_settings, scenarios_dir, settings_path, workouts_dir,
+    from_kovaaks, kovaaks_profile, load as load_settings, load_profiles, save_profiles, scenarios_dir, settings_path,
+    workouts_dir,
 };
 pub use game::{PlayOptions, PlayStep, run};
 
@@ -25,7 +26,7 @@ pub use game::{PlayOptions, PlayStep, run};
 /// - `--play <scenario id or .toml path> [--adaptive]`: one scenario.
 /// - `--workout <workout id or .toml path>`: every run of a workout in turn.
 ///
-/// Options: `--db <file>`, `--windowed`, `--no-save`, `--seed <n>`, and
+/// Options: `--profile <name>` (default: the active settings profile), `--db <file>`, `--windowed`, `--no-save`, `--seed <n>`, and
 /// `--smoke <folder>`, which has a bot play short versions of the runs
 /// (`--smoke-seconds`, default 4), saves screenshots in the folder and exits; it's
 /// for checking the engine works.
@@ -43,6 +44,7 @@ fn parse_and_run(args: &[String]) -> Result<(), String> {
     let mut id = None;
     let mut workout_id = None;
     let mut adaptive = false;
+    let mut profile = None;
     let mut db = None;
     let mut windowed = false;
     let mut save = true;
@@ -55,6 +57,7 @@ fn parse_and_run(args: &[String]) -> Result<(), String> {
             "--play" => id = it.next().cloned(),
             "--workout" => workout_id = it.next().cloned(),
             "--adaptive" => adaptive = true,
+            "--profile" => profile = it.next().cloned(),
             "--db" => db = it.next().map(PathBuf::from),
             "--windowed" => windowed = true,
             "--no-save" => save = false,
@@ -92,7 +95,7 @@ fn parse_and_run(args: &[String]) -> Result<(), String> {
         None => rustyaim_core::db::default_path().map_err(|e| e.to_string())?,
     };
     let db_handle = rustyaim_core::Db::open(&db_path).ok();
-    let mut settings = load_settings(&data, db_handle.as_ref());
+    let mut settings = load_settings(&data, db_handle.as_ref(), profile.as_deref())?;
     drop(db_handle);
     if windowed || smoke.is_some() {
         settings.display.mode = DisplayMode::Windowed;
