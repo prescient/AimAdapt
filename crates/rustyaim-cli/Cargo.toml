@@ -1,0 +1,10 @@
+[package]
+name = "rustyaim-cli"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.104"
+clap = { version = "4.6.7", features = ["derive"] }
+notify = "8.2.1"
+rustyaim-core = { version = "0.1.0", path = "../rustyaim-core" }

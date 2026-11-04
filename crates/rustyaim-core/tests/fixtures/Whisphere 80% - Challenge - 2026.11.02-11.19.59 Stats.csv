@@ -1,0 +1,48 @@
+Kill #,Timestamp,Bot,Weapon,TTK,Shots,Hits,Accuracy,Damage Done,Damage Possible,Efficiency,Cheated,OverShots
+
+Weapon,Shots,Hits,Damage Done,Damage Possible,,Sens Scale,Horiz Sens,Vert Sens,FOV,Hide Gun,Crosshair,Crosshair Scale,Crosshair Color,ADS Sens,ADS Zoom Scale,Avg Target Scale,Avg Time Dilation
+LG,23680,3630,3630.0,23680.0,
+
+Kills:,0
+Deaths:,0
+Fight Time:,0.0
+Time Remaining:,0.0
+Avg TTK:,0.0
+Damage Done:,3630.0
+Total Overshots:,0
+Damage Taken:,0.0
+Hit Count:,3630
+Miss Count:,20050
+Midairs:,0
+Midaired:,0
+Directs:,0
+Directed:,0
+Reloads:,0
+Distance Traveled:,0.0
+MBS Points:,0.0
+Score:,3630.0
+Scenario:,Whisphere 80%
+Hash:,1f678c52ea0418bf6879a6f2476b83f0
+Game Version:,3.9.12.2026-10-29-17-41-55-50e64693faaa
+Challenge Start:,11:18:59.747
+Pause Count:,0
+Pause Duration:,0
+Avg Target Scale:,1.0
+Avg Time Dilation:,1.0
+
+Input Lag:,0
+Max FPS (config):,120.0
+Sens Scale:,Overwatch
+Sens Increment:,0.499714
+Horiz Sens:,5.3
+Vert Sens:,5.3
+DPI:,400
+FOV:,104.0
+FOVScale:,Overwatch
+Hide Gun:,false
+Crosshair:,plus.png
+Crosshair Scale:,1.0
+Crosshair Color:,010101FF
+Resolution:,2560x1440
+Avg FPS:,119.999229
+Resolution Scale:,100.0
