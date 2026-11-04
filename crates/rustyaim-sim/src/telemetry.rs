@@ -89,6 +89,8 @@ pub struct TrackSample {
     pub lead_deg: f32,
     /// Seconds since the target last changed direction.
     pub since_change_s: f32,
+    /// Some target is damaged and not yet healed (switching: you're on a kill).
+    pub engaged: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

@@ -180,7 +180,7 @@ function profileEditor(p) {
           : num_("Sensitivity", "settings.cm_per_360", 'min="1" max="500" step="0.1"', "cm/360", "Centimeters of mouse movement for a full turn.")}
         ${num_("Mouse DPI", "settings.dpi", 'min="50" max="50000" step="50"')}
         <label class="form-row"><span>Adaptive target mix</span><select class="select" data-pfield="settings.challenge">
-          ${[["steady", "Steady: mostly near your rating"], ["balanced", "Balanced: some stretch and easy targets"], ["push", "Push: more stretch targets"]].map(([v, l]) => `<option value="${v}" ${st.challenge === v ? "selected" : ""}>${l}</option>`).join("")}
+          ${[["steady", "Steady: mostly near your rating"], ["balanced", "Balanced: some stretch and easy runs"], ["push", "Push: more stretch runs"]].map(([v, l]) => `<option value="${v}" ${st.challenge === v ? "selected" : ""}>${l}</option>`).join("")}
         </select><span class="help">Stretch targets are faster than you can reliably hit. Hitting them moves your rating the most.</span></label>
         ${num_("Field of view", "settings.fov", 'min="30" max="150" step="0.1"', "° horizontal (16:9)", `${esc(g?.fov_note ?? "")}${g?.fov ? ` <button class="link-btn" type="button" data-action="game-fov">Use ${g.fov}</button>` : ""}`)}
       </div>

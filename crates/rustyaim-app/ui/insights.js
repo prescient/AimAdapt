@@ -74,12 +74,16 @@ function insightDetail(d) {
   const best = adaptive.reduce((m, r) => (m === null || betterThan(d.knob, r.rating, m) ? r.rating : m), null);
   const fastest = adaptive.reduce((m, r) => (r.fastest !== null && (m === null || betterThan(d.knob, r.fastest, m)) ? r.fastest : m), null);
   const t = d.tracking;
+  const sw = d.switching;
   const kpis = [
-    latest ? kpi(`85% ${knobWord(d.knob)}`, esc(fmtKnob(d.knob, latest.rating)), `best ${esc(fmtKnob(d.knob, best))}${fastest !== null ? ` · fastest hit ${esc(fmtKnob(d.knob, fastest))}` : ""}`) : "",
+    latest ? kpi(`85% ${knobWord(d.knob)}`, esc(fmtKnob(d.knob, latest.rating)), `best ${esc(fmtKnob(d.knob, best))}${fastest !== null ? ` · held ${esc(fmtKnob(d.knob, fastest))}` : ""}`) : "",
     d.success !== null ? kpi("Targets hit", share(d.success), `destroyed before timing out · last ${d.recent_runs} runs`) : "",
     d.fitts ? kpi("Flick speed", `${d.fitts.throughput.toFixed(1)}<small> bits/s</small>`, delta(d.fitts.throughput, d.fitts.throughput_before, "bits/s") || "speed for size and distance") : "",
     d.reaction ? kpi("Reaction", `${Math.round(d.reaction.median_ms)}<small> ms</small>`, delta(d.reaction.median_ms, d.reaction.median_before_ms, "ms", -1) || "median, before moving") : "",
-    t ? kpi("On target", share(t.on_target), delta(t.on_target, t.on_target_before, "%") || `median miss ${t.median_error_deg.toFixed(2)}°`) : "",
+    t && !sw ? kpi("On target", share(t.on_target), delta(t.on_target, t.on_target_before, "%") || `median miss ${t.median_error_deg.toFixed(2)}°`) : "",
+    sw && sw.kills_per_min !== null ? kpi("Kills a minute", `${Math.round(sw.kills_per_min)}`, delta(sw.kills_per_min, sw.kills_per_min_before, "") || "overall switching pace") : "",
+    sw && sw.acquire_ms !== null ? kpi("Acquire", `${Math.round(sw.acquire_ms)}<small> ms</small>`, delta(sw.acquire_ms, sw.acquire_before_ms, "ms", -1) || "kill to reaching the next target, median") : "",
+    sw && sw.engaged_on_target !== null ? kpi("On target while killing", share(sw.engaged_on_target), delta(sw.engaged_on_target, sw.engaged_on_target_before, "%") || "time between targets not counted") : "",
   ].join("");
   return `
     <section class="card"><div class="card-head"><h2>${esc(d.scenario)}</h2><a class="btn" href="#play">Play</a></div>
@@ -147,12 +151,12 @@ function ratingCard(d, adaptive) {
     if (!up) [tlo, thi] = [thi, tlo];
     const tline = tl.map((p, i) => `${i ? "L" : "M"}${sx(p[0], 0, tmax)},${sy(p[1], tlo, thi)}`).join("");
     tchart = `<section class="card grow-1"><div class="card-head"><h2>Last run</h2><span class="small muted">Your rating as the run went on</span></div>
-      ${svg(`${axes(0, tmax, tlo, thi, "seconds", knob === "target_speed" ? "°/s" : knob === "lifetime" ? "s" : "m", fmtTick)}<path d="${tline}" fill="none" stroke="var(--blue)" stroke-width="2"/>`)}
-      <div class="small muted">Big early moves are the trainer finding your speed; it settles as it gets more certain.</div></section>`;
+      ${svg(`${axes(0, tmax, tlo, thi, "seconds", knob === "target_speed" ? "°/s" : knob === "lifetime" || knob === "kill_pace" ? "s" : "m", fmtTick)}<path d="${tline}" fill="none" stroke="var(--blue)" stroke-width="2"/>`)}
+      <div class="small muted">The rating takes in each target or segment as you play. A calibration run moves the difficulty with it; later runs stay at one value and the rating settles as it gets more certain.</div></section>`;
   }
   return `<div class="row">
     <section class="card grow-2"><div class="card-head"><h2>85% ${knobWord(knob)} by run</h2><span class="small muted">Up is better · shaded = likely range</span></div>
-      ${svg(`${axes(1, n + 1, lo, hi, "run", knob === "target_speed" ? "°/s" : knob === "lifetime" ? "s" : "m", fmtTick)}
+      ${svg(`${axes(1, n + 1, lo, hi, "run", knob === "target_speed" ? "°/s" : knob === "lifetime" || knob === "kill_pace" ? "s" : "m", fmtTick)}
         <polygon points="${band}" fill="var(--rust)" opacity="0.15"/>
         <path d="${line}" fill="none" stroke="var(--rust)" stroke-width="2.5"/>
         ${adaptive.map((r, i) => `<circle cx="${sx(i, 0, n)}" cy="${sy(r.rating, lo, hi)}" r="3.5" fill="var(--rust)"><title>Run ${i + 1}: ${esc(fmtKnob(knob, r.rating))}</title></circle>`).join("")}`)}
@@ -182,7 +186,7 @@ function curveCard(c) {
       ${mark(c.at95, "95%", 2)}${mark(c.at85, "85%", 1)}${mark(c.at50, "50%", 0)}
       <path d="${line}" fill="none" stroke="var(--rust)" stroke-width="2.5"/>
       ${c.observed.map((o) => `<circle cx="${X(o[0])}" cy="${sy(o[1] * 100, 0, 100)}" r="${3 + Math.min(6, Math.sqrt(o[2]))}" fill="var(--blue)" opacity="0.6"><title>${esc(fmtKnob(knob, o[0]))}: ${Math.round(o[1] * 100)}% of ${o[2]} targets</title></circle>`).join("")}`)}
-    <div class="note-body">The line is your current curve: the chance of hitting a target at each ${knob === "target_speed" ? "speed" : knob === "lifetime" ? "lifetime" : "size"}. ${c.observed.length ? "Blue dots are what actually happened in recent runs (bigger = more targets). " : ""}You're reliable (95%) at ${esc(fmtKnob(knob, c.at95))} and it's a coin flip at ${esc(fmtKnob(knob, c.at50))}. A steep drop means you're consistent up to your limit; a gentle slope means misses creep in early.</div>
+    <div class="note-body">The line is your current curve: the chance of hitting a target at each ${({ target_speed: "speed", lifetime: "lifetime", kill_pace: "kill pace" })[knob] ?? "size"}. ${c.observed.length ? "Blue dots are what actually happened in recent runs (bigger = more targets). " : ""}You're reliable (95%) at ${esc(fmtKnob(knob, c.at95))} and it's a coin flip at ${esc(fmtKnob(knob, c.at50))}. A steep drop means you're consistent up to your limit; a gentle slope means misses creep in early.</div>
   </section>`;
 }
 

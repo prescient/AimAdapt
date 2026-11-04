@@ -101,6 +101,7 @@ CREATE INDEX runs_source ON runs (source, scenario);
     crate::telemetry::MIGRATION,
     crate::telemetry::MIGRATION_RATINGS,
     crate::telemetry::MIGRATION_PROGRAMS,
+    crate::telemetry::MIGRATION_RUN_LEVEL,
 ];
 
 /// Value of the `Source` field (and `runs.source`) for runs played in RustyAim's engine.

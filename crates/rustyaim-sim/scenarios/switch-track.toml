@@ -1,5 +1,5 @@
 name = "Switch Track"
-description = "Three moving targets that each take half a second of beam. Destroy one, then move to the next. Trains target switching."
+description = "Three moving targets that each take half a second of beam, and heal when you leave them. Destroy one, then move to the next. Adaptive mode rates time on target while you're on a kill. Trains target switching."
 author = "RustyAim"
 category = "switching"
 skill = "evasive_switching"
@@ -17,6 +17,8 @@ damage_per_s = 200.0
 count = 3
 radius = 0.45
 health = 100.0
+regen_per_s = 60.0
+health_bar = true
 color = "#c38bff"
 
 [targets.spawn]
@@ -41,3 +43,4 @@ knob = "target_speed"
 easy = 4.0
 hard = 120.0
 start = 16.0
+engaged_only = true

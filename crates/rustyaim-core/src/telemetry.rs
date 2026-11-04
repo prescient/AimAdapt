@@ -23,8 +23,13 @@ pub struct EngineRun {
     pub theta: Option<f64>,
     pub slope: Option<f64>,
     pub rating_sd: Option<f64>,
-    /// Hardest value succeeded at this run.
+    /// This run's value if it held the goal rate for the whole run.
     pub fastest: Option<f64>,
+    /// The value the whole run was played at, `None` for a calibration run.
+    pub run_value: Option<f64>,
+    /// The run's pick (`near`, `stretch`, `easy`, or `calibrate`) and its planned chance.
+    pub run_pick: Option<String>,
+    pub planned_chance: Option<f64>,
     /// Target mix: `steady`, `balanced` or `push`.
     pub mix: Option<String>,
     pub goal: Option<f64>,
@@ -83,6 +88,9 @@ pub struct StoredRating {
     pub slope: f64,
     pub sd: f64,
     pub finished_at: String,
+    /// That run's pick and success rate, for the next run's guard rails.
+    pub run_pick: Option<String>,
+    pub success_rate: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -104,6 +112,8 @@ pub struct SampleRow {
     pub target_speed_dps: f64,
     pub lead_deg: f64,
     pub since_change_s: f64,
+    /// Some target was damaged and not yet healed.
+    pub engaged: bool,
 }
 
 pub(crate) const MIGRATION: &str = r#"
@@ -168,6 +178,14 @@ CREATE TABLE engine_samples (
 CREATE INDEX engine_samples_run ON engine_samples (run_id);
 "#;
 
+/// Schema v6: adaptive runs play at one difficulty after a calibration run.
+pub(crate) const MIGRATION_RUN_LEVEL: &str = r#"
+ALTER TABLE engine_runs ADD COLUMN run_value REAL;
+ALTER TABLE engine_runs ADD COLUMN run_pick TEXT;
+ALTER TABLE engine_runs ADD COLUMN planned_chance REAL;
+ALTER TABLE engine_samples ADD COLUMN engaged INTEGER NOT NULL DEFAULT 0;
+"#;
+
 /// Schema v5: skills, programs and reps.
 pub(crate) const MIGRATION_PROGRAMS: &str = r#"
 ALTER TABLE engine_runs ADD COLUMN skill TEXT;
@@ -224,9 +242,10 @@ impl Db {
         let changed = tx.execute(
             "INSERT OR IGNORE INTO engine_runs (run_id, base_scenario, category, adaptive, goal, success_rate,
                 level_timeline, workout, trace, knob, rating, rating_low, rating_high, start_rating, theta, slope,
-                rating_sd, fastest, mix, skill, program, program_day, rep, reps, block)
+                rating_sd, fastest, mix, skill, program, program_day, rep, reps, block, run_value, run_pick,
+                planned_chance)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
-                     ?21, ?22, ?23, ?24, ?25)",
+                     ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)",
             params![
                 run_id,
                 e.base_scenario,
@@ -253,6 +272,9 @@ impl Db {
                 e.rep,
                 e.reps,
                 e.block,
+                e.run_value,
+                e.run_pick,
+                e.planned_chance,
             ],
         )?;
         if changed == 0 {
@@ -297,8 +319,8 @@ impl Db {
             }
             let mut st = tx.prepare_cached(
                 "INSERT INTO engine_samples (run_id, t, on_target, error_deg, target_speed_dps, lead_deg,
-                    since_change_s)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    since_change_s, engaged)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             )?;
             for s in &e.samples {
                 st.execute(params![
@@ -308,7 +330,8 @@ impl Db {
                     s.error_deg,
                     s.target_speed_dps,
                     s.lead_deg,
-                    s.since_change_s
+                    s.since_change_s,
+                    s.engaged
                 ])?;
             }
         }
@@ -320,7 +343,7 @@ impl Db {
     pub fn last_rating(&self, base_scenario: &str) -> Result<Option<StoredRating>, DbError> {
         self.conn()
             .query_row(
-                "SELECT e.knob, e.rating, e.theta, e.slope, e.rating_sd, r.finished_at
+                "SELECT e.knob, e.rating, e.theta, e.slope, e.rating_sd, r.finished_at, e.run_pick, e.success_rate
                  FROM engine_runs e JOIN runs r ON r.id = e.run_id
                  WHERE e.base_scenario = ?1 AND e.adaptive = 1 AND e.rating IS NOT NULL AND e.theta IS NOT NULL
                  ORDER BY r.finished_at DESC LIMIT 1",
@@ -333,18 +356,25 @@ impl Db {
                         slope: r.get(3)?,
                         sd: r.get(4)?,
                         finished_at: r.get(5)?,
+                        run_pick: r.get(6)?,
+                        success_rate: r.get(7)?,
                     })
                 },
             )
             .optional()
     }
 
-    /// The hardest value ever succeeded at on a scenario with this knob: the
-    /// shortest lifetime or smallest size, or the highest tracking speed.
+    /// The hardest value the goal rate was held at for a whole run on a scenario
+    /// with this knob: the shortest lifetime or smallest size, or the highest
+    /// tracking speed. Runs from before fixed-difficulty runs (schema v6) stored
+    /// single-target bests instead, so they're left out.
     pub fn fastest_hit(&self, base_scenario: &str, knob: &str) -> Result<Option<f64>, DbError> {
         let agg = if knob == "target_speed" { "MAX" } else { "MIN" };
         self.conn().query_row(
-            &format!("SELECT {agg}(fastest) FROM engine_runs WHERE base_scenario = ?1 AND knob = ?2"),
+            &format!(
+                "SELECT {agg}(fastest) FROM engine_runs
+                 WHERE base_scenario = ?1 AND knob = ?2 AND run_value IS NOT NULL"
+            ),
             [base_scenario, knob],
             |r| r.get(0),
         )

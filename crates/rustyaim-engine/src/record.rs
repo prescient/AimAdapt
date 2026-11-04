@@ -15,7 +15,7 @@ use rustyaim_core::db::SOURCE_RUSTYAIM;
 use rustyaim_core::parse::{Kill, WeaponTotal};
 use rustyaim_core::telemetry::{EngineRun, SampleRow, ShotRow, TargetRow};
 use rustyaim_core::{Db, RunFile};
-use rustyaim_sim::adaptive::{Knob, Mix, Prior};
+use rustyaim_sim::adaptive::{Knob, Mix, Pick, Prior};
 use rustyaim_sim::scenario::WeaponKind;
 use rustyaim_sim::{PlayerSettings, RunResult, Scenario};
 
@@ -91,8 +91,12 @@ pub fn to_run_file(info: &RunInfo) -> RunFile {
         put("Adaptive Knob", knob_id(a.knob).into());
         put("Rating", format!("{:.4}", a.value));
         put("Start Rating", format!("{:.4}", a.start_value));
+        put("Run", a.pick.as_str().into());
+        if let Some(v) = a.run_value {
+            put("Run Value", format!("{v:.4}"));
+        }
         if let Some(f) = a.fastest {
-            put("Fastest Hit", format!("{f:.4}"));
+            put("Held Goal At", format!("{f:.4}"));
         }
         put("Goal", format!("{}", a.goal));
         if let Some(rate) = a.success_rate {
@@ -168,6 +172,9 @@ pub fn to_engine_run(info: &RunInfo) -> EngineRun {
         slope: a.map(|a| f(a.slope)),
         rating_sd: a.map(|a| f(a.sd)),
         fastest: a.and_then(|a| a.fastest).map(f),
+        run_value: a.and_then(|a| a.run_value).map(f),
+        run_pick: a.map(|a| a.pick.as_str().into()),
+        planned_chance: a.and_then(|a| a.planned_chance).map(f),
         mix: a.map(|_| mix_id(info.settings.challenge).into()),
         goal: a.map(|a| f(a.goal)),
         success_rate: a.and_then(|a| a.success_rate).map(f),
@@ -227,6 +234,7 @@ pub fn to_engine_run(info: &RunInfo) -> EngineRun {
                 target_speed_dps: f(s.target_speed_dps),
                 lead_deg: f(s.lead_deg),
                 since_change_s: f(s.since_change_s),
+                engaged: s.engaged,
             })
             .collect(),
     }
@@ -248,6 +256,7 @@ pub fn knob_id(k: Knob) -> &'static str {
     match k {
         Knob::Lifetime => "lifetime",
         Knob::TargetSpeed => "target_speed",
+        Knob::KillPace => "kill_pace",
         Knob::Radius | Knob::Auto => "radius",
     }
 }
@@ -271,7 +280,8 @@ pub fn prior(db: &Db, scenario: &Scenario, now: chrono::NaiveDateTime) -> Option
     let then = chrono::NaiveDateTime::parse_from_str(&last.finished_at, "%Y-%m-%dT%H:%M:%S%.3f").ok()?;
     let days = ((now - then).num_minutes() as f32 / 1440.0).max(0.0);
     let fastest = db.fastest_hit(&scenario.name, knob).ok().flatten().map(|v| v as f32);
-    Some(Prior { theta: last.theta as f32, slope: last.slope as f32, sd: last.sd as f32, days, fastest })
+    let last_run = last.run_pick.as_deref().and_then(Pick::parse).zip(last.success_rate.map(|r| r as f32));
+    Some(Prior { theta: last.theta as f32, slope: last.slope as f32, sd: last.sd as f32, days, fastest, last_run })
 }
 
 /// The best rating so far for a scenario's knob (lowest lifetime or size, highest speed).
@@ -377,11 +387,26 @@ mod tests {
         // The next run starts from the saved rating, a day later.
         let p = prior(&db, &scenario, finished() + chrono::Duration::days(1) + chrono::Duration::minutes(1)).unwrap();
         assert!((p.days - 1.0).abs() < 0.01, "{}", p.days);
-        assert!(p.fastest.is_some());
+        assert!(first.adaptive.as_ref().unwrap().calibration(), "the first adaptive run calibrates");
+        assert_eq!(p.fastest, None, "a calibration run sets no best");
+        assert_eq!(p.last_run.map(|r| r.0), Some(Pick::Calibrate));
         let second = play(&scenario, true, Some(p));
-        let start = second.adaptive.as_ref().unwrap().start_value;
+        let a2 = second.adaptive.as_ref().unwrap();
+        let start = a2.start_value;
         assert!((f64::from(start) / rating.rating - 1.0).abs() < 0.05, "{start} vs {}", rating.rating);
+        assert!(a2.run_value.is_some(), "later runs play at one value");
         save(&path, &info(&scenario, &second, &settings, 2)).unwrap();
+        let db = Db::open(&path).unwrap();
+        let p = prior(&db, &scenario, finished() + chrono::Duration::days(2)).unwrap();
+        assert_eq!(p.last_run.map(|r| r.0), Some(a2.pick), "the guard rails see the last run's pick");
+        let (run_value, run_pick): (Option<f64>, Option<String>) = db
+            .conn()
+            .query_row("SELECT run_value, run_pick FROM engine_runs ORDER BY run_id DESC LIMIT 1", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(run_value.map(|v| v as f32), a2.run_value);
+        assert_eq!(run_pick.as_deref(), Some(a2.pick.as_str()));
         let standard = play(&scenario, false, None);
         save(&path, &info(&scenario, &standard, &settings, 3)).unwrap();
 

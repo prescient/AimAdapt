@@ -265,6 +265,14 @@ pub struct Targets {
     pub lifetime_s: f32,
     /// Size at the end of its lifetime, as a fraction of `radius` (needs `lifetime_s`).
     pub shrink_to: f32,
+    /// Show a health bar above each target.
+    pub health_bar: bool,
+    /// Show the time left above targets that time out.
+    pub timer_bar: bool,
+    /// Targets that time out alternate between `color` and `alt_color`, so a new
+    /// target looks different from the one before it.
+    pub alternate_colors: bool,
+    pub alt_color: String,
     pub spawn: Spawn,
     pub movement: Movement,
 }
@@ -282,6 +290,10 @@ impl Default for Targets {
             respawn_delay_s: 0.0,
             lifetime_s: 0.0,
             shrink_to: 1.0,
+            health_bar: false,
+            timer_bar: true,
+            alternate_colors: true,
+            alt_color: "#4da3ff".into(),
             spawn: Spawn::default(),
             movement: Movement::default(),
         }
@@ -452,6 +464,7 @@ impl Scenario {
         check(t.lifetime_s >= 0.0, "lifetime can't be negative");
         check(t.shrink_to > 0.0 && t.shrink_to <= 1.0, "shrink-to must be above 0 and at most 1");
         check(parse_color(&t.color).is_some(), "target color must look like #ff5a4e");
+        check(parse_color(&t.alt_color).is_some(), "second target color must look like #4da3ff");
         check(parse_color(&self.arena.wall_color).is_some(), "wall color must look like #3a3f4b");
         check(parse_color(&self.arena.floor_color).is_some(), "floor color must look like #2a2e37");
         check(finite_range(sp.distance) && sp.distance.0 >= 1.0, "spawn distance must be at least 1 m, min ≤ max");

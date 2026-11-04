@@ -1,6 +1,6 @@
 # Scenario files
 
-RustyAim's built-in trainer plays scenarios written as TOML files. The eight built-in scenarios live in [`crates/rustyaim-sim/scenarios`](crates/rustyaim-sim/scenarios). Your own scenarios go in `%APPDATA%\RustyAim\scenarios`. The Play screen's editor writes them there, and you can also edit the files by hand.
+RustyAim's built-in trainer plays scenarios written as TOML files. The built-in scenarios live in [`crates/rustyaim-sim/scenarios`](crates/rustyaim-sim/scenarios). Your own scenarios go in `%APPDATA%\RustyAim\scenarios`. The Play screen's editor writes them there, and you can also edit the files by hand.
 
 Every field is optional. A missing field takes the default shown below, so a file only needs the values it changes. Unknown fields are rejected, which catches typos like `radiuss`. The app's editor is built from the same field list ([`crates/rustyaim-sim/src/spec.rs`](crates/rustyaim-sim/src/spec.rs)), and a test checks that this page covers every field.
 
@@ -86,6 +86,10 @@ per_miss = -30.0
 | `targets.respawn_delay_s` | `0.0` | Seconds before a destroyed target is replaced. |
 | `targets.lifetime_s` | `0.0` | A target disappears as a timeout after this many seconds. 0 means it stays until it's destroyed. |
 | `targets.shrink_to` | `1.0` | Size at the end of its lifetime, as a share of the radius. Needs `lifetime_s`. |
+| `targets.timer_bar` | `true` | Show a bar above each target that times out, emptying as its time runs out. |
+| `targets.alternate_colors` | `true` | Targets that time out switch between `color` and `alt_color`, so each new target looks different from the one before. |
+| `targets.alt_color` | `"#4da3ff"` | The second color. The default blue against the default orange-red stays distinct for common kinds of color blindness. |
+| `targets.health_bar` | `false` | Show each target's health in a bar above it. Useful with `regen_per_s`, so you can see a target healing. |
 
 ### `[targets.spawn]`
 
@@ -125,30 +129,33 @@ Every scenario can be played in **Standard** mode, at the difficulty written in 
 - **Target lifetime** (seconds) for timed clicking. Your rating might be "0.62 s": you hit 85% of targets that last 0.62 s.
 - **Target speed** (degrees per second across your view) for tracking. "48 °/s" means you stay on target 85% of the time at that speed.
 - **Target size** (radius in meters).
+- **Kill pace** (seconds between kills) for speed switching. "1.50 s" means 85% of your kills come within 1.5 s of the one before, which is about 45 kills a minute.
 
-**How the rating works.** The trainer models your chance of success at each value as an S-shaped curve. It keeps a probability estimate of where that curve sits and how steep it is, so it knows how sure it is, much like the Glicko version of Elo. Each outcome updates the estimate by how surprising it was. Hitting a target faster than your rating moves it more than hitting one at your level. Missing a target faster than your rating costs less than missing one at your level. While the estimate is uncertain the updates are big, so a first run finds your speed in roughly 15–25 targets. After that they shrink. The next run starts from your last rating. Its uncertainty grows with the days since you played, so after a break it re-checks quickly.
+**How the rating works.** The trainer models your chance of success at each value as an S-shaped curve. It keeps a probability estimate of where that curve sits and how steep it is, so it knows how sure it is, much like the Glicko version of Elo. Each outcome updates the estimate by how surprising it was. Succeeding at a value harder than your rating moves it more than succeeding at your level, and failing at a harder value costs less than failing at your level. The next run starts from your last rating. Its uncertainty grows with the days since you played, so after a break the rating moves more again.
 
 - **Clicking:** a target is a success if you destroy it before it times out with at most one miss on it. Spraying clicks doesn't count. A timeout is a failure.
-- **Tracking:** the target speed is set for each `segment_s`-second segment. The share of that time the crosshair was on target is the outcome, whether or not you're firing.
+- **Tracking:** each `segment_s`-second segment is one outcome: the share of that time the crosshair was on target, whether or not you're firing. With `engaged_only`, only time while a target is damaged and not yet healed counts, so the trip to a fresh target after a kill isn't off target, but leaving a half-killed target is, until it heals.
+- **Kill pace:** a kill within the pace of the one before is a success. Each full stretch of that length with no kill is a failure, and the late kill that ends it doesn't count as a success. Speed Switch, the built-in kill-pace scenario, has no target timers.
 
-**Which difficulty each target gets.** The trainer first picks a chance of success, then turns it into a value using your current curve:
+**Calibration run, then one difficulty per run.** The first adaptive run on a scenario is a calibration run. It sets each target's (or segment's) difficulty as it goes, between 65% and 90% chance of success, to find your level within the run. The game labels it "Calibration run". Every later run plays at one fixed difficulty for the whole run, shown as "This run: …" before you start, and the rating takes in the run as you play. Each run's difficulty is picked from a mix: first a chance of success, then the value with that chance on your current curve.
 
-| Pick | Chance of success | Balanced | Steady | Push |
+| Run | Chance of success | Balanced | Steady | Push |
 |---|---|---|---|---|
-| Near your rating | 80–90% | 65% | 85% | 50% |
-| Stretch | 45–70% | 20% | 5% | 35% |
-| Easy | 95–98% | 15% | 10% | 15% |
+| At your level | 80–90% | 65% | 85% | 50% |
+| Stretch | 55–72% | 20% | 5% | 35% |
+| Easy | 93–97% | 15% | 10% | 15% |
 
-Hitting a stretch target faster than your best ever counts as a breakthrough. It shows in the game and is saved as your fastest hit. A stretch target never comes right after a miss or straight after another stretch. Until the rating has settled, every target is picked between 65% and 90%. The mix is a setting in your profile.
+A stretch run never comes straight after another stretch run, or after a run more than 10 points below the goal. Holding the goal rate (at least 10 targets or segments) for a whole run at a value harder than your best counts as a breakthrough. The game announces it at the end of the run, and the value is saved as your best held. The mix is a setting in your profile.
 
 | Field | Default | Meaning |
 |---|---|---|
 | `adaptive.goal` | `0.85` | Your rating is the value you succeed at this share of the time (0.6–0.95). |
-| `adaptive.knob` | `"auto"` | `lifetime`, `target_speed` or `radius`. `auto` uses lifetime for hitscan, target speed for moving beam targets, and size otherwise. |
-| `adaptive.easy` | `0` | Easiest value it will use, in the knob's units. 0 for a default (3 s lifetime, 3 °/s, 2× the radius). |
-| `adaptive.hard` | `0` | Hardest value it will use. 0 for a default (0.25 s, 180 °/s, 0.3× the radius). |
-| `adaptive.start` | `0` | First guess at your rating. 0 for the scenario's own lifetime, speed or size. |
-| `adaptive.segment_s` | `2.0` | Tracking: seconds at each speed. |
+| `adaptive.knob` | `"auto"` | `lifetime`, `target_speed`, `radius` or `kill_pace`. `auto` uses lifetime for hitscan, target speed for moving beam targets, and size otherwise. |
+| `adaptive.easy` | `0` | Easiest value it will use, in the knob's units. 0 for a default (3 s lifetime, 3 °/s, 2× the radius, 3 s kill pace). |
+| `adaptive.hard` | `0` | Hardest value it will use. 0 for a default (0.25 s, 180 °/s, 0.3× the radius, 0.3 s kill pace). |
+| `adaptive.start` | `0` | First guess at your rating, for the calibration run. 0 for the scenario's own lifetime, speed or size (1.5 s for kill pace). |
+| `adaptive.segment_s` | `2.0` | Tracking: seconds per outcome. |
+| `adaptive.engaged_only` | `false` | Tracking: only count time while a target is damaged and not yet healed. For switching, with `targets.regen_per_s` so an abandoned target heals. |
 
 ```toml
 [adaptive]

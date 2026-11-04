@@ -138,6 +138,21 @@ impl Target {
         (self.lifetime > 0.0).then(|| (self.lifetime - self.age).max(0.0))
     }
 
+    /// Lifetime left as a share of the whole, if it has one.
+    pub fn time_left_fraction(&self) -> Option<f32> {
+        self.time_left().map(|t| (t / self.lifetime).clamp(0.0, 1.0))
+    }
+
+    /// Spawn order, from 1.
+    pub fn no(&self) -> u32 {
+        self.track.no
+    }
+
+    /// Damaged and not yet healed back to full.
+    pub fn engaged(&self) -> bool {
+        self.health > 1e-4 && self.health < self.max_health - 1e-4
+    }
+
     fn hit_by(&self, aim: Vec3, shape: Shape) -> Option<f32> {
         let h = self.height * self.radius / self.base_radius.max(1e-6);
         ray_hit(aim, self.pos, self.radius, shape, h)
@@ -185,7 +200,8 @@ pub enum Event {
     TimedOut {
         id: u64,
     },
-    /// Adaptive mode: a success at a harder value than ever before.
+    /// Adaptive mode, at the end of a run: the goal rate held at a value harder
+    /// than the player's best.
     Breakthrough {
         value: f32,
     },
@@ -239,10 +255,23 @@ pub struct AdaptiveSummary {
     pub goal: f32,
     pub success_rate: Option<f32>,
     pub outcomes: usize,
-    /// Hardest value succeeded at this run.
+    /// This run's value, if it held the goal rate (fixed-difficulty runs only).
     pub fastest: Option<f32>,
     /// (seconds, rating), thinned to at most 300 points.
     pub timeline: Vec<(f32, f32)>,
+    /// The value this run was played at, or `None` for a calibration run.
+    pub run_value: Option<f32>,
+    /// What kind of run it was (`Calibrate` for a calibration run).
+    pub pick: Pick,
+    /// The chance of success the run was planned at.
+    pub planned_chance: Option<f32>,
+    pub breakthrough: bool,
+}
+
+impl AdaptiveSummary {
+    pub fn calibration(&self) -> bool {
+        self.run_value.is_none()
+    }
 }
 
 /// The finished run, ready to save.
@@ -270,6 +299,41 @@ struct AdaptiveRun {
     mix: Mix,
     /// Tracking: the current segment's value, planned chance and pick.
     segment: Option<(f32, f32, Pick)>,
+    /// The whole run's value, planned chance and pick. `None` for a calibration
+    /// run, where every target or segment gets its own value.
+    run: Option<(f32, f32, Pick)>,
+    breakthrough: bool,
+}
+
+impl AdaptiveRun {
+    /// The difficulty for the next target or segment.
+    fn next(&mut self, rng: &mut Rng) -> (f32, f32, Pick) {
+        match self.run {
+            Some(run) => run,
+            None => self.rating.pick(rng, self.mix),
+        }
+    }
+}
+
+/// The speed range (m/s) that moves targets at `deg_s` across the view at the
+/// scenario's mean distance.
+fn speed_for(s: &Scenario, deg_s: f32) -> Range {
+    let sp = &s.targets.spawn;
+    let d = (sp.distance.0 + sp.distance.1) / 2.0;
+    let mps = deg_s.to_radians() * d;
+    Range(mps * 0.85, mps)
+}
+
+/// Kill-pace rating: the current window between kills.
+#[derive(Debug, Clone, Copy, Default)]
+struct Pace {
+    /// When the window started: the clock start, the last kill, or the end of the
+    /// last window that ran out.
+    since: f32,
+    /// A window has run out since the last kill, so the next kill isn't a success.
+    missed: bool,
+    /// This window's value, planned chance and pick.
+    window: Option<(f32, f32, Pick)>,
 }
 
 pub struct Sim {
@@ -295,6 +359,7 @@ pub struct Sim {
     beam_acc: f32,
     /// Ticks, on-target ticks and seconds in the current adaptive tracking segment.
     window: (u32, u32, f32),
+    pace: Pace,
     telemetry: Telemetry,
     next_sample: f32,
     next_trace: f32,
@@ -306,11 +371,38 @@ impl Sim {
         Sim::build(scenario, seed, None)
     }
 
-    /// An adaptive run, starting from the player's previous rating if there is one.
+    /// An adaptive run. With no earlier rating it's a calibration run, which sets
+    /// each target's (or segment's) difficulty as it goes to find the player's
+    /// level. Otherwise the whole run plays at one difficulty picked from the mix
+    /// around the rating, and the rating takes in the run as it's played.
     pub fn adaptive(scenario: Scenario, seed: u64, prior: Option<Prior>, mix: Mix) -> Sim {
         let cfg = scenario.adaptive.resolve(&scenario);
-        let run = AdaptiveRun { rating: Rating::new(cfg, prior), mix, segment: None };
-        Sim::build(scenario, seed, Some(run))
+        let rating = Rating::new(cfg, prior);
+        let run = prior.is_some().then(|| rating.pick_run(&mut Rng::new(seed ^ 0x9e37_79b9), mix));
+        let mut sim =
+            Sim::build(scenario, seed, Some(AdaptiveRun { rating, mix, segment: None, run, breakthrough: false }));
+        if let Some((value, _, _)) = run {
+            let t = &mut sim.current.targets;
+            match cfg.knob {
+                Knob::Lifetime => t.lifetime_s = value,
+                Knob::Radius => t.radius = value,
+                Knob::TargetSpeed => t.movement.speed = speed_for(&sim.scenario, value),
+                Knob::KillPace | Knob::Auto => {}
+            }
+            sim.respawn_all();
+        }
+        sim
+    }
+
+    /// Replaces the opening targets, so they use the current difficulty.
+    fn respawn_all(&mut self) {
+        self.targets.clear();
+        self.next_id = 1;
+        self.next_no = 1;
+        let mut events = Vec::new();
+        for _ in 0..self.scenario.targets.count {
+            self.spawn(&mut events);
+        }
     }
 
     fn build(base: Scenario, seed: u64, adaptive: Option<AdaptiveRun>) -> Sim {
@@ -333,6 +425,7 @@ impl Sim {
             cooldown: 0.0,
             beam_acc: 0.0,
             window: (0, 0, 0.0),
+            pace: Pace::default(),
             telemetry: Telemetry::default(),
             next_sample: 0.0,
             next_trace: 0.0,
@@ -365,6 +458,32 @@ impl Sim {
     /// Adaptive mode: the knob, current rating and success rate so far.
     pub fn rating(&self) -> Option<(Knob, f32, Option<f32>)> {
         self.adaptive.as_ref().map(|a| (a.rating.cfg.knob, a.rating.value(), a.rating.success_rate()))
+    }
+
+    /// Kill-pace rating: the seconds allowed for the next kill and how many are left
+    /// (negative once the window has run out).
+    pub fn pace(&self) -> Option<(f32, f32)> {
+        if self.knob() != Some(Knob::KillPace) {
+            return None;
+        }
+        let value = self.pace.window.map(|w| w.0).or(self.run_pick().map(|r| r.0))?;
+        Some((value, value - (self.elapsed() - self.pace.since)))
+    }
+
+    /// Kills per minute so far.
+    pub fn kills_per_min(&self) -> Option<f32> {
+        let t = self.elapsed();
+        (t >= 5.0).then(|| self.stats.kills as f32 * 60.0 / t)
+    }
+
+    fn knob(&self) -> Option<Knob> {
+        self.adaptive.as_ref().map(|a| a.rating.cfg.knob)
+    }
+
+    /// Adaptive mode: the value this whole run plays at and what kind of run it is,
+    /// or `None` for a calibration run (and standard runs).
+    pub fn run_pick(&self) -> Option<(f32, Pick)> {
+        self.adaptive.as_ref().and_then(|a| a.run).map(|(v, _, p)| (v, p))
     }
 
     pub fn phase(&self) -> Phase {
@@ -431,6 +550,10 @@ impl Sim {
                 outcomes: r.outcomes(),
                 fastest: r.fastest,
                 timeline,
+                run_value: a.run.map(|x| x.0),
+                pick: a.run.map_or(Pick::Calibrate, |x| x.2),
+                planned_chance: a.run.map(|x| x.1),
+                breakthrough: a.breakthrough,
             }
         });
         RunResult {
@@ -474,6 +597,7 @@ impl Sim {
         let now = self.elapsed();
 
         self.move_targets(dt, &mut events);
+        self.pace_tick(now);
         self.spawn_due(now, &mut events);
         self.track_aim(now, aim);
         match self.scenario.weapon.kind {
@@ -486,6 +610,14 @@ impl Sim {
         let limit = self.scenario.timing.kill_limit;
         if self.time_left() <= 0.0 || (limit > 0 && self.stats.kills >= limit) {
             self.phase = Phase::Finished;
+            if let Some(a) = &mut self.adaptive
+                && let Some((value, _, _)) = a.run
+            {
+                a.breakthrough = a.rating.finish_run(value);
+                if a.breakthrough {
+                    events.push(Event::Breakthrough { value });
+                }
+            }
             events.push(Event::Finished);
         }
         events
@@ -500,30 +632,68 @@ impl Sim {
         })
     }
 
+    /// Kill pace: the current window's value, picking one if needed.
+    fn pace_window(&mut self) -> Option<(f32, f32, Pick)> {
+        if self.knob() != Some(Knob::KillPace) {
+            return None;
+        }
+        if self.pace.window.is_none() {
+            let a = self.adaptive.as_mut()?;
+            self.pace.window = Some(a.next(&mut self.rng));
+        }
+        self.pace.window
+    }
+
+    /// Kill pace: each window that runs out with no kill is a failure.
+    fn pace_tick(&mut self, now: f32) {
+        for _ in 0..100 {
+            let Some((value, _, _)) = self.pace_window() else { return };
+            if now - self.pace.since < value {
+                return;
+            }
+            self.outcome(value, 0.0, false);
+            self.pace.since += value;
+            self.pace.missed = true;
+            self.pace.window = None;
+        }
+    }
+
+    /// Kill pace: a kill inside the window is a success, and starts the next one.
+    fn pace_kill(&mut self, now: f32) {
+        let Some((value, _, _)) = self.pace_window() else { return };
+        if !self.pace.missed && now - self.pace.since <= value {
+            self.outcome(value, 1.0, false);
+        }
+        self.pace = Pace { since: now, missed: false, window: None };
+    }
+
     /// Feeds an outcome at a knob value to the rating.
-    fn outcome(&mut self, value: f32, outcome: f32, tracking: bool, events: &mut Vec<Event>) {
+    fn outcome(&mut self, value: f32, outcome: f32, tracking: bool) {
         let now = self.elapsed();
-        if let Some(a) = &mut self.adaptive
-            && a.rating.update(now, value, outcome, tracking)
-        {
-            events.push(Event::Breakthrough { value });
+        if let Some(a) = &mut self.adaptive {
+            a.rating.update(now, value, outcome, tracking);
         }
     }
 
     /// Tracking: picks the next segment's difficulty and applies it to every target.
+    /// In a fixed-difficulty run every segment keeps the run's value.
     fn start_segment(&mut self) {
         if self.per_target() {
             return;
         }
         let Some(a) = &mut self.adaptive else { return };
-        let (value, chance, pick) = a.rating.pick(&mut self.rng, a.mix);
+        if a.rating.cfg.knob == Knob::KillPace || (a.run.is_some() && a.segment.is_some()) {
+            return;
+        }
+        let (value, chance, pick) = a.next(&mut self.rng);
         a.segment = Some((value, chance, pick));
+        if a.run.is_some() {
+            // Already applied to the scenario before the targets spawned.
+            return;
+        }
         match a.rating.cfg.knob {
             Knob::TargetSpeed => {
-                let sp = &self.scenario.targets.spawn;
-                let d = (sp.distance.0 + sp.distance.1) / 2.0;
-                let mps = value.to_radians() * d;
-                self.current.targets.movement.speed = Range(mps * 0.85, mps);
+                self.current.targets.movement.speed = speed_for(&self.scenario, value);
                 // Change speed now, keeping each target's direction.
                 for t in &mut self.targets {
                     let screen = (t.rate[0] * t.pitch.to_radians().cos(), t.rate[1]);
@@ -541,7 +711,7 @@ impl Sim {
                     t.base_radius = value;
                 }
             }
-            Knob::Lifetime | Knob::Auto => {}
+            Knob::Lifetime | Knob::KillPace | Knob::Auto => {}
         }
     }
 
@@ -593,6 +763,7 @@ impl Sim {
                     target_speed_dps: speed,
                     lead_deg: lead,
                     since_change_s: now - t.last_change,
+                    engaged: self.targets.iter().any(Target::engaged),
                 });
             }
         }
@@ -674,7 +845,10 @@ impl Sim {
             let on = self.pick(aim);
             // Adaptive tracking judges aim, firing or not, so holding fire only when
             // on target can't game the level.
-            self.adaptive_tick(on.is_some(), tick, events);
+            let counts = !self.scenario.adaptive.engaged_only || self.targets.iter().any(Target::engaged);
+            if counts {
+                self.adaptive_tick(on.is_some(), tick);
+            }
             if !firing {
                 continue;
             }
@@ -690,8 +864,8 @@ impl Sim {
         }
     }
 
-    fn adaptive_tick(&mut self, on: bool, tick: f32, events: &mut Vec<Event>) {
-        if self.per_target() {
+    fn adaptive_tick(&mut self, on: bool, tick: f32) {
+        if self.per_target() || self.knob() == Some(Knob::KillPace) {
             return;
         }
         let Some(a) = &self.adaptive else { return };
@@ -703,7 +877,7 @@ impl Sim {
             let share = self.window.1 as f32 / self.window.0.max(1) as f32;
             self.window = (0, 0, 0.0);
             if let Some((value, _, _)) = current {
-                self.outcome(value, share, true, events);
+                self.outcome(value, share, true);
             }
             self.start_segment();
         }
@@ -736,12 +910,13 @@ impl Sim {
         events.push(Event::Killed { id: t.id });
         self.pending.push(now + self.current.targets.respawn_delay_s);
         self.next_target(now);
+        self.pace_kill(now);
         if self.per_target()
             && let Some((value, _, _)) = t.track.value
         {
             // A kill counts as a success unless it took a spray of misses.
             let ok = if t.misses <= MAX_MISSES_PER_TARGET { 1.0 } else { 0.0 };
-            self.outcome(value, ok, false, events);
+            self.outcome(value, ok, false);
         }
     }
 
@@ -849,7 +1024,7 @@ impl Sim {
             self.next_target(now);
             if self.per_target() {
                 for value in timed_out.into_iter().filter(|v| v.is_finite()) {
-                    self.outcome(value, 0.0, false, events);
+                    self.outcome(value, 0.0, false);
                 }
             }
         }
@@ -891,7 +1066,7 @@ impl Sim {
         if self.per_target()
             && let Some(a) = &mut self.adaptive
         {
-            let (v, chance, pick) = a.rating.pick(&mut self.rng, a.mix);
+            let (v, chance, pick) = a.next(&mut self.rng);
             match a.rating.cfg.knob {
                 Knob::Lifetime => lifetime = v,
                 _ => radius = v,
@@ -1320,7 +1495,8 @@ mod tests {
         assert_eq!(a.knob, Knob::Lifetime);
         assert!(a.value < start * 0.5, "perfect play gets fast: {start} -> {}", a.value);
         assert_eq!(r.score, a.value, "the result is the rating");
-        assert!(a.fastest.unwrap() <= a.value);
+        assert!(a.calibration() && a.pick == Pick::Calibrate, "no earlier rating: a calibration run");
+        assert_eq!(a.fastest, None, "a calibration run sets no best");
         // Targets got their lifetimes from the rating, and record them.
         let t = &r.telemetry.targets[3];
         assert_eq!(t.value, Some(t.lifetime_s));
@@ -1379,6 +1555,242 @@ mod tests {
         let late: Vec<f32> = r.telemetry.samples.iter().filter(|x| x.t > 15.0).map(|x| x.target_speed_dps).collect();
         let mean = late.iter().sum::<f32>() / late.len() as f32;
         assert!(mean > start, "targets sped up: {mean} vs {start}");
+    }
+
+    fn prior_at(knob: Knob, value: f32, fastest: Option<f32>) -> Prior {
+        Prior {
+            theta: knob.h(value) + 0.12 * (0.85f32 / 0.15).ln(),
+            slope: 0.12,
+            sd: 0.08,
+            days: 1.0,
+            fastest,
+            last_run: Some((Pick::Near, 0.85)),
+        }
+    }
+
+    /// Playtest: adapting target by target inside a run felt chaotic. After the
+    /// calibration run, every target in a run gets the same lifetime.
+    #[test]
+    fn later_runs_play_at_one_difficulty() {
+        let mut s = no_countdown(Scenario::default());
+        s.timing.duration_s = 20.0;
+        let mut sim = Sim::adaptive(s, 4, Some(prior_at(Knob::Lifetime, 0.8, None)), Mix::Balanced);
+        let (value, pick) = sim.run_pick().expect("a fixed-difficulty run");
+        assert_ne!(pick, Pick::Calibrate);
+        let start = sim.rating().unwrap().1;
+        let mut i = 0;
+        while sim.phase() != Phase::Finished {
+            // Kill every other target; let the rest time out.
+            if let Some(t) = sim.targets().first()
+                && i % 40 == 0
+            {
+                let at = t.pos;
+                sim.step(FRAME, shoot(at));
+            } else {
+                sim.step(FRAME, idle());
+            }
+            i += 1;
+        }
+        let r = sim.result();
+        let targets = &r.telemetry.targets;
+        assert!(targets.len() > 10);
+        for t in targets {
+            assert!((t.lifetime_s - value).abs() < 1e-6, "every target at {value}: {}", t.lifetime_s);
+            assert_eq!(t.value, Some(value));
+            assert_eq!(t.pick, Some(pick.as_str()));
+        }
+        let a = r.adaptive.unwrap();
+        assert_eq!(a.run_value, Some(value));
+        assert!(!a.calibration());
+        assert!(a.outcomes >= 10, "the rating took in the run: {}", a.outcomes);
+        assert_ne!(a.value, start, "and moved");
+    }
+
+    #[test]
+    fn later_tracking_runs_keep_one_speed() {
+        let mut s = no_countdown(Scenario::default());
+        s.weapon.kind = WeaponKind::Beam;
+        s.weapon.trigger = Trigger::Always;
+        s.targets.health = 1e9;
+        s.targets.spawn.yaw = Range(-40.0, 40.0);
+        s.targets.movement = Movement { kind: MovementKind::Strafe, ..Default::default() };
+        s.timing.duration_s = 20.0;
+        let mut sim = Sim::adaptive(s, 3, Some(prior_at(Knob::TargetSpeed, 30.0, None)), Mix::Balanced);
+        let (value, _) = sim.run_pick().unwrap();
+        while sim.phase() != Phase::Finished {
+            let at = sim.targets()[0].pos;
+            sim.step(FRAME, Input { aim: at.normalize(), fire_pressed: false, fire_held: false });
+        }
+        let r = sim.result();
+        let a = r.adaptive.unwrap();
+        assert!((9..=10).contains(&a.outcomes), "still one outcome per segment: {}", a.outcomes);
+        let speeds: Vec<f32> = r.telemetry.samples.iter().map(|x| x.target_speed_dps).filter(|v| *v > 0.5).collect();
+        let mean = speeds.iter().sum::<f32>() / speeds.len() as f32;
+        assert!((mean / value - 1.0).abs() < 0.2, "targets move at the run's {value} deg/s: {mean}");
+        assert!(a.value > 30.0, "perfect tracking raises the rating");
+    }
+
+    /// A breakthrough is holding the goal for a whole run at a value faster than
+    /// your best, and is announced when the run ends.
+    #[test]
+    fn breakthroughs_come_at_the_end_of_a_run() {
+        let mut s = no_countdown(Scenario::default());
+        s.timing.duration_s = 20.0;
+        let mut sim = Sim::adaptive(s, 6, Some(prior_at(Knob::Lifetime, 0.8, Some(3.0))), Mix::Balanced);
+        let (value, _) = sim.run_pick().unwrap();
+        let mut events = Vec::new();
+        while sim.phase() != Phase::Finished {
+            let at = sim.targets()[0].pos;
+            events.push(sim.step(FRAME, shoot(at)));
+            events.push(sim.step(FRAME, idle()));
+        }
+        let at: Vec<usize> =
+            (0..events.len()).filter(|&i| events[i].iter().any(|e| matches!(e, Event::Breakthrough { .. }))).collect();
+        assert_eq!(at.len(), 1, "one breakthrough");
+        assert!(events[at[0]].contains(&Event::Finished), "on the last step");
+        let a = sim.result().adaptive.unwrap();
+        assert!(a.breakthrough);
+        assert_eq!(a.fastest, Some(value));
+    }
+
+    fn speed_switch() -> Scenario {
+        let mut s = builtin("builtin:speed-switch");
+        s.timing.duration_s = 30.0;
+        s
+    }
+
+    /// Plays a player who kills one target every `gap` seconds: looks away (up),
+    /// then beams the first target until it dies. Returns the result.
+    fn kill_every(mut sim: Sim, gap: f32) -> RunResult {
+        let mut last = 0.0;
+        while sim.phase() != Phase::Finished {
+            let kills = sim.stats().kills;
+            let input = if sim.elapsed() - last >= gap - 0.15 {
+                let at = sim.targets()[0].pos;
+                Input { aim: at.normalize(), fire_pressed: false, fire_held: true }
+            } else {
+                Input { aim: Vec3::Y, fire_pressed: false, fire_held: false }
+            };
+            sim.step(FRAME, input);
+            if sim.stats().kills > kills {
+                last = sim.elapsed();
+            }
+        }
+        sim.result()
+    }
+
+    /// Playtest: Speed Switch's rating was mostly each target's own timer, which
+    /// runs while you're busy with the others. It's now rated on the pace between
+    /// kills, and its targets never time out.
+    #[test]
+    fn speed_switch_is_rated_on_kill_pace() {
+        let s = speed_switch();
+        assert_eq!(s.targets.lifetime_s, 0.0, "no per-target timers");
+        assert_eq!(s.adaptive.resolve(&s).knob, Knob::KillPace);
+        let prior = prior_at(Knob::KillPace, 1.0, None);
+        let mut sim = Sim::adaptive(s.clone(), 2, Some(prior), Mix::Balanced);
+        let (value, _) = sim.run_pick().unwrap();
+        assert!(sim.pace().is_some());
+        sim.step(FRAME, idle());
+        assert!(sim.pace().unwrap().1 > 0.0);
+
+        // Comfortably inside the pace: every kill is a success.
+        let fast = kill_every(Sim::adaptive(s.clone(), 2, Some(prior), Mix::Balanced), value * 0.6);
+        let a = fast.adaptive.unwrap();
+        assert_eq!(a.success_rate, Some(1.0), "{a:?}");
+        assert!(fast.stats.kills as usize >= a.outcomes && a.outcomes > 20, "one outcome per kill: {}", a.outcomes);
+        assert_eq!(fast.stats.timeouts, 0);
+
+        // Slower than the pace: every window runs out, and the late kill isn't a
+        // success either.
+        let slow = kill_every(Sim::adaptive(s.clone(), 2, Some(prior), Mix::Balanced), value * 1.7);
+        let a = slow.adaptive.unwrap();
+        assert_eq!(a.success_rate, Some(0.0), "{a:?}");
+        // Kills 1.7 paces apart: each gap holds one full empty window.
+        let windows = (30.0 / (value * 1.7)) as usize;
+        assert!(a.outcomes.abs_diff(windows) <= 2, "one failure per empty window: {} vs {windows}", a.outcomes);
+        assert!(a.value > 1.0, "the rating slows down: {}", a.value);
+    }
+
+    #[test]
+    fn kill_pace_calibration_finds_the_players_pace() {
+        // A player who kills every 0.7 s, against a first guess of 1.5 s.
+        let r = kill_every(Sim::adaptive(speed_switch(), 3, None, Mix::Balanced), 0.7);
+        let a = r.adaptive.unwrap();
+        assert!(a.calibration());
+        assert!(a.value < 1.0 && a.value > 0.5, "rated near 0.7 s: {}", a.value);
+    }
+
+    fn builtin(id: &str) -> Scenario {
+        let e = crate::library::builtins().into_iter().find(|e| e.id == id).unwrap();
+        no_countdown(e.scenario.unwrap())
+    }
+
+    /// Tracks the first target perfectly until it dies, then looks away for
+    /// `travel` seconds before starting on the next one.
+    fn track_with_travel(mut sim: Sim, travel: f32) -> RunResult {
+        let mut away_until = 0.0;
+        while sim.phase() != Phase::Finished {
+            let kills = sim.stats().kills;
+            let aim = if sim.elapsed() < away_until { Vec3::Y } else { sim.targets()[0].pos.normalize() };
+            sim.step(FRAME, Input { aim, fire_pressed: false, fire_held: true });
+            if sim.stats().kills > kills {
+                away_until = sim.elapsed() + travel;
+            }
+        }
+        sim.result()
+    }
+
+    /// Playtest: Stability Switch's rating was mostly the trip to the next target
+    /// after each kill, which counted as off-target time. Now only time while a
+    /// target is engaged (damaged, not yet healed) counts.
+    #[test]
+    fn stability_switch_ignores_travel_between_targets() {
+        let mut s = builtin("builtin:stability-switch");
+        s.timing.duration_s = 30.0;
+        assert!(s.adaptive.engaged_only && s.targets.regen_per_s > 0.0 && s.targets.health_bar);
+        let prior = prior_at(Knob::TargetSpeed, 12.0, None);
+        let play = |s: &Scenario, travel| {
+            let r = track_with_travel(Sim::adaptive(s.clone(), 4, Some(prior), Mix::Steady), travel);
+            r.adaptive.unwrap().success_rate.unwrap()
+        };
+        let quick = play(&s, 0.0);
+        let slow = play(&s, 0.6);
+        assert!(quick > 0.97 && slow > 0.97, "travel doesn't count: {quick} vs {slow}");
+        // The old scoring, for contrast: every trip is off-target time.
+        let mut old = s.clone();
+        old.adaptive.engaged_only = false;
+        let slow_old = play(&old, 0.6);
+        assert!(slow_old < 0.85, "travel used to count: {slow_old}");
+    }
+
+    #[test]
+    fn leaving_a_damaged_target_counts_until_it_heals() {
+        let mut s = builtin("builtin:stability-switch");
+        s.targets.count = 1;
+        s.targets.movement.kind = MovementKind::Static;
+        s.timing.duration_s = 10.0;
+        let mut sim = Sim::adaptive(s.clone(), 1, Some(prior_at(Knob::TargetSpeed, 12.0, None)), Mix::Steady);
+        let at = sim.targets()[0].pos.normalize();
+        let held = |aim| Input { aim, fire_pressed: false, fire_held: true };
+        // Half a second on target, then look away.
+        for _ in 0..120 {
+            sim.step(FRAME, held(at));
+        }
+        assert!(sim.targets()[0].engaged());
+        let mut engaged_away = 0;
+        for _ in 0..(240 * 4) {
+            sim.step(FRAME, held(Vec3::Y));
+            engaged_away += usize::from(sim.targets()[0].engaged());
+        }
+        assert_eq!(sim.targets()[0].health_fraction(), 1.0, "healed back to full");
+        let healed_after = engaged_away as f32 * FRAME;
+        // 50 damage at 40/s regen: 1.25 s to heal.
+        assert!((healed_after - 1.25).abs() < 0.05, "engaged while healing: {healed_after}");
+        let r = sim.result();
+        let engaged: Vec<_> = r.telemetry.samples.iter().filter(|x| x.engaged).collect();
+        let on = engaged.iter().filter(|x| x.on_target).count() as f32 / engaged.len() as f32;
+        assert!((on - 0.5 / 1.75).abs() < 0.05, "half a second on, 1.25 s healing off: {on}");
     }
 
     #[test]

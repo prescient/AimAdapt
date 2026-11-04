@@ -68,11 +68,11 @@ function scenarioFacts(s) {
 const higherIsHarder = (knob) => knob === "target_speed";
 function fmtKnob(knob, v) {
   if (v === null || v === undefined) return "–";
-  if (knob === "lifetime") return `${v.toFixed(2)} s`;
+  if (knob === "lifetime" || knob === "kill_pace") return `${v.toFixed(2)} s`;
   if (knob === "target_speed") return `${Math.round(v)} °/s`;
   return `${v.toFixed(2)} m`;
 }
-const knobWord = (knob) => (knob === "target_speed" ? "tracking speed" : knob === "lifetime" ? "speed" : "size");
+const knobWord = (knob) => ({ target_speed: "tracking speed", lifetime: "speed", kill_pace: "kill pace" })[knob] ?? "size";
 const betterThan = (knob, a, b) => (higherIsHarder(knob) ? a > b : a < b);
 
 const scenarioName = (id) => ui.trainer.data?.scenarios.find((e) => e.id === id)?.scenario?.name ?? id.replace(/^(builtin|user):/, "");
@@ -103,7 +103,7 @@ function play() {
     ${profileBar()}
     ${typeof todayCard === "function" ? todayCard() : ""}
     <section class="banner info"><div><div class="banner-title">Adaptive mode keeps you at about 85%</div>
-      <div class="banner-body">Adaptive mode rates you in real units: the target lifetime (or tracking speed) you hit 85% of the time. It finds that in the first 15–25 targets, then mixes targets near your rating with harder stretch targets and a few easy ones (change the mix in Settings). Hitting a stretch target faster than ever is a breakthrough. Standard mode plays the scenario exactly as written.</div></div></section>
+      <div class="banner-body">Adaptive mode rates you in real units: the target lifetime, tracking speed or kill pace you succeed at 85% of the time. Your first adaptive run on a scenario is a calibration run that finds your level as you play. After that, each run plays at one difficulty for the whole run: most near your rating, some harder stretch runs and a few easy ones (change the mix in Settings). Holding 85% for a whole run faster than ever is a breakthrough. Standard mode plays the scenario exactly as written.</div></div></section>
     ${workoutsCard()}
     <div class="chips" role="group" aria-label="Filter scenarios">
       ${CATEGORIES.map(([k, label]) => `<button class="chip ${tr.filter === k ? "on" : ""}" type="button" data-action="trainer-filter" data-filter="${k}" aria-pressed="${tr.filter === k}">${label}</button>`).join("")}
@@ -145,7 +145,7 @@ function scenarioCard(e) {
   }
   const playing = ui.trainer.data.playing ? "disabled" : "";
   const level = e.rating !== null && e.rating !== undefined
-    ? `85% ${knobWord(e.knob)} <span class="num">${esc(fmtKnob(e.knob, e.rating))}</span>${e.best_rating !== null && betterThan(e.knob, e.best_rating, e.rating) ? ` <span class="muted">(best ${esc(fmtKnob(e.knob, e.best_rating))})</span>` : ""}${e.fastest !== null ? ` · fastest hit ${esc(fmtKnob(e.knob, e.fastest))}` : ""}`
+    ? `85% ${knobWord(e.knob)} <span class="num">${esc(fmtKnob(e.knob, e.rating))}</span>${e.best_rating !== null && betterThan(e.knob, e.best_rating, e.rating) ? ` <span class="muted">(best ${esc(fmtKnob(e.knob, e.best_rating))})</span>` : ""}${e.fastest !== null ? ` · held ${esc(fmtKnob(e.knob, e.fastest))}` : ""}`
     : '<span class="muted">Not rated yet</span>';
   const standard = e.runs ? ` · best score <span class="num">${num(e.best)}</span>` : "";
   return `<section class="card scenario-card">
@@ -260,6 +260,9 @@ function fieldInput(f, value) {
     case "choice":
       control = `<select id="${id}" class="select" data-path="${f.path}" data-kind="text">${f.options.map((o) => `<option value="${esc(o.value)}" ${o.value === value ? "selected" : ""} title="${esc(o.help)}">${esc(o.label)}</option>`).join("")}</select>`;
       break;
+    case "toggle":
+      control = `<span class="field"><input id="${id}" type="checkbox" data-path="${f.path}" data-kind="toggle" ${value ? "checked" : ""}></span>`;
+      break;
     case "knobs":
       return `<div class="form-row wide"><label>${esc(f.label)}</label>${knobsInput(f, value)}${help}</div>`;
     default:
@@ -303,6 +306,9 @@ function onEditorInput(el) {
       break;
     case "tags":
       v = el.value.split(",").map((t) => t.trim()).filter(Boolean);
+      break;
+    case "toggle":
+      v = el.checked;
       break;
     case "range": {
       v = [...getPath(e.scenario, path)];

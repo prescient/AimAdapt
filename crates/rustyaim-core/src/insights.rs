@@ -34,7 +34,7 @@ pub struct ScenarioSummary {
     pub adaptive_runs: usize,
     pub last_played: String,
     /// Adaptive mode: the knob, the latest rating and the best one, and the
-    /// hardest value ever hit.
+    /// hardest value the goal rate was held at for a whole run.
     pub knob: Option<String>,
     pub latest_rating: Option<f64>,
     pub best_rating: Option<f64>,
@@ -49,7 +49,7 @@ pub fn higher_is_harder(knob: &str) -> bool {
 /// Formats a knob value with its unit.
 pub fn format_value(knob: &str, v: f64) -> String {
     match knob {
-        "lifetime" => format!("{v:.2} s"),
+        "lifetime" | "kill_pace" => format!("{v:.2} s"),
         "target_speed" => format!("{v:.0} °/s"),
         _ => format!("{v:.2} m"),
     }
@@ -169,6 +169,21 @@ pub struct Tracking {
     pub recovery_s: Option<f64>,
 }
 
+/// Switching, split into its two parts: getting to the next target after a kill,
+/// and staying on a target until it dies. Kills per minute is the overall pace.
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[derive(Debug, Clone, PartialEq)]
+pub struct Switching {
+    pub kills_per_min: Option<f64>,
+    pub kills_per_min_before: Option<f64>,
+    /// Median time from the previous kill to first reaching the next target.
+    pub acquire_ms: Option<f64>,
+    pub acquire_before_ms: Option<f64>,
+    /// Share of time on target while a target was engaged (damaged, not yet healed).
+    pub engaged_on_target: Option<f64>,
+    pub engaged_on_target_before: Option<f64>,
+}
+
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Segment {
@@ -206,6 +221,7 @@ pub struct Insights {
     /// Average times the crosshair moved onto a target before killing it (1 = clean).
     pub entries_per_kill: Option<f64>,
     pub tracking: Option<Tracking>,
+    pub switching: Option<Switching>,
     pub segments: Vec<Segment>,
     pub notes: Vec<Note>,
 }
@@ -237,6 +253,7 @@ struct T {
     direction: f64,
     radius: f64,
     reaction: Option<f64>,
+    reach: Option<f64>,
     overshoot: f64,
     entries: i64,
     value: Option<f64>,
@@ -306,7 +323,8 @@ pub fn scenario(db: &Db, base_scenario: &str) -> Result<Option<Insights>, DbErro
     let conn = db.conn();
     let mut stmt = conn.prepare(
         "SELECT r.id, r.finished_at, e.adaptive, e.rating, e.success_rate, r.score, r.accuracy, e.workout,
-                e.category, e.level_timeline, e.knob, e.rating_low, e.rating_high, e.fastest, e.theta, e.slope
+                e.category, e.level_timeline, e.knob, e.rating_low, e.rating_high,
+                CASE WHEN e.run_value IS NOT NULL THEN e.fastest END, e.theta, e.slope
          FROM engine_runs e JOIN runs r ON r.id = e.run_id
          WHERE e.base_scenario = ?1 ORDER BY r.finished_at, r.id",
     )?;
@@ -354,7 +372,7 @@ pub fn scenario(db: &Db, base_scenario: &str) -> Result<Option<Insights>, DbErro
     let mut by_run: HashMap<i64, Vec<T>> = HashMap::new();
     let mut stmt = conn.prepare(
         "SELECT t.run_id, t.start_at, t.ended_at, t.outcome, t.distance_deg, t.direction_deg, t.radius_deg,
-                t.reaction_s, t.overshoot_deg, t.entries, t.value
+                t.reaction_s, t.overshoot_deg, t.entries, t.value, t.reach_s
          FROM engine_targets t JOIN engine_runs e ON e.run_id = t.run_id
          WHERE e.base_scenario = ?1",
     )?;
@@ -373,6 +391,7 @@ pub fn scenario(db: &Db, base_scenario: &str) -> Result<Option<Insights>, DbErro
             overshoot: r.get(8)?,
             entries: r.get(9)?,
             value: r.get(10)?,
+            reach: r.get(11)?,
         })
     })?;
     for t in iter {
@@ -427,6 +446,11 @@ pub fn scenario(db: &Db, base_scenario: &str) -> Result<Option<Insights>, DbErro
     let entries_per_kill = (killed.len() >= 5).then(|| mean(killed.iter().map(|t| t.entries as f64)).unwrap_or(0.0));
     let shots = shot_map(db, &recent_ids)?;
     let tracking = tracking_stats(db, &recent_ids, &before_ids)?;
+    let switching = if category == "switching" {
+        Some(switching_stats(db, (&recent_ids, &recent), (&before_ids, &before))?)
+    } else {
+        None
+    };
     let segments = segment_stats(&decided);
     let curve = model.map(|((theta, slope), knob)| speed_curve(&knob, theta, slope, &decided));
 
@@ -447,6 +471,7 @@ pub fn scenario(db: &Db, base_scenario: &str) -> Result<Option<Insights>, DbErro
         reaction,
         entries_per_kill,
         tracking,
+        switching,
         segments,
         notes: Vec::new(),
     };
@@ -645,6 +670,46 @@ fn shot_map(db: &Db, ids: &[i64]) -> Result<Option<ShotMap>, DbError> {
 /// (on target, error°, target speed °/s, lead°, seconds since direction change)
 type Sample = (bool, f64, f64, f64, f64);
 
+fn switching_stats(db: &Db, recent: (&[i64], &[T]), before: (&[i64], &[T])) -> Result<Switching, DbError> {
+    let kpm = |ids: &[i64]| -> Result<Option<f64>, DbError> {
+        if ids.is_empty() {
+            return Ok(None);
+        }
+        let (kills, secs): (Option<f64>, Option<f64>) = db.conn().query_row(
+            &format!("SELECT SUM(kills), SUM(duration_s) FROM runs WHERE id IN ({})", in_list(ids)),
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        Ok(kills.zip(secs).filter(|(_, s)| *s >= 10.0).map(|(k, s)| k * 60.0 / s))
+    };
+    let acquire = |ts: &[T]| {
+        let mut v: Vec<f64> = ts.iter().filter(|t| t.killed).filter_map(|t| t.reach).map(|r| r * 1000.0).collect();
+        if v.len() >= 5 { median(&mut v) } else { None }
+    };
+    let engaged = |ids: &[i64]| -> Result<Option<f64>, DbError> {
+        if ids.is_empty() {
+            return Ok(None);
+        }
+        let (n, on): (i64, Option<i64>) = db.conn().query_row(
+            &format!(
+                "SELECT COUNT(*), SUM(on_target) FROM engine_samples WHERE engaged = 1 AND run_id IN ({})",
+                in_list(ids)
+            ),
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        Ok((n >= 30).then(|| on.unwrap_or(0) as f64 / n as f64))
+    };
+    Ok(Switching {
+        kills_per_min: kpm(recent.0)?,
+        kills_per_min_before: kpm(before.0)?,
+        acquire_ms: acquire(recent.1),
+        acquire_before_ms: acquire(before.1),
+        engaged_on_target: engaged(recent.0)?,
+        engaged_on_target_before: engaged(before.0)?,
+    })
+}
+
 fn tracking_stats(db: &Db, recent: &[i64], before: &[i64]) -> Result<Option<Tracking>, DbError> {
     if recent.is_empty() {
         return Ok(None);
@@ -746,12 +811,11 @@ fn notes(i: &Insights) -> Vec<Note> {
     if let (Some(knob), Some(last)) = (&i.knob, rated.last()) {
         let fmt = |v: f64| format_value(knob, v);
         let now = last.rating.unwrap_or(0.0);
-        let unit_word = if knob == "target_speed" {
-            "tracking speed"
-        } else if knob == "lifetime" {
-            "speed"
-        } else {
-            "size"
+        let unit_word = match knob.as_str() {
+            "target_speed" => "tracking speed",
+            "lifetime" => "speed",
+            "kill_pace" => "kill pace",
+            _ => "size",
         };
         let mut body = format!("You hit {:.0}% at {}.", 85.0, fmt(now));
         if rated.len() >= 2 {
@@ -772,11 +836,24 @@ fn notes(i: &Insights) -> Vec<Note> {
             .reduce(|a, b| if higher_is_harder(knob) { a.max(b) } else { a.min(b) })
         {
             push(
-                format!("Fastest hit: {}", fmt(f)),
-                "The hardest target you've ever hit on this scenario. Stretch targets give you the chance to beat it."
+                format!("Best held: {}", fmt(f)),
+                "The hardest difficulty you've held the goal rate at for a whole run. Stretch runs give you the                  chance to beat it."
                     .into(),
             );
         }
+    }
+    if let Some(sw) = &i.switching
+        && let Some(kpm) = sw.kills_per_min
+    {
+        let mut body = String::new();
+        if let Some(a) = sw.acquire_ms {
+            body += &format!("After a kill you reach the next target in {a:.0} ms (median). ");
+        }
+        if let Some(e) = sw.engaged_on_target {
+            body += &format!("Once you're on a kill, you stay on target {:.0}% of the time. ", e * 100.0);
+        }
+        body += "Faster switching comes from both: getting to the next target sooner, and not slipping off the one you're killing.";
+        push(format!("Switching: {kpm:.0} kills a minute"), body);
     }
     if let Some(c) = &i.curve {
         let fmt = |v: f64| format_value(&c.knob, v);
@@ -989,6 +1066,11 @@ mod tests {
         let mut fields = BTreeMap::new();
         fields.insert("Score".to_string(), "50".to_string());
         fields.insert("Source".to_string(), "rustyaim".to_string());
+        // A 60 s run, with its kills.
+        let start = at - chrono::Duration::seconds(60);
+        fields.insert("Challenge Start".to_string(), start.format("%H:%M:%S%.3f").to_string());
+        let kills = e.targets.iter().filter(|t| t.outcome == "killed").count();
+        fields.insert("Kills".to_string(), kills.to_string());
         let file_name = format!("rustyaim/test/{n}");
         let run = RunFile {
             file_name: file_name.clone(),
@@ -1059,6 +1141,9 @@ mod tests {
             slope: Some(0.12),
             rating_sd: Some(0.05),
             fastest: Some(rating * 0.8),
+            run_value: Some(rating * 0.8),
+            run_pick: Some("stretch".into()),
+            planned_chance: Some(0.6),
             mix: Some("balanced".into()),
             goal: Some(0.85),
             success_rate: Some(0.85),
@@ -1096,7 +1181,7 @@ mod tests {
         assert!(titles.contains(&"You overshoot"), "{titles:?}");
         assert!(titles.contains(&"Shots land low"), "{titles:?}");
         assert!(titles.contains(&"85% speed: 0.62 s"), "{titles:?}");
-        assert!(titles.contains(&"Fastest hit: 0.50 s"), "{titles:?}");
+        assert!(titles.contains(&"Best held: 0.50 s"), "{titles:?}");
         let better = &i.notes.iter().find(|n| n.title.starts_with("85% speed")).unwrap().body;
         assert!(better.contains("better by 0.18 s"), "{better}");
 
@@ -1106,6 +1191,51 @@ mod tests {
         assert_eq!(o[0].best_rating, Some(0.62), "lower lifetime is better");
         assert_eq!(o[0].fastest, Some(0.62 * 0.8));
         assert_eq!(db.last_rating("Timed Flicks").unwrap().unwrap().knob, "lifetime");
+    }
+
+    #[test]
+    fn switching_insights_split_acquisition_from_time_on_target() {
+        let mut db = Db::open_in_memory().unwrap();
+        let mut e = clicking_run(1.5);
+        e.base_scenario = "Stability Switch".into();
+        e.category = "switching".into();
+        e.knob = Some("target_speed".into());
+        for (i, t) in e.targets.iter_mut().enumerate() {
+            t.outcome = "killed".into();
+            t.reach_s = Some(0.2 + (i % 3) as f64 * 0.05);
+        }
+        // 300 engaged samples, 240 on target; 300 more between targets, all off.
+        e.samples = (0..600)
+            .map(|i| SampleRow { t: i as f64 / 30.0, on_target: i < 240, engaged: i < 300, ..Default::default() })
+            .collect();
+        save(&mut db, 1, &e);
+        let i = scenario(&db, "Stability Switch").unwrap().unwrap();
+        let sw = i.switching.as_ref().unwrap();
+        assert!((sw.acquire_ms.unwrap() - 250.0).abs() < 1.0, "{sw:?}");
+        assert!((sw.engaged_on_target.unwrap() - 0.8).abs() < 1e-9, "travel isn't counted: {sw:?}");
+        assert!(i.tracking.as_ref().unwrap().on_target < 0.5, "all samples: {:?}", i.tracking);
+        let titles: Vec<&str> = i.notes.iter().map(|n| n.title.as_str()).collect();
+        assert!((sw.kills_per_min.unwrap() - 80.0).abs() < 1e-6, "80 kills in a minute: {sw:?}");
+        assert!(titles.contains(&"Switching: 80 kills a minute"), "{titles:?}");
+        // Not shown for other categories.
+        save(&mut db, 2, &clicking_run(0.6));
+        assert!(scenario(&db, "Timed Flicks").unwrap().unwrap().switching.is_none());
+    }
+
+    /// Before fixed-difficulty runs, `fastest` was the hardest single target hit,
+    /// which a whole run can rarely match. Those old values must not count as the
+    /// best held, or breakthroughs would almost never happen.
+    #[test]
+    fn single_target_bests_from_old_runs_are_ignored() {
+        let mut db = Db::open_in_memory().unwrap();
+        let old = EngineRun { fastest: Some(0.2), run_value: None, run_pick: None, ..clicking_run(0.8) };
+        save(&mut db, 1, &old);
+        assert_eq!(db.fastest_hit("Timed Flicks", "lifetime").unwrap(), None);
+        save(&mut db, 2, &clicking_run(0.62));
+        assert_eq!(db.fastest_hit("Timed Flicks", "lifetime").unwrap(), Some(0.62 * 0.8));
+        let i = scenario(&db, "Timed Flicks").unwrap().unwrap();
+        assert_eq!(i.runs[0].fastest, None);
+        assert_eq!(i.runs[1].fastest, Some(0.62 * 0.8));
     }
 
     #[test]
@@ -1122,6 +1252,7 @@ mod tests {
                     target_speed_dps: 25.0,
                     lead_deg: -0.5,
                     since_change_s: since,
+                    engaged: false,
                 }
             })
             .collect();

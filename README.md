@@ -25,29 +25,31 @@ Requirements: Windows 10 or 11 with the WebView2 runtime (included with Windows 
   - **Switching:** speed, evasive, stability.
 - Hitscan and beam weapons; click, hold or always-on triggers.
 - Sphere and capsule targets, with optional lifetime, shrink and health regeneration.
+- Timed targets show a time-left bar and alternate between two colors, so a new target stands out from the one before. Optional health bars.
 - Movement: still, strafing or random.
 
 ![Results screen](docs/screenshots/game-results.jpg)
 
 ## Adaptive mode
 
-Each scenario has one difficulty setting: target lifetime for timed clicking, target speed for tracking. Adaptive mode estimates the value you succeed at 85% of the time, along with how certain that estimate is.
+Each scenario has one difficulty setting: target lifetime for timed clicking, target speed for tracking, kill pace for speed switching. Adaptive mode estimates the value you succeed at 85% of the time, along with how certain that estimate is.
 
-- **How it updates:** a Bayesian estimate similar to Glicko. A surprising result moves the rating more than an expected one. It settles within about 15–25 targets.
-- **Next run:** starts from your last rating. The uncertainty grows with the days since you last played.
-- **Target mix:** each target's difficulty is picked by chance of success:
+- **How it updates:** a Bayesian estimate similar to Glicko. A surprising result moves the rating more than an expected one. The next run starts from your last rating, and the uncertainty grows with the days since you last played.
+- **Calibration run:** your first adaptive run on a scenario changes difficulty as you play, to find your level within the run.
+- **One difficulty per run after that:** every later run plays at a single value for the whole run, shown at the start ("This run: 0.62 s"). The value is picked by chance of success:
 
-  | Pick | Chance of success | Balanced |
+  | Run | Chance of success | Balanced |
   |---|---|---|
-  | Near your rating | 80–90% | 65% |
-  | Stretch | 45–70% | 20% |
-  | Easy | 95%+ | 15% |
+  | At your level | 80–90% | 65% |
+  | Stretch | 55–72% | 20% |
+  | Easy | 93–97% | 15% |
 
-  The Steady and Push mixes change these shares.
-- **Breakthroughs:** hitting a target faster than your previous best is recorded as a new fastest hit.
+  The Steady and Push mixes change these shares. A stretch run never follows another stretch run, or a run well below 85%.
+- **Breakthroughs:** holding 85% for a whole run at a value harder than your best.
 - **What counts:**
   - **Clicking:** a target is a success if it's destroyed before it times out, with at most one miss on it.
-  - **Tracking:** each 2-second segment is scored by the share of time spent on target.
+  - **Tracking:** each 2-second segment is scored by the share of time spent on target. Stability Switch and Switch Track only count time while a target is damaged and not yet healed, so moving between targets isn't counted against you. Their targets show health bars and heal when you leave them.
+  - **Kill pace (Speed Switch):** a kill within the pace of the one before is a success; each full stretch of that length with no kill is a failure.
 
 Standard mode plays a scenario exactly as written and scores points.
 

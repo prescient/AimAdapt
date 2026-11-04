@@ -51,6 +51,8 @@ pub enum Kind {
     Choice {
         options: &'static [Choice],
     },
+    /// On or off.
+    Toggle,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -126,6 +128,11 @@ const KNOBS: &[Choice] = &[
         help: "How fast targets cross your view. Higher is harder.",
     },
     Choice { value: "radius", label: "Target size (m)", help: "Target radius. Lower is harder." },
+    Choice {
+        value: "kill_pace",
+        label: "Kill pace (s)",
+        help: "Seconds allowed from one kill to the next. Lower is harder. For switching.",
+    },
 ];
 
 pub const FIELDS: &[Field] = &[
@@ -204,6 +211,22 @@ pub const FIELDS: &[Field] = &[
         num(0.0, 10_000.0, 5.0, "/s"),
     ),
     f("targets.color", "Targets", "Color", "", Kind::Color),
+    f(
+        "targets.alternate_colors",
+        "Targets",
+        "Alternate colors",
+        "Targets that time out switch between the two colors, so each new one looks different from the last.",
+        Kind::Toggle,
+    ),
+    f("targets.alt_color", "Targets", "Second color", "Used by every other target when colors alternate.", Kind::Color),
+    f("targets.health_bar", "Targets", "Health bar", "Show each target's health above it.", Kind::Toggle),
+    f(
+        "targets.timer_bar",
+        "Targets",
+        "Time-left bar",
+        "Show how long each target has before it times out.",
+        Kind::Toggle,
+    ),
     f(
         "targets.respawn_delay_s",
         "Targets",
@@ -328,6 +351,13 @@ pub const FIELDS: &[Field] = &[
         "Tracking segment",
         "Tracking: seconds at each speed; the share of time on target is the outcome.",
         num(0.5, 10.0, 0.5, "s"),
+    ),
+    f(
+        "adaptive.engaged_only",
+        "Adaptive",
+        "Only engaged time",
+        "Tracking: only count time while a target is damaged and not yet healed, so moving to a fresh target after a kill isn't off target.",
+        Kind::Toggle,
     ),
     f(
         "arena.size",

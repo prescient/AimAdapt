@@ -2,7 +2,8 @@
 //! keep play near the speed they hit about 85% of the time.
 //!
 //! Each scenario names one **knob**: target lifetime in seconds (timed clicking),
-//! target speed in degrees per second (tracking), or target radius in meters. The
+//! target speed in degrees per second (tracking), target radius in meters, or kill
+//! pace in seconds between kills (speed switching). The
 //! rating is a curve, the chance of success at each knob value, modeled as
 //!
 //! ```text
@@ -19,10 +20,15 @@
 //! 15–25 targets find the player's speed and later ones refine it. Between sessions
 //! the uncertainty grows with the days away.
 //!
-//! Each target's difficulty comes from a **mix**: most targets near the goal
-//! rate, some stretch targets (45–70% chance) that move the rating a lot when hit,
-//! and a few easy ones. Picking by chance of success keeps the mix right at any
-//! skill level.
+//! **Runs, not targets.** The first adaptive run on a scenario is a calibration
+//! run: each target (or tracking segment) gets its own difficulty so the rating
+//! finds the player quickly. Every later run plays at one fixed difficulty, picked
+//! from a **mix**: most runs near the goal rate, some stretch runs that move the
+//! rating a lot when you hold the goal, and a few easy ones. Picking by chance of
+//! success keeps the mix right at any skill level. A run at one value is still
+//! plenty of evidence (40–80 targets or ~30 segments), and the rating absorbs it
+//! the same way. A breakthrough is holding the goal rate for a whole run at a
+//! value harder than your best.
 
 use serde::{Deserialize, Serialize};
 
@@ -35,6 +41,10 @@ const LAPSE: f32 = 0.04;
 /// within a segment are strongly correlated, so a segment counts as a few targets.
 const SEGMENT_WEIGHT: f32 = 3.0;
 const SLOPES: [f32; 6] = [0.04, 0.07, 0.11, 0.17, 0.26, 0.4];
+/// A fixed-difficulty run needs this many outcomes to count as holding the goal.
+pub const MIN_RUN_OUTCOMES: usize = 10;
+/// A run this far below the goal rate rules out a stretch run next.
+const WELL_BELOW: f32 = 0.10;
 const GRID: usize = 161;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -52,11 +62,15 @@ pub struct Adaptive {
     /// Seconds per tracking segment: the target speed is set at the start of each
     /// segment and the share of time on target is the outcome.
     pub segment_s: f32,
+    /// Tracking: count time only while a target is engaged (damaged and not yet
+    /// healed back to full), so moving to a fresh target after a kill isn't off
+    /// target. For switching, with `regen_per_s` so an abandoned target heals.
+    pub engaged_only: bool,
 }
 
 impl Default for Adaptive {
     fn default() -> Self {
-        Adaptive { goal: 0.85, knob: Knob::Auto, easy: 0.0, hard: 0.0, start: 0.0, segment_s: 2.0 }
+        Adaptive { goal: 0.85, knob: Knob::Auto, easy: 0.0, hard: 0.0, start: 0.0, segment_s: 2.0, engaged_only: false }
     }
 }
 
@@ -72,12 +86,16 @@ pub enum Knob {
     TargetSpeed,
     /// Target radius in meters. Lower is harder.
     Radius,
+    /// Seconds allowed from one kill to the next. A kill inside that time is a
+    /// success; each stretch of that length with no kill is a failure. Lower is
+    /// harder. Rates switching on pace rather than on each target's own timer.
+    KillPace,
 }
 
 impl Knob {
     pub fn unit(self) -> &'static str {
         match self {
-            Knob::Lifetime => "s",
+            Knob::Lifetime | Knob::KillPace => "s",
             Knob::TargetSpeed => "°/s",
             Knob::Radius | Knob::Auto => "m",
         }
@@ -89,6 +107,7 @@ impl Knob {
             Knob::Lifetime => "Target lifetime",
             Knob::TargetSpeed => "Target speed",
             Knob::Radius => "Target size",
+            Knob::KillPace => "Kill pace",
         }
     }
 
@@ -109,7 +128,7 @@ impl Knob {
 
     pub fn format(self, v: f32) -> String {
         match self {
-            Knob::Lifetime => format!("{v:.2} s"),
+            Knob::Lifetime | Knob::KillPace => format!("{v:.2} s"),
             Knob::TargetSpeed => format!("{v:.0} °/s"),
             Knob::Radius | Knob::Auto => format!("{v:.2} m"),
         }
@@ -154,6 +173,7 @@ impl Adaptive {
                 (3.0, 180.0, v)
             }
             Knob::Radius | Knob::Auto => (s.targets.radius * 2.0, s.targets.radius * 0.3, s.targets.radius),
+            Knob::KillPace => (3.0, 0.3, 1.5),
         };
         let pick = |v: f32, d: f32| if v > 0.0 { v } else { d };
         Resolved {
@@ -217,7 +237,7 @@ impl Mix {
     }
 }
 
-/// What kind of target was picked.
+/// What kind of difficulty was picked, for a target or a whole run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pick {
     Near,
@@ -236,6 +256,20 @@ impl Pick {
             Pick::Calibrate => "calibrate",
         }
     }
+
+    pub fn parse(s: &str) -> Option<Pick> {
+        [Pick::Near, Pick::Stretch, Pick::Easy, Pick::Calibrate].into_iter().find(|p| p.as_str() == s)
+    }
+
+    /// How the game names a run of this kind.
+    pub fn run_label(self) -> &'static str {
+        match self {
+            Pick::Near => "At your level",
+            Pick::Stretch => "Stretch run",
+            Pick::Easy => "Easy run",
+            Pick::Calibrate => "Calibration run",
+        }
+    }
 }
 
 /// A rating carried between runs.
@@ -247,8 +281,10 @@ pub struct Prior {
     pub sd: f32,
     /// Days since that rating was set.
     pub days: f32,
-    /// Best value ever succeeded at, in knob units.
+    /// Hardest value the goal rate was held at for a whole run, in knob units.
     pub fastest: Option<f32>,
+    /// The previous run's pick and success rate, for the guard rails.
+    pub last_run: Option<(Pick, f32)>,
 }
 
 /// The current rating: a posterior over (θ, s).
@@ -263,9 +299,11 @@ pub struct Rating {
     pub timeline: Vec<(f32, f32)>,
     pub start_value: f32,
     pub best_before: Option<f32>,
+    /// Set by [`Rating::finish_run`] when this run held the goal rate.
     pub fastest: Option<f32>,
     last_pick: Pick,
     last_failed: bool,
+    last_run: Option<(Pick, f32)>,
 }
 
 /// Summary statistics of the posterior.
@@ -320,6 +358,7 @@ impl Rating {
             fastest: None,
             last_pick: Pick::Near,
             last_failed: false,
+            last_run: prior.and_then(|p| p.last_run),
         };
         r.start_value = r.value();
         r.timeline.push((0.0, r.start_value));
@@ -380,10 +419,46 @@ impl Rating {
         self.estimate().sd < 0.12 || self.outcomes.len() >= 25
     }
 
-    /// Chooses the next target's difficulty. Returns the knob value, the planned
-    /// chance of success, and what kind of pick it was.
-    pub fn pick(&mut self, rng: &mut Rng, mix: Mix) -> (f32, f32, Pick) {
+    /// Chooses one difficulty for a whole run from the mix. Guard rails: no stretch
+    /// run right after one well below the goal, and never two stretch runs in a row.
+    pub fn pick_run(&self, rng: &mut Rng, mix: Mix) -> (f32, f32, Pick) {
+        let (near, stretch, _) = mix.shares();
+        let stretch_ok = self.last_run.is_none_or(|(p, s)| p != Pick::Stretch && s >= self.cfg.goal - WELL_BELOW);
+        let r = rng.next_f32();
+        let (kind, chance) = if r < near || (!stretch_ok && r < near + stretch) {
+            (Pick::Near, 0.80 + rng.next_f32() * 0.10)
+        } else if r < near + stretch {
+            (Pick::Stretch, 0.55 + rng.next_f32() * 0.17)
+        } else {
+            (Pick::Easy, 0.93 + rng.next_f32() * 0.04)
+        };
+        (self.value_at(chance), chance, kind)
+    }
+
+    /// The knob value with this chance of success, at the posterior mean.
+    fn value_at(&self, chance: f32) -> f32 {
         let e = self.estimate();
+        let q = ((chance - LAPSE / 2.0) / (1.0 - LAPSE)).clamp(0.01, 0.99);
+        let h = (e.theta - e.slope * (q / (1.0 - q)).ln()).clamp(self.h_easy(), self.h_hard());
+        self.cfg.knob.value(h)
+    }
+
+    /// Ends a fixed-difficulty run at `value`. If the run held the goal rate, that
+    /// value becomes this run's best, and the result is true for a breakthrough:
+    /// held at a value harder than the best before.
+    pub fn finish_run(&mut self, value: f32) -> bool {
+        let held = self.outcomes.len() >= MIN_RUN_OUTCOMES && self.success_rate().is_some_and(|r| r >= self.cfg.goal);
+        if !held {
+            return false;
+        }
+        self.fastest = Some(value);
+        let k = self.cfg.knob;
+        self.best_before.is_some_and(|b| k.h(value) > k.h(b) + 1e-6)
+    }
+
+    /// Chooses the next target's difficulty in a calibration run. Returns the knob
+    /// value, the planned chance of success, and what kind of pick it was.
+    pub fn pick(&mut self, rng: &mut Rng, mix: Mix) -> (f32, f32, Pick) {
         let (near, stretch, _) = mix.shares();
         let (kind, chance) = if !self.calibrated() {
             (Pick::Calibrate, 0.65 + rng.next_f32() * 0.25)
@@ -399,17 +474,13 @@ impl Rating {
                 (Pick::Easy, 0.95 + rng.next_f32() * 0.03)
             }
         };
-        // Invert the model at the posterior mean: the difficulty with that chance.
-        let q = ((chance - LAPSE / 2.0) / (1.0 - LAPSE)).clamp(0.01, 0.99);
-        let h = (e.theta - e.slope * (q / (1.0 - q)).ln()).clamp(self.h_easy(), self.h_hard());
         self.last_pick = kind;
-        (self.cfg.knob.value(h), chance, kind)
+        (self.value_at(chance), chance, kind)
     }
 
     /// Records an outcome at a knob value: 1 = success, 0 = failure, or the share
-    /// of time on target for a tracking segment. Returns true for a breakthrough:
-    /// a success harder than anything before.
-    pub fn update(&mut self, t: f32, value: f32, outcome: f32, tracking: bool) -> bool {
+    /// of time on target for a tracking segment.
+    pub fn update(&mut self, t: f32, value: f32, outcome: f32, tracking: bool) {
         let outcome = outcome.clamp(0.0, 1.0);
         let h = self.cfg.knob.h(value);
         let w = if tracking { SEGMENT_WEIGHT } else { 1.0 };
@@ -424,21 +495,6 @@ impl Rating {
         let success = outcome >= if tracking { self.cfg.goal } else { 0.5 };
         self.last_failed = !success;
         self.timeline.push((t, self.value()));
-        let k = self.cfg.knob;
-        let harder = |a: f32, b: f32| k.h(a) > k.h(b) + 1e-6;
-        let mut breakthrough = false;
-        if success {
-            if self.fastest.is_none_or(|f| harder(value, f)) {
-                breakthrough = self.best_before.is_some_and(|b| harder(value, b)) && self.outcomes.len() > 5;
-                self.fastest = Some(value);
-            }
-            if let Some(b) = self.best_before
-                && harder(value, b)
-            {
-                self.best_before = Some(value);
-            }
-        }
-        breakthrough
     }
 
     pub fn success_rate(&self) -> Option<f32> {
@@ -499,8 +555,14 @@ mod tests {
     #[test]
     fn mix_keeps_success_near_the_goal() {
         let p = player(0.6, 0.1);
-        let prior =
-            Prior { theta: Knob::Lifetime.h(0.6) + 0.1 * 1.7346, slope: 0.1, sd: 0.05, days: 0.0, fastest: None };
+        let prior = Prior {
+            theta: Knob::Lifetime.h(0.6) + 0.1 * 1.7346,
+            slope: 0.1,
+            sd: 0.05,
+            days: 0.0,
+            fastest: None,
+            last_run: None,
+        };
         for (mix, lo, hi) in [(Mix::Steady, 0.82, 0.92), (Mix::Balanced, 0.78, 0.9), (Mix::Push, 0.72, 0.86)] {
             let mut r = Rating::new(cfg(), Some(prior));
             let rate = play(&mut r, &p, 600, mix, 9);
@@ -508,10 +570,13 @@ mod tests {
         }
     }
 
+    fn rated(at: f32, sd: f32, fastest: Option<f32>, last_run: Option<(Pick, f32)>) -> Prior {
+        Prior { theta: Knob::Lifetime.h(at) + 0.12 * 1.7346, slope: 0.12, sd, days: 0.0, fastest, last_run }
+    }
+
     #[test]
     fn surprises_move_the_rating_most() {
-        let prior =
-            Prior { theta: Knob::Lifetime.h(0.6) + 0.12 * 1.7346, slope: 0.12, sd: 0.1, days: 0.0, fastest: Some(0.5) };
+        let prior = rated(0.6, 0.1, Some(0.5), None);
         let base = Rating::new(cfg(), Some(prior)).value();
         let moved = |v: f32, outcome: f32| {
             let mut r = Rating::new(cfg(), Some(prior));
@@ -522,26 +587,94 @@ mod tests {
         assert!(moved(0.42, 1.0) > 1.5 * moved(0.6, 1.0), "{} vs {}", moved(0.42, 1.0), moved(0.6, 1.0));
         // ...and missing a stretch target costs less than missing one at your level.
         assert!(moved(0.42, 0.0) < moved(0.6, 0.0), "{} vs {}", moved(0.42, 0.0), moved(0.6, 0.0));
-        let mut a = Rating::new(cfg(), Some(prior));
-        assert!(!a.update(1.0, 0.42, 1.0, false), "no breakthroughs in the first few targets");
-        assert_eq!(a.fastest, Some(0.42));
+    }
+
+    /// A whole run at one value: `hits` successes out of `n`.
+    fn run_at(prior: Prior, value: f32, hits: usize, n: usize) -> Rating {
+        let mut r = Rating::new(cfg(), Some(prior));
+        for i in 0..n {
+            r.update(i as f32, value, if i < hits { 1.0 } else { 0.0 }, false);
+        }
+        r
     }
 
     #[test]
-    fn breakthroughs_beat_the_previous_best() {
-        let prior =
-            Prior { theta: Knob::Lifetime.h(0.6) + 0.12 * 1.7346, slope: 0.12, sd: 0.1, days: 0.0, fastest: Some(0.5) };
-        let mut r = Rating::new(cfg(), Some(prior));
-        for i in 0..6 {
-            assert!(!r.update(i as f32, 0.7, 1.0, false));
+    fn breakthroughs_hold_the_goal_for_a_whole_run() {
+        let prior = rated(0.6, 0.1, Some(0.5), None);
+        // Held 90% at 0.45 s, faster than the 0.5 s best.
+        let mut r = run_at(prior, 0.45, 45, 50);
+        assert!(r.finish_run(0.45));
+        assert_eq!(r.fastest, Some(0.45));
+        // Held it, but slower than the best: a good run, not a breakthrough.
+        let mut r = run_at(prior, 0.55, 45, 50);
+        assert!(!r.finish_run(0.55));
+        assert_eq!(r.fastest, Some(0.55));
+        // Fast, but below the goal: no breakthrough and no best.
+        let mut r = run_at(prior, 0.45, 35, 50);
+        assert!(!r.finish_run(0.45));
+        assert_eq!(r.fastest, None);
+        // Too short a run to count.
+        let mut r = run_at(prior, 0.45, 5, 5);
+        assert!(!r.finish_run(0.45));
+    }
+
+    #[test]
+    fn a_full_run_moves_the_rating_toward_what_happened() {
+        let prior = rated(0.6, 0.1, None, None);
+        let base = Rating::new(cfg(), Some(prior)).value();
+        // All hits at 0.6 s: faster rating (shorter lifetime). Half misses: slower.
+        assert!(run_at(prior, 0.6, 50, 50).value() < base);
+        assert!(run_at(prior, 0.6, 25, 50).value() > base * 1.05);
+    }
+
+    #[test]
+    fn run_picks_follow_the_mix_with_guard_rails() {
+        let count = |last_run, mix| {
+            let r = Rating::new(cfg(), Some(rated(0.6, 0.05, None, last_run)));
+            let mut rng = Rng::new(11);
+            let mut n = [0usize; 3];
+            for _ in 0..2000 {
+                let (v, chance, kind) = r.pick_run(&mut rng, mix);
+                assert!((r.chance_at(v) - chance).abs() < 0.03, "{kind:?} at {v} has the planned chance");
+                n[match kind {
+                    Pick::Near => 0,
+                    Pick::Stretch => 1,
+                    _ => 2,
+                }] += 1;
+            }
+            n.map(|c| c as f32 / 2000.0)
+        };
+        let [near, stretch, easy] = count(Some((Pick::Near, 0.86)), Mix::Balanced);
+        assert!((near - 0.65).abs() < 0.04 && (stretch - 0.20).abs() < 0.04 && (easy - 0.15).abs() < 0.04);
+        // After a stretch run, or a run well below the goal: no stretch.
+        assert_eq!(count(Some((Pick::Stretch, 0.9)), Mix::Push)[1], 0.0);
+        assert_eq!(count(Some((Pick::Near, 0.70)), Mix::Push)[1], 0.0);
+        // A run just under the goal is fine.
+        assert!(count(Some((Pick::Near, 0.80)), Mix::Push)[1] > 0.3);
+        // Stretch runs are harder than near runs, easy runs easier.
+        let r = Rating::new(cfg(), Some(rated(0.6, 0.05, None, None)));
+        let mut rng = Rng::new(3);
+        for _ in 0..200 {
+            let (v, _, kind) = r.pick_run(&mut rng, Mix::Push);
+            match kind {
+                Pick::Stretch => assert!(v < 0.6),
+                Pick::Easy => assert!(v > 0.6),
+                _ => assert!((v / 0.6 - 1.0).abs() < 0.12, "near run at {v}"),
+            }
         }
-        assert!(r.update(7.0, 0.45, 1.0, false), "faster than the 0.5 s best");
-        assert!(!r.update(8.0, 0.48, 1.0, false), "slower than this run's 0.45");
+    }
+
+    #[test]
+    fn picks_round_trip_as_text() {
+        for p in [Pick::Near, Pick::Stretch, Pick::Easy, Pick::Calibrate] {
+            assert_eq!(Pick::parse(p.as_str()), Some(p));
+        }
+        assert_eq!(Pick::parse("level"), None);
     }
 
     #[test]
     fn time_away_widens_the_prior() {
-        let p = |days| Prior { theta: 0.0, slope: 0.12, sd: 0.05, days, fastest: None };
+        let p = |days| Prior { theta: 0.0, slope: 0.12, sd: 0.05, days, fastest: None, last_run: None };
         let fresh = Rating::new(cfg(), Some(p(0.0))).estimate().sd;
         let later = Rating::new(cfg(), Some(p(30.0))).estimate().sd;
         assert!(later > fresh * 2.0, "{fresh} -> {later}");

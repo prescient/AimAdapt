@@ -6,7 +6,7 @@ RustyAim is an aim trainer for Windows. It rates you in real units, keeps each d
 
 **Status:** `todo` · `doing` · `done` · `spike` (research before committing)
 
-Last reviewed: Nov 4, 2026 (after Core Week, `d9a0ea8`).
+Last reviewed: Nov 4, 2026 (after the first playtest session).
 
 ---
 
@@ -24,9 +24,10 @@ Last reviewed: Nov 4, 2026 (after Core Week, `d9a0ea8`).
 - [x] Runs saved to the shared database with KovaaK's field names plus `source = 'rustyaim'`.
 - [x] The app's exe runs the trainer with `--play`, `--workout` or `--program`, so the release is a single file.
 - [x] `--smoke` bot that plays like a person, for end-to-end checks and demo data.
+- [x] Moving targets bounce off the room's floor, ceiling and walls, not just their spawn area (Float Track sank through the floor). From [playtesting](PLAYTEST.md).
+- [x] Time-left bars on timed targets, and timed targets alternate between two colors (orange-red and blue by default), so the next to expire and the newest are easy to tell apart. Health bars for switching targets that heal. All scenario options. From [playtesting](PLAYTEST.md).
 
 ### To do
-- [ ] `todo` P1 **Next up:** a visible countdown on timed targets, e.g. shrinking slightly or fading color as time runs out, so you can tell which target expires first. From playtesting Speed Switch ([PLAYTEST.md](PLAYTEST.md)).
 - [ ] `todo` P1 Pause menu and pausing on focus loss (Esc quits straight away today).
 - [ ] `todo` P1 Hit and kill sounds (generated, no asset files), with volume in settings.
 - [ ] `todo` P2 Measure input-to-photon latency and frame pacing; optional frame cap.
@@ -57,20 +58,27 @@ Last reviewed: Nov 4, 2026 (after Core Week, `d9a0ea8`).
 ## 3. Adaptive rating
 
 ### Done
-- [x] Each scenario rates one knob in real units: target lifetime (s), tracking speed (°/s) or size (m).
+- [x] Each scenario rates one knob in real units: target lifetime (s), tracking speed (°/s), size (m) or kill pace (s between kills).
 - [x] A Bayesian, Glicko-like estimate of the 85% point and how steeply success falls off.
-  - It settles within about 15–25 targets.
   - It carries over between runs, and its uncertainty widens with days away.
-- [x] Target mix by chance of success: near (80–90%), stretch (45–70%) and easy (95%+).
+- [x] Adapt between runs, not during them (from [playtesting](PLAYTEST.md): changing difficulty target by target felt chaotic).
+  - The first adaptive run on a scenario is a calibration run that adapts as you play.
+  - Every later run plays at one value, shown up front ("This run: 0.62 s"), picked from the mix: at your level (80–90% chance), stretch (55–72%) and easy (93–97%).
   - Steady, Balanced and Push mixes are set per profile.
-  - Guard rails: no stretch target right after a miss, and never two in a row.
-  - Breakthroughs are recorded when you beat your fastest hit.
+  - Guard rails: no stretch run after a stretch run, or after a run more than 10 points below the goal.
+  - A breakthrough is holding the goal for a whole run at a value past your best, announced at the end of the run.
 - [x] Clicking success needs a kill before the timeout with at most one miss on it. Tracking is scored per 2-second segment by the share of time on target.
+- [x] Switching is rated on what it trains (from [playtesting](PLAYTEST.md): both ratings were mostly target acquisition time).
+  - Speed Switch: kill pace. A kill within the pace of the one before is a success; each empty window is a failure. No per-target timers.
+  - Stability Switch and Switch Track: target speed, counting only time while a target is engaged (damaged and not yet healed). Their targets heal when you leave them and show health bars.
+  - The HUD and results show kills a minute; Insights splits acquisition time from time on target while killing.
 - [x] Replaced the first version, which used 0–100 levels and a staircase.
 
 ### To do
 - [ ] `spike` P1 Tune against real play. The default easy/hard ranges, first guesses and the "consistent vs. fades gradually" cut-off are educated guesses that have only been checked with the bot.
 - [ ] `todo` P2 Show the stretch/near/easy split and breakthroughs per run in Insights.
+- [ ] `todo` P2 Offer (not force) another calibration run when a rating has become very uncertain, e.g. after a long break. From [playtesting](PLAYTEST.md).
+- [ ] `todo` P2 Timed Grid still rates each target's own timer, so the order you clear its three targets matters. The time-left bars and colors help; if it still feels like a queue, consider kill pace there too. From [playtesting](PLAYTEST.md).
 
 ## 4. Programs and workouts
 
