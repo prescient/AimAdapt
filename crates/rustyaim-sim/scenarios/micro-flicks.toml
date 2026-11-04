@@ -1,0 +1,23 @@
+name = "Micro Flicks"
+description = "Tiny targets that appear just next to the last one. Trains small, precise corrections."
+author = "RustyAim"
+category = "clicking"
+tags = ["flick", "micro", "precision"]
+
+[timing]
+duration_s = 60.0
+
+[targets]
+count = 1
+radius = 0.12
+
+[targets.spawn]
+distance = [10.0, 10.0]
+yaw = [-12.0, 12.0]
+pitch = [-6.0, 10.0]
+min_separation = 1.5
+max_from_last = 6.0
+
+[scoring]
+per_kill = 100.0
+per_miss = -30.0

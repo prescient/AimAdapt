@@ -1,0 +1,22 @@
+name = "Wide Flicks"
+description = "One small target at a time, always far from the last one. Trains big, accurate flicks."
+author = "RustyAim"
+category = "clicking"
+tags = ["flick", "wide"]
+
+[timing]
+duration_s = 60.0
+
+[targets]
+count = 1
+radius = 0.3
+
+[targets.spawn]
+distance = [12.0, 14.0]
+yaw = [-60.0, 60.0]
+pitch = [-8.0, 20.0]
+min_separation = 30.0
+
+[scoring]
+per_kill = 100.0
+per_miss = -25.0

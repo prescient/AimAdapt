@@ -1,6 +1,9 @@
 //! RustyAim desktop app: a Tauri shell over `rustyaim-core`. The UI in `ui/` asks
 //! for a snapshot of everything it shows, and the folder watcher tells it when new
 //! runs arrive so it can refresh.
+//!
+//! Run with `--play <scenario id>`, the same executable is the aim trainer instead
+//! (see `rustyaim-engine`); the Play screen starts it that way.
 
 // Hide the console window in release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -18,7 +21,9 @@ use rustyaim_core::{Db, ImportReport, discover, import};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-struct AppData {
+mod trainer;
+
+pub(crate) struct AppData {
     db: Mutex<Db>,
     db_path: PathBuf,
     stats_dir: Option<PathBuf>,
@@ -59,7 +64,7 @@ struct ScenarioDetail {
     cold_starts: Vec<ColdStart>,
 }
 
-fn err(e: impl std::fmt::Display) -> String {
+pub(crate) fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
 
@@ -127,12 +132,20 @@ fn dump_snapshot(state: &AppData, path: &std::path::Path) -> Result<(), String> 
         .into_iter()
         .filter_map(|name| scenario_detail(&p, &state.progress, &name).map(|d| (name, d)))
         .collect();
+    drop(db);
+    let t = trainer::TrainerState {
+        data_dir: rustyaim_core::db::data_dir().map_err(err)?,
+        playing: std::sync::atomic::AtomicBool::new(false),
+    };
+    let trainer = trainer::build_trainer(state, &t)?;
     #[derive(Serialize)]
     struct Dump<'a> {
         snapshot: &'a Snapshot,
         scenarios: &'a std::collections::BTreeMap<String, ScenarioDetail>,
+        trainer: &'a trainer::Trainer,
     }
-    let json = serde_json::to_string(&Dump { snapshot: &snapshot, scenarios: &scenarios }).map_err(err)?;
+    let json =
+        serde_json::to_string(&Dump { snapshot: &snapshot, scenarios: &scenarios, trainer: &trainer }).map_err(err)?;
     std::fs::write(path, json).map_err(err)
 }
 
@@ -174,6 +187,12 @@ fn watch_stats(app: AppHandle, dir: PathBuf) {
 }
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    // Trainer mode: no app window, no import, just the game.
+    if args.iter().any(|a| a == "--play") {
+        std::process::exit(rustyaim_engine::run_from_args(&args[1..]));
+    }
+
     let db_path = rustyaim_core::db::default_path().expect("couldn't find a folder for the database");
     let db = Db::open(&db_path).expect("couldn't open the database");
     let data = AppData {
@@ -187,7 +206,6 @@ fn main() {
     // Catch up on runs played while the app was closed before the first screen loads.
     let _ = import_now(&data);
 
-    let args: Vec<String> = std::env::args().collect();
     if let Some(i) = args.iter().position(|a| a == "--dump-snapshot") {
         let path = args.get(i + 1).expect("--dump-snapshot needs a file path");
         dump_snapshot(&data, std::path::Path::new(path)).expect("couldn't write the snapshot");
@@ -195,9 +213,14 @@ fn main() {
     }
 
     let watch_dir = data.stats_dir.clone();
+    let trainer_state = trainer::TrainerState {
+        data_dir: rustyaim_core::db::data_dir().expect("couldn't find the data folder"),
+        playing: std::sync::atomic::AtomicBool::new(false),
+    };
 
     tauri::Builder::default()
         .manage(data)
+        .manage(trainer_state)
         .setup(move |app| {
             if let Some(dir) = watch_dir {
                 let handle = app.handle().clone();
@@ -205,7 +228,17 @@ fn main() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![snapshot, scenario, rescan])
+        .invoke_handler(tauri::generate_handler![
+            snapshot,
+            scenario,
+            rescan,
+            trainer::trainer,
+            trainer::check_scenario,
+            trainer::save_scenario,
+            trainer::delete_scenario,
+            trainer::save_engine_settings,
+            trainer::play,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running RustyAim");
 }

@@ -9,6 +9,8 @@ UI glitches matter less: they're visible, and easy to spot and fix.
 
 So most testing effort goes into `rustyaim-core`, where all parsing and maths lives, and the UI is kept thin.
 
+The built-in trainer follows the same pattern. All game rules live in `rustyaim-sim`, which has no graphics and is tested directly. `rustyaim-engine` only feeds it mouse input and draws what it reports.
+
 ## What runs when
 
 | When | What | How |
@@ -30,6 +32,18 @@ These cover pure logic with small, hand-built inputs, one behaviour per test. To
 - **discover:** Steam `libraryfolders.vdf` parsing.
 
 **Rule:** every bug fix starts with a failing unit test.
+
+### 1b. Trainer rules (`rustyaim-sim`)
+
+These are 26 tests over the scenario format and simulation. Each one steps the simulation at 240 Hz with scripted aim, so no window is needed:
+
+- **Format:** an empty file gives the defaults, TOML round-trips, unknown fields are rejected, bad values get plain messages, and the fingerprint ignores the description but not the difficulty.
+- **Field list:** every scenario field is described exactly once, every choice parses, every default is within its limits, and SCENARIOS.md mentions every field.
+- **Simulation:** sphere and capsule hits, countdown blocks shots, kills respawn in the same frame, misses, fire rate on hold, time and kill limits, 60 Hz beam accuracy, moving targets staying inside their area at a fixed distance, lifetime timeouts and shrinking, spawn spacing, and the same seed replaying the same run.
+- **Library:** built-ins are valid, and user scenarios save, load, rename on clash, delete, and reject `../` ids.
+- **Engine record** (`rustyaim-engine`): an engine run saved through `insert_runs` gets the right score, accuracy, length and `source`, keeps separate bests for variants, and is ignored when matching KovaaK's settings.
+
+**Engine smoke test:** `rustyaim-engine <scenario> --smoke <folder> --db <file>` has a bot play a 4-second run, then saves screenshots mid-run and on the results screen. It needs a GPU, so it's run by hand, not on CI. Check the screenshots and that the run is in the test database.
 
 ### 2. Fixture tests (`crates/rustyaim-core/tests/`)
 
@@ -55,7 +69,7 @@ Serialize the reports (`TrainingReport`, `ScenarioStats` and the rest) for the f
 
 ### 5. Database tests
 
-Already covered: a new database migrates to the current schema, and reopening keeps it.
+Already covered: a new database migrates to the current schema (version 2 adds `runs.source`), and reopening keeps it.
 
 **Rule:** each new migration gets a test that opens a database from the previous version (saved as a fixture) and checks the data survived.
 
@@ -85,6 +99,7 @@ The Tauri commands (`snapshot`, `scenario`, `rescan`) build their payloads from 
 3. Play one scenario. The run should appear without restarting the app.
 4. Click each screen and check that today, the streak and the latest run look right.
 5. Click Rescan. The counts should not change.
+6. On Play, start Static Grid and one tracking scenario. Check that mouse sensitivity matches KovaaK's (a full turn should take the same distance), the FPS is well above your monitor's refresh rate, and the run appears on Progress after the trainer closes.
 
 ## Known risks to test for
 

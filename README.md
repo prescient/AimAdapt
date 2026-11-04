@@ -1,14 +1,16 @@
 # RustyAim
 
-Tracks your KovaaK's aim training: imports the per-run stats files into a local SQLite database, then reports progress and training time. See [BACKLOG.md](BACKLOG.md) for the plan and [TESTING.md](TESTING.md) for how it's tested.
+Tracks your aim training. RustyAim imports KovaaK's per-run stats files into a local SQLite database and reports progress and training time. It also has its own built-in aim trainer, with scenarios you can edit. See [BACKLOG.md](BACKLOG.md) for the plan, [SCENARIOS.md](SCENARIOS.md) for the scenario format and [TESTING.md](TESTING.md) for how it's tested.
 
 Windows only for now. Download `RustyAim_<version>_x64-portable.exe` from [releases](../../releases) and run it; there is nothing to install. Installers (setup .exe and .msi) are attached too if you prefer a Start menu entry and uninstaller. Needs the WebView2 runtime, which ships with Windows 11 and current Windows 10.
 
 ## Layout
 
-- `crates/rustyaim-core` handles parsing, storage, import and summaries. All logic lives here.
+- `crates/rustyaim-core` handles parsing, storage, import and summaries.
+- `crates/rustyaim-sim` holds the trainer's rules: the scenario format, a description of every field (used to build the editor), and the simulation (spawning, movement, hits, scoring). It has no graphics, so it's fully unit-tested.
+- `crates/rustyaim-engine` is the trainer itself: a Bevy window with raw mouse input and no frame cap. It saves finished runs to the same database.
 - `crates/rustyaim-cli` is the `rustyaim-cli` command line front end.
-- `crates/rustyaim-app` is the Tauri desktop app. Its UI is plain HTML/CSS/JS in `ui/`, with no build step.
+- `crates/rustyaim-app` is the Tauri desktop app. Its UI is plain HTML/CSS/JS in `ui/`, with no build step. Run with `--play <scenario>`, the same exe runs the trainer instead, which keeps the download a single file.
 
 ## Desktop app
 
@@ -17,6 +19,16 @@ cargo run -p rustyaim-app
 ```
 
 It imports new runs on startup, watches the stats folder while open, and refreshes the screens when new runs arrive. It uses the same database as the CLI.
+
+The **Play** screen lists the built-in and your own scenarios, with your best for each. Play opens the trainer full screen (Esc quits, R restarts, Space plays again). Copy & edit opens a form with every setting the engine supports. Your sensitivity and FOV start from your latest KovaaK's run. RustyAim runs show up in Progress and Training time next to your KovaaK's runs.
+
+To run the trainer on its own while developing:
+
+```bash
+cargo run -p rustyaim-engine -- builtin:static-grid --windowed
+```
+
+`--smoke <folder>` makes a bot play a 4-second version, saves `play.png` and `results.png` there, and exits. It's a quick check that rendering, input and saving work on a machine; add `--db <file>` to keep the test run out of your history.
 
 To preview the UI in a browser against your real data, dump a snapshot next to the UI files and serve the folder (the dump is gitignored):
 

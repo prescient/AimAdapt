@@ -1,0 +1,22 @@
+name = "Static Grid"
+description = "Three still targets in front of you. Clear them as fast as you can; a new one appears as each goes. Trains speed and click timing."
+author = "RustyAim"
+category = "clicking"
+tags = ["static", "speed", "beginner"]
+
+[timing]
+duration_s = 60.0
+
+[targets]
+count = 3
+radius = 0.35
+
+[targets.spawn]
+distance = [10.0, 10.0]
+yaw = [-18.0, 18.0]
+pitch = [-4.0, 12.0]
+min_separation = 6.0
+
+[scoring]
+per_kill = 100.0
+per_miss = -20.0

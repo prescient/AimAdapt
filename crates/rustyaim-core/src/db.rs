@@ -15,7 +15,8 @@ const TIME_FORMAT: &str = "%Y-%m-%dT%H:%M:%S%.3f";
 
 /// Each entry upgrades the schema by one version (tracked in `PRAGMA user_version`).
 /// Never edit an entry once released; add a new one.
-const MIGRATIONS: &[&str] = &[r#"
+const MIGRATIONS: &[&str] = &[
+    r#"
 CREATE TABLE runs (
     id                INTEGER PRIMARY KEY,
     file_name         TEXT NOT NULL UNIQUE,
@@ -91,16 +92,41 @@ CREATE TABLE import_errors (
     error     TEXT NOT NULL,
     seen_at   TEXT NOT NULL
 );
-"#];
+"#,
+    r#"
+-- Where a run came from: 'kovaaks' (imported stats file) or 'rustyaim' (built-in engine).
+ALTER TABLE runs ADD COLUMN source TEXT NOT NULL DEFAULT 'kovaaks';
+CREATE INDEX runs_source ON runs (source, scenario);
+"#,
+];
+
+/// Value of the `Source` field (and `runs.source`) for runs played in RustyAim's engine.
+pub const SOURCE_RUSTYAIM: &str = "rustyaim";
 
 /// `%APPDATA%\RustyAim\rustyaim.db`, creating the folder if needed. Shared by the CLI and app.
 pub fn default_path() -> std::io::Result<std::path::PathBuf> {
+    Ok(data_dir()?.join("rustyaim.db"))
+}
+
+/// `%APPDATA%\RustyAim`, created if needed. Holds the database, engine settings and
+/// the player's own scenarios.
+pub fn data_dir() -> std::io::Result<std::path::PathBuf> {
     let base = std::env::var_os("APPDATA")
         .map(std::path::PathBuf::from)
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "APPDATA isn't set"))?;
     let dir = base.join("RustyAim");
     std::fs::create_dir_all(&dir)?;
-    Ok(dir.join("rustyaim.db"))
+    Ok(dir)
+}
+
+/// Sensitivity and FOV from a run, as KovaaK's records them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AimSettings {
+    pub sens_scale: String,
+    pub horiz_sens: f64,
+    pub dpi: i64,
+    pub fov: Option<f64>,
+    pub fov_scale: Option<String>,
 }
 
 pub struct Db {
@@ -171,6 +197,29 @@ impl Db {
         Ok(rows)
     }
 
+    /// Settings from the most recent KovaaK's run that recorded them, used as the
+    /// starting point for the built-in engine's sensitivity and FOV.
+    pub fn latest_kovaaks_settings(&self) -> Result<Option<AimSettings>, DbError> {
+        self.conn
+            .query_row(
+                "SELECT sens_scale, horiz_sens, dpi, fov, fov_scale FROM runs
+                 WHERE source = 'kovaaks' AND sens_scale IS NOT NULL AND horiz_sens IS NOT NULL
+                   AND dpi IS NOT NULL
+                 ORDER BY finished_at DESC LIMIT 1",
+                [],
+                |r| {
+                    Ok(AimSettings {
+                        sens_scale: r.get(0)?,
+                        horiz_sens: r.get(1)?,
+                        dpi: r.get(2)?,
+                        fov: r.get(3)?,
+                        fov_scale: r.get(4)?,
+                    })
+                },
+            )
+            .optional()
+    }
+
     pub fn last_finished_at(&self) -> Result<Option<String>, DbError> {
         self.conn.query_row("SELECT MAX(finished_at) FROM runs", [], |r| r.get(0)).optional().map(Option::flatten)
     }
@@ -198,9 +247,9 @@ fn insert_run(tx: &Transaction, run: &RunFile, imported_at: NaiveDateTime) -> Re
             kills, deaths, hits, misses, avg_ttk_s, damage_done, damage_taken, pause_count,
             pause_duration, scenario_hash, game_version, sens_scale, horiz_sens, vert_sens, dpi,
             fov, fov_scale, max_fps, avg_fps, resolution, avg_target_scale, avg_time_dilation,
-            imported_at
+            imported_at, source
         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
-                  ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31)",
+                  ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32)",
         params![
             run.file_name,
             // The file name is the source of truth; `Scenario:` should match it.
@@ -234,6 +283,7 @@ fn insert_run(tx: &Transaction, run: &RunFile, imported_at: NaiveDateTime) -> Re
             run.field_f64("Avg Target Scale"),
             run.field_f64("Avg Time Dilation"),
             fmt(imported_at),
+            run.field("Source").unwrap_or("kovaaks"),
         ],
     )?;
     if changed == 0 {

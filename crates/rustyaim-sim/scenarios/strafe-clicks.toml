@@ -1,0 +1,30 @@
+name = "Strafe Clicks"
+description = "A body-sized target strafing side to side. Click it as it changes direction. Trains reading movement."
+author = "RustyAim"
+category = "clicking"
+tags = ["moving", "strafe"]
+
+[timing]
+duration_s = 60.0
+
+[targets]
+count = 1
+shape = "capsule"
+radius = 0.3
+height = 1.6
+color = "#ffb547"
+
+[targets.spawn]
+distance = [12.0, 16.0]
+yaw = [-30.0, 30.0]
+pitch = [-5.0, 2.0]
+min_separation = 10.0
+
+[targets.movement]
+kind = "strafe"
+speed = [4.0, 6.0]
+change_every_s = [0.35, 1.0]
+
+[scoring]
+per_kill = 100.0
+per_miss = -20.0

@@ -1,0 +1,35 @@
+name = "Switch Track"
+description = "Three moving targets that each take half a second of beam. Destroy one, then move to the next. Trains target switching."
+author = "RustyAim"
+category = "switching"
+tags = ["switching", "tracking"]
+
+[timing]
+duration_s = 60.0
+
+[weapon]
+kind = "beam"
+trigger = "hold"
+damage_per_s = 200.0
+
+[targets]
+count = 3
+radius = 0.45
+health = 100.0
+color = "#c38bff"
+
+[targets.spawn]
+distance = [11.0, 13.0]
+yaw = [-45.0, 45.0]
+pitch = [-6.0, 18.0]
+min_separation = 15.0
+
+[targets.movement]
+kind = "random"
+speed = [2.0, 4.0]
+change_every_s = [0.5, 1.5]
+vertical = 0.4
+
+[scoring]
+per_kill = 100.0
+per_damage = 0.0

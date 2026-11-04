@@ -12,7 +12,10 @@ const invoke = tauri
       const d = await devData;
       if (cmd === "snapshot") return d.snapshot;
       if (cmd === "scenario") return d.scenarios[args.name] ?? null;
-      return d.snapshot.last_import;
+      if (cmd === "trainer") return d.trainer;
+      if (cmd === "check_scenario") return [];
+      if (cmd === "rescan") return d.snapshot.last_import;
+      throw new Error("Only available in the app");
     };
 
 const ui = {
@@ -103,8 +106,9 @@ function route() {
 
 function render() {
   const { view, arg } = route();
+  const navView = view === "edit" ? "play" : view;
   document.querySelectorAll(".nav").forEach((a) => {
-    const on = a.dataset.view === view;
+    const on = a.dataset.view === navView;
     a.classList.toggle("active", on);
     on ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current");
   });
@@ -115,7 +119,7 @@ function render() {
     return;
   }
   if (!ui.snap) return;
-  const views = { dashboard, progress, training, benchmarks, library };
+  const views = { dashboard, play, edit, progress, training, benchmarks, library };
   main.innerHTML = (views[view] || dashboard)(arg);
   if (view === "progress") afterProgress(arg);
 }

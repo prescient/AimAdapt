@@ -124,6 +124,41 @@ Goal: each day the app builds a plan (which scenarios, how many runs, at what di
 - [ ] `spike` Downsides: generated scenarios aren't on public leaderboards, and scores aren't comparable to the original scenario. Decide whether to keep a "speed %" field linking each variant back to its original.
 - [ ] `todo` If it works: continuous difficulty (e.g. +5% speed per step) instead of fixed rungs.
 
+## Epic E: Built-in aim trainer (P1)
+
+Goal: RustyAim runs its own scenarios instead of relying only on KovaaK's. The engine is Bevy, in its own window with raw mouse input and no frame cap. Scenarios are TOML files with a published schema (SCENARIOS.md), and the app has a form-based editor built from that schema. KovaaK's import keeps working; engine runs go into the same database tagged `source = 'rustyaim'`.
+
+Layout: `rustyaim-sim` (scenario format, field descriptions, simulation; no graphics, fully tested) → `rustyaim-engine` (Bevy window, HUD, saving runs) → the app, which starts the trainer by running its own exe with `--play <id>` so it stays a single file.
+
+### E1. First playable version
+- [x] `done` Scenario format: timing, arena, weapon (hitscan or beam; click, hold or always), targets (count, sphere or capsule, size, health, regen, lifetime, shrink), spawn area (distance, yaw, pitch, spacing, max distance from the last kill), movement (static, strafe, random) and scoring. Validation with plain-language messages.
+- [x] `done` Field list (`spec.rs`) with labels, help, limits and choices; tests keep it in step with the format.
+- [x] `done` Simulation: spawning, angle-space movement with bouncing at the area edge, ray hits on spheres and capsules, 60 Hz beam ticks, kill/TTK records, seeded RNG so a seed replays the same run.
+- [x] `done` Engine: full-screen Bevy window, raw mouse look in cm/360 and DPI, FOV in horizontal 16:9 degrees, gridded room, hit flash, HUD (timer, score, accuracy, kills, FPS), countdown, results with personal best, Esc / R / Space.
+- [x] `done` Runs saved with KovaaK's field names (score, hits, misses, TTK, sens, FOV, FPS), so progress and training screens include them. A scenario fingerprint keeps easier and harder variants apart.
+- [x] `done` Settings start from your latest KovaaK's sensitivity and FOV.
+- [x] `done` Play screen: scenario cards with bests, filters, settings, play button. Editor: every field from the spec, live validation, copy-and-edit for built-ins.
+- [x] `done` Eight original starter scenarios: Static Grid, Wide Flicks, Micro Flicks, Shrink Reflex, Strafe Clicks, Strafe Track, Float Track, Switch Track.
+
+### E2. Feel and feedback
+- [ ] `todo` Hit and kill sounds (generated, no asset files), with volume in settings.
+- [ ] `todo` Measure input-to-photon latency and frame pacing; option for a frame cap.
+- [ ] `todo` Pause on focus loss, and a pause menu instead of Esc quitting straight away.
+- [ ] `todo` Crosshair editor preview in the app; more crosshair options (outline, color on hit).
+- [ ] `todo` In-game results: score chart for this scenario and accuracy by target.
+
+### E3. More of what the engine allows
+- [ ] `todo` Player movement (WASD strafing) and targets that move toward or away from the player.
+- [ ] `todo` Target paths beyond strafe and random: circles, smooth noise, jumps with gravity.
+- [ ] `todo` Projectile weapons with travel time; spread and recoil.
+- [ ] `todo` Time dilation (play at 80% speed) and a target-scale setting, like KovaaK's difficulty variants.
+- [ ] `todo` Visual themes: room colors, target outlines, high-contrast mode.
+
+### E4. Plans with the engine
+- [ ] `todo` Generate difficulty variants automatically (smaller, faster, shorter lifetime) for Epic 6 ladders, since the engine's scenarios are fully under our control.
+- [ ] `todo` Playlists inside the app: run a list of scenarios back to back in one trainer session.
+- [ ] `todo` Record aim traces (view angles per frame) for replay and flick analysis.
+
 ## Epic T: Testing and releases (P1)
 
 The plan is in [TESTING.md](TESTING.md).

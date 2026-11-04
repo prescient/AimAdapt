@@ -179,3 +179,22 @@ td.r, th.r { text-align: right; }
 svg text { font-family: var(--font); }
 .empty-state { padding: 40px 20px; text-align: center; color: var(--dim); }
 .error { color: #ff9d8a; }
+
+/* Play screen and scenario editor */
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px 18px; align-items: start; }
+.form-row { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.form-row > span:first-child, .form-row > label { font-size: 12px; font-weight: 600; color: var(--muted); }
+.form-row.check { flex-direction: row; align-items: center; gap: 10px; min-height: 44px; }
+.form-row.check input { width: 18px; height: 18px; accent-color: var(--rust); }
+.form-row.check span { font-size: 14px; font-weight: 500; color: var(--text); }
+.form-row .help { font-size: 12px; color: var(--dim); }
+.field:has(input[type="color"]) { max-width: 140px; }
+.field input[type="color"] { padding: 0; height: 30px; border: 0; background: transparent; cursor: pointer; }
+.field input[type="number"] { font-family: var(--font-mono); }
+.pair { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.pair .field { flex: 1 1 90px; }
+.textarea { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--control); background: var(--well); color: var(--text); font: inherit; resize: vertical; }
+.editor-groups { display: flex; flex-direction: column; gap: 16px; }
+.problems { margin: 6px 0 0; padding-left: 18px; color: #ffd9c4; font-size: 13px; }
+.scenario-card h3 { font-size: 17px; }
+.scenario-card .chips .btn { min-height: 38px; }
