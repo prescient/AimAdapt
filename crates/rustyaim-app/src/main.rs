@@ -2,8 +2,9 @@
 //! for a snapshot of everything it shows, and the folder watcher tells it when new
 //! runs arrive so it can refresh.
 //!
-//! Run with `--play <scenario id>`, the same executable is the aim trainer instead
-//! (see `rustyaim-engine`); the Play screen starts it that way.
+//! Run with `--play <scenario id>`, `--workout <id>` or `--program <id>`, the same
+//! executable is the aim trainer instead (see `rustyaim-engine`); the Play and
+//! Program screens start it that way.
 
 // Hide the console window in release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -206,10 +207,17 @@ fn watch_stats(app: AppHandle, dir: PathBuf) {
     }
 }
 
+/// Whether these arguments start the trainer rather than the app. Every way the
+/// app launches the trainer must be listed here, or the launch opens a second app
+/// window instead of the game.
+fn is_trainer_launch(args: &[String]) -> bool {
+    args.iter().any(|a| matches!(a.as_str(), "--play" | "--workout" | "--program"))
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     // Trainer mode: no app window, no import, just the game.
-    if args.iter().any(|a| a == "--play") {
+    if is_trainer_launch(&args) {
         std::process::exit(rustyaim_engine::run_from_args(&args[1..]));
     }
 
@@ -275,4 +283,40 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running RustyAim");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(a: &[&str]) -> Vec<String> {
+        std::iter::once("RustyAim.exe").chain(a.iter().copied()).map(String::from).collect()
+    }
+
+    /// Regression: Start on a program day or workout opened a second app window
+    /// because only `--play` was recognized. This checks the exact arguments the
+    /// Play and Program screens launch with.
+    #[test]
+    fn the_apps_own_launches_start_the_trainer() {
+        let launches = [
+            trainer::play_args("builtin:timed-flicks", false),
+            trainer::play_args("builtin:timed-flicks", true),
+            trainer::workout_args("builtin:quick-warmup"),
+            trainer::program_args("builtin:core-week", "mon"),
+        ];
+        for a in launches {
+            let full: Vec<String> = std::iter::once("RustyAim.exe".to_string()).chain(a.clone()).collect();
+            assert!(is_trainer_launch(&full), "{a:?} would open the app instead of the trainer");
+        }
+    }
+
+    #[test]
+    fn every_trainer_launch_starts_the_trainer() {
+        assert!(is_trainer_launch(&args(&["--play", "builtin:timed-flicks", "--adaptive", "--db", "x.db"])));
+        assert!(is_trainer_launch(&args(&["--workout", "builtin:quick-warmup", "--db", "x.db"])));
+        assert!(is_trainer_launch(&args(&["--program", "builtin:core-week", "--day", "mon", "--db", "x.db"])));
+        assert!(!is_trainer_launch(&args(&[])));
+        assert!(!is_trainer_launch(&args(&["--db", "x.db", "--no-import"])));
+        assert!(!is_trainer_launch(&args(&["--dump-snapshot", "out.json"])));
+    }
 }

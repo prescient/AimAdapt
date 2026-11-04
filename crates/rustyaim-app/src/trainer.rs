@@ -258,7 +258,25 @@ pub fn insights(state: State<'_, AppData>, scenario: String) -> Result<Option<in
     insights::scenario(&db, &scenario).map_err(err)
 }
 
-fn launch(app: AppHandle, state: &AppData, t: &TrainerState, args: &[&str]) -> Result<(), String> {
+/// Trainer arguments for a scenario. The app's `main` must recognize every
+/// `*_args` function's result as a trainer launch (see its tests).
+pub(crate) fn play_args(id: &str, adaptive: bool) -> Vec<String> {
+    let mut a = vec!["--play".to_string(), id.to_string()];
+    if adaptive {
+        a.push("--adaptive".into());
+    }
+    a
+}
+
+pub(crate) fn workout_args(id: &str) -> Vec<String> {
+    vec!["--workout".into(), id.into()]
+}
+
+pub(crate) fn program_args(id: &str, day: &str) -> Vec<String> {
+    vec!["--program".into(), id.into(), "--day".into(), day.into()]
+}
+
+fn launch(app: AppHandle, state: &AppData, t: &TrainerState, args: &[String]) -> Result<(), String> {
     if t.playing.swap(true, Ordering::SeqCst) {
         return Err("The trainer is already open".into());
     }
@@ -288,11 +306,7 @@ pub fn play(
 ) -> Result<(), String> {
     // Check it loads first so a broken file shows an error here, not a silent exit.
     library::resolve(&id, &t.scenarios_dir())?;
-    let mut args = vec!["--play", id.as_str()];
-    if adaptive {
-        args.push("--adaptive");
-    }
-    launch(app, &state, &t, &args)
+    launch(app, &state, &t, &play_args(&id, adaptive))
 }
 
 /// Starts the trainer on a workout.
@@ -307,7 +321,7 @@ pub fn play_workout(
     for item in &w.items {
         library::resolve(&item.scenario, &t.scenarios_dir()).map_err(|e| format!("{}: {e}", item.scenario))?;
     }
-    launch(app, &state, &t, &["--workout", id.as_str()])
+    launch(app, &state, &t, &workout_args(&id))
 }
 
 #[derive(Serialize)]
@@ -397,5 +411,5 @@ pub fn play_program(
 ) -> Result<(), String> {
     rustyaim_sim::program::resolve(&id)?;
     let day = day.unwrap_or_else(|| rustyaim_engine::today().id().to_string());
-    launch(app, &state, &t, &["--program", id.as_str(), "--day", day.as_str()])
+    launch(app, &state, &t, &program_args(&id, &day))
 }
