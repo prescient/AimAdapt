@@ -59,13 +59,17 @@ All in `crates/rustyaim-core/src/training.rs`. Reported by `rustyaim-cli time`.
 
 ## Epic 3: Progress tracking (P1)
 
-- [ ] `todo` Per-scenario history: score, accuracy, average TTK, personal-best flags.
-- [ ] `todo` Improvement measures: first run → best, rolling average, recent trend.
-- [ ] `todo` Sensitivity history built from the settings in each run, with markers on charts.
-- [ ] `todo` Plateau detection: N runs without a new best and a flat rolling average.
-- [ ] `todo` Cold-start dip: first run of the day vs. previous best.
-- [ ] `todo` Consistency score: how much scores vary from run to run.
-- [ ] `todo` Fatigue curve: score vs. minutes into the session.
+All in `crates/rustyaim-core/src/progress.rs`. Reported by `rustyaim-cli progress [scenario]` and `rustyaim-cli sens`. Restarted runs stay in the history but never count as bests and are left out of averages.
+
+- [x] `done` Per-scenario history: score, accuracy, average TTK, personal-best flags.
+- [x] `done` Improvement measures: first run → best, average, trend (last 5 runs vs. the 5 before).
+- [x] `done` Sensitivity history from each run's settings (sens, scale, DPI, FOV), with cm/360. Changes are marked in scenario histories, ready for chart markers.
+- [ ] `spike` cm/360 is only verified for the "Overwatch" scale. Valorant/CS/Apex use standard values but KovaaK's names for those scales are unconfirmed.
+- [x] `done` Plateau detection: 10+ runs without a new best and a trend within ±3%.
+- [x] `done` Cold-start dip: the day's first run vs. the best from earlier days, and vs. the rest of that day's runs (the better warm-up measure).
+- [x] `done` Consistency: variation (stdev / mean) of the last 10 runs.
+- [x] `done` Fatigue curve: score relative to each scenario's average, in 10-minute buckets into the session. It's a rough signal because it mixes in which scenarios you play when.
+- [ ] `todo` Compare scores before and after a sensitivity change per scenario (moved here from Epic 7 now that periods exist).
 
 ## Epic 4: Scenario classification and benchmarks (P1)
 
@@ -119,7 +123,6 @@ Goal: each day the app builds a plan (which scenarios, how many runs, at what di
 ## Epic 7: Later (P3)
 
 - [ ] `todo` Session notes: sleep, energy, mood, hardware changes, linked to sessions so you can see how they relate to scores.
-- [ ] `todo` Before/after sensitivity comparison per scenario.
 - [ ] `todo` Export to CSV and database backup/restore.
 - [ ] `todo` Windows installer and auto-update.
 - [ ] `todo` Import older history from other trackers' exports, if needed.

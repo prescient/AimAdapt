@@ -23,8 +23,22 @@ cargo run -p rustyaim-cli -- time
 ```
 
 ```bash
+cargo run -p rustyaim-cli -- progress
+```
+
+```bash
+cargo run -p rustyaim-cli -- progress "vt ww5t novice s5"
+```
+
+```bash
+cargo run -p rustyaim-cli -- sens
+```
+
+```bash
 cargo run -p rustyaim-cli -- watch
 ```
+
+`progress` lists scenarios with best score, change since the first run, trend, and runs since the last personal best, plus cold-start and fatigue summaries. Sort with `--sort played|improved|recent|name`. Give a scenario name (or part of one) to see its full run history. `sens` lists your sensitivity and FOV changes with cm/360.
 
 `time` shows training time: active vs. session time, sessions, days, streak, weekday averages and runs by hour. Options: `--gap 15` (break in minutes that starts a new session), `--day-start 4` (hour a training day begins), `--goal 30` (daily goal in minutes).
 

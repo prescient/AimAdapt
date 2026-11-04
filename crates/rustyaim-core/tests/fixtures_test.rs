@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use chrono::NaiveDate;
-use rustyaim_core::{Db, import::import_dir_at, parse_file, summary, training};
+use rustyaim_core::{Db, import::import_dir_at, parse_file, progress, summary, training};
 
 const CLICKING: &str = "shimPressure Micro Novice - Challenge - 2026.11.03-06.31.39 Stats.csv";
 const TRACKING: &str = "Whisphere 80% - Challenge - 2026.11.02-11.19.59 Stats.csv";
@@ -119,6 +119,28 @@ fn training_report_from_imported_runs() {
     assert_eq!(report.streak, training::Streak { current: 2, best: 2, trained_today: false });
     assert_eq!(report.runs_by_hour[6], 2);
     assert_eq!(report.runs_by_hour[11], 1);
+}
+
+#[test]
+fn progress_from_imported_runs() {
+    let dir = tempfile::tempdir().unwrap();
+    for name in [CLICKING, TRACKING, SHORT] {
+        std::fs::copy(fixtures().join(name), dir.path().join(name)).unwrap();
+    }
+    let mut db = Db::open_in_memory().unwrap();
+    import_dir_at(&mut db, dir.path(), now()).unwrap();
+
+    let p = progress::load(&db, &training::TimeSettings::default()).unwrap();
+    assert_eq!(p.runs.len(), 3);
+    assert!(p.runs.iter().all(|r| r.is_pb), "each scenario's only run is its best");
+    // Whisphere on Nov 2 used FOV 104 like the others, so one settings period.
+    assert_eq!(p.sens_periods.len(), 1);
+    let cm = p.sens_periods[0].settings.cm_per_360().unwrap();
+    assert!((cm - 65.36).abs() < 0.01);
+
+    let s = p.stats_for("shimPressure Micro Novice", &progress::ProgressSettings::default()).unwrap();
+    assert_eq!(s.best_score, Some(132.5));
+    assert_eq!(s.runs_since_pb, 0);
 }
 
 #[test]

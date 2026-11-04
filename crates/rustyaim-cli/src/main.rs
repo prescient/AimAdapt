@@ -9,6 +9,7 @@ use anyhow::{Context, Result, bail};
 use chrono::Local;
 use clap::{Parser, Subcommand};
 use notify::{RecursiveMode, Watcher};
+use rustyaim_core::progress::{self, Progress, ProgressSettings};
 use rustyaim_core::training::{self, TimeSettings, TrainingReport};
 use rustyaim_core::{Db, ImportReport, discover, import, summary};
 
@@ -54,8 +55,29 @@ enum Command {
         #[arg(long, default_value_t = 10)]
         sessions: usize,
     },
+    /// Progress per scenario, or one scenario's full history
+    Progress {
+        /// Scenario name, or part of it. Omit to list all scenarios.
+        scenario: Option<String>,
+        /// Sort order for the list
+        #[arg(long, value_enum, default_value_t = SortBy::Played)]
+        sort: SortBy,
+        /// How many scenarios to list
+        #[arg(long, default_value_t = 20)]
+        top: usize,
+    },
+    /// Sensitivity and FOV changes over time
+    Sens,
     /// List files that couldn't be imported
     Errors,
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum SortBy {
+    Played,
+    Improved,
+    Recent,
+    Name,
 }
 
 fn main() -> Result<()> {
@@ -81,6 +103,15 @@ fn main() -> Result<()> {
             let settings = TimeSettings { session_gap_min: gap, day_start_hour: day_start, daily_goal_min: goal, ..Default::default() };
             print_time(&training::report(&db, &settings, Local::now().naive_local())?, &settings, sessions);
         }
+        Command::Progress { scenario, sort, top } => {
+            let p = progress::load(&db, &TimeSettings::default())?;
+            let settings = ProgressSettings::default();
+            match scenario {
+                Some(query) => print_scenario(&p, &find_scenario(&p, &query)?, &settings),
+                None => print_progress_list(&p, &settings, sort, top),
+            }
+        }
+        Command::Sens => print_sens(&progress::load(&db, &TimeSettings::default())?),
         Command::Errors => {
             let errors = db.import_errors()?;
             if errors.is_empty() {
@@ -246,6 +277,170 @@ fn print_time(r: &TrainingReport, settings: &TimeSettings, recent: usize) {
     let max = r.runs_by_hour.iter().copied().max().unwrap_or(1).max(1) as f64;
     for (hour, n) in r.runs_by_hour.iter().enumerate().filter(|(_, n)| **n > 0) {
         println!("  {hour:02}:00  {n:>4}  {}", bar(*n as f64, max, 30));
+    }
+}
+
+fn find_scenario(p: &Progress, query: &str) -> Result<String> {
+    let names = p.scenarios();
+    if let Some(exact) = names.iter().find(|n| n.eq_ignore_ascii_case(query)) {
+        return Ok(exact.clone());
+    }
+    let q = query.to_lowercase();
+    let matches: Vec<&String> = names.iter().filter(|n| n.to_lowercase().contains(&q)).collect();
+    match matches.as_slice() {
+        [] => bail!("no scenario matches \"{query}\""),
+        [one] => Ok((*one).clone()),
+        many => {
+            let list: Vec<String> = many.iter().map(|n| format!("  {n}")).collect();
+            bail!("\"{query}\" matches {} scenarios, be more specific:\n{}", many.len(), list.join("\n"))
+        }
+    }
+}
+
+fn opt_num(v: Option<f64>) -> String {
+    v.map(num).unwrap_or_else(|| "-".into())
+}
+
+fn opt_pct(v: Option<f64>) -> String {
+    v.map(|p| format!("{p:+.0}%")).unwrap_or_else(|| "-".into())
+}
+
+fn print_progress_list(p: &Progress, settings: &ProgressSettings, sort: SortBy, top: usize) {
+    let mut stats = p.stats(settings);
+    if stats.is_empty() {
+        println!("No runs imported yet. Run `rustyaim import` first.");
+        return;
+    }
+    match sort {
+        SortBy::Played => stats.sort_by(|a, b| b.runs.cmp(&a.runs).then(b.last_played.cmp(&a.last_played))),
+        SortBy::Improved => stats.sort_by(|a, b| {
+            b.improvement_pct.unwrap_or(f64::NEG_INFINITY).total_cmp(&a.improvement_pct.unwrap_or(f64::NEG_INFINITY))
+        }),
+        SortBy::Recent => stats.sort_by_key(|s| std::cmp::Reverse(s.last_played)),
+        SortBy::Name => stats.sort_by_key(|s| s.scenario.to_lowercase()),
+    }
+
+    println!("{} scenarios. Change = first run to best. Trend = last {} runs vs the {} before.", stats.len(), settings.trend_window, settings.trend_window);
+    println!("\n  runs        best   change   trend   since PB  scenario");
+    for s in stats.iter().take(top) {
+        let flag = if s.plateau { "  [plateau]" } else { "" };
+        println!(
+            "  {:>4}  {:>10}  {:>7}  {:>6}  {:>9}  {}{flag}",
+            s.runs,
+            opt_num(s.best_score),
+            opt_pct(s.improvement_pct),
+            opt_pct(s.trend_pct),
+            s.runs_since_pb,
+            s.scenario
+        );
+    }
+    if stats.len() > top {
+        println!("  … {} more (use --top)", stats.len() - top);
+    }
+
+    let cold = p.cold_starts();
+    if !cold.is_empty() {
+        // Median, because one noisy scenario can swing an average a long way.
+        let mut changes: Vec<f64> = cold.iter().map(|c| c.vs_previous_best_pct).collect();
+        changes.sort_by(f64::total_cmp);
+        let median = changes[changes.len() / 2];
+        let below = changes.iter().filter(|c| **c < 0.0).count();
+        println!(
+            "\nCold starts: the first run of the day was below your previous best on {below} of {} return visits (median {median:+.0}%).",
+            cold.len()
+        );
+        let mut vs_rest: Vec<f64> = cold.iter().filter_map(|c| c.vs_rest_of_day_pct).collect();
+        if !vs_rest.is_empty() {
+            vs_rest.sort_by(f64::total_cmp);
+            let below = vs_rest.iter().filter(|c| **c < 0.0).count();
+            println!(
+                "Warm-up: it was below that day's later runs on {below} of {} (median {:+.0}%).",
+                vs_rest.len(),
+                vs_rest[vs_rest.len() / 2]
+            );
+        }
+    }
+
+    let fatigue = p.fatigue(settings);
+    if !fatigue.is_empty() {
+        println!("\nScore vs. minutes into session (100% = that scenario's average)");
+        for b in &fatigue {
+            println!("  {:>3}-{:<3} min  {:>4} runs  {:>4.0}%  {}", b.from_min, b.to_min, b.runs, b.relative_score_pct, bar(b.relative_score_pct, 150.0, 30));
+        }
+        println!("  (Mixes in which scenarios you play when, so treat it as a rough signal.)");
+    }
+}
+
+fn print_scenario(p: &Progress, scenario: &str, settings: &ProgressSettings) {
+    let Some(s) = p.stats_for(scenario, settings) else { return };
+    println!("{scenario}");
+    println!("  Runs           {} ({} counted)", s.runs, s.counted_runs);
+    println!("  Played         {} to {}", s.first_played.format("%b %-d"), s.last_played.format("%b %-d"));
+    let best_at = s.best_at.map(|t| format!(" on {}", t.format("%b %-d %H:%M"))).unwrap_or_default();
+    println!("  Best           {}{best_at}", opt_num(s.best_score));
+    println!("  First / last   {} / {}", opt_num(s.first_score), opt_num(s.last_score));
+    println!("  Average        {}", opt_num(s.average.map(|a| (a * 10.0).round() / 10.0)));
+    println!("  Change         {} (first run to best)", opt_pct(s.improvement_pct));
+    println!("  Trend          {}", opt_pct(s.trend_pct));
+    println!("  Variation      {}", s.variation_pct.map(|v| format!("{v:.0}% (lower is steadier)")).unwrap_or_else(|| "-".into()));
+    println!("  Accuracy       {}", s.recent_accuracy.map(|a| format!("{:.1}% (last {} runs)", a * 100.0, settings.trend_window)).unwrap_or_else(|| "-".into()));
+    println!("  Since PB       {} runs{}", s.runs_since_pb, if s.plateau { " (plateau)" } else { "" });
+
+    println!("\n     #  when             score    acc   ttk");
+    let mut period = None;
+    for (i, r) in p.history(scenario).iter().enumerate() {
+        if period.is_some_and(|prev| prev != r.sens_period) {
+            let sens = &p.sens_periods[r.sens_period].settings;
+            println!("        --- settings changed: {} ---", describe_sens(sens));
+        }
+        period = Some(r.sens_period);
+        let mark = if r.restarted { "restarted" } else if r.is_pb { "PB" } else { "" };
+        println!(
+            "  {:>4}  {}  {:>8}  {:>5}  {:>4}  {mark}",
+            i + 1,
+            r.finished_at.format("%a %b %-d %H:%M"),
+            opt_num(r.score),
+            r.accuracy.map(|a| format!("{:.0}%", a * 100.0)).unwrap_or_else(|| "-".into()),
+            r.avg_ttk_s.filter(|t| *t > 0.0).map(|t| format!("{t:.2}")).unwrap_or_else(|| "-".into()),
+        );
+    }
+
+    let cold: Vec<_> = p.cold_starts().into_iter().filter(|c| c.scenario == scenario).collect();
+    if !cold.is_empty() {
+        println!("\nFirst run of the day vs. earlier best");
+        for c in cold {
+            let rest = c.vs_rest_of_day_pct.map(|v| format!(", {v:+.0}% vs. the rest of that day")).unwrap_or_default();
+            println!("  {}  {} vs {} ({:+.0}%{rest})", c.day.format("%b %-d"), num(c.first_score), num(c.previous_best), c.vs_previous_best_pct);
+        }
+    }
+}
+
+fn describe_sens(s: &progress::SensSettings) -> String {
+    let sens = match (&s.sens_scale, s.horiz_sens) {
+        (Some(scale), Some(v)) => format!("{v} {scale}"),
+        (None, Some(v)) => format!("{v}"),
+        _ => "sens ?".into(),
+    };
+    let dpi = s.dpi.map(|d| format!("{d} DPI")).unwrap_or_else(|| "DPI ?".into());
+    let fov = s.fov.map(|f| format!("FOV {f}")).unwrap_or_else(|| "FOV ?".into());
+    let cm = s.cm_per_360().map(|c| format!(", {c:.1} cm/360")).unwrap_or_default();
+    format!("{sens}, {dpi}, {fov}{cm}")
+}
+
+fn print_sens(p: &Progress) {
+    if p.sens_periods.is_empty() {
+        println!("No runs imported yet. Run `rustyaim import` first.");
+        return;
+    }
+    println!("Settings periods, oldest first");
+    for period in &p.sens_periods {
+        println!(
+            "  {} to {}  {:>4} runs  {}",
+            period.from.format("%b %-d %H:%M"),
+            period.to.format("%b %-d %H:%M"),
+            period.runs,
+            describe_sens(&period.settings)
+        );
     }
 }
 
