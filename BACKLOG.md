@@ -155,7 +155,8 @@ Layout: `rustyaim-sim` (scenario format, field descriptions, simulation; no grap
 - [ ] `todo` Visual themes: room colors, target outlines, high-contrast mode.
 
 ### E1b. Adaptive training, workouts, display and analytics
-- [x] `done` Adaptive mode for every scenario: one difficulty level (0–100) drives knobs (lifetime, radius, speed, direction change, spread, health, respawn delay), adjusted by a weighted staircase to hold ~85% success (kills vs. misses and timeouts; on-target share for beams). Big first steps, shrinking on each reversal. The result is the settled level; the next run starts from it.
+- [x] `done` Adaptive mode for every scenario (first version: 0–100 levels and a staircase; replaced below).
+- [x] `done` Ratings in real units instead of levels: a Bayesian (Glicko-like) estimate of the knob value you hit 85% of the time (target lifetime in s, tracking speed in °/s, or size), with its uncertainty. It finds you in ~15–25 targets, carries over between runs and widens with days away. Targets come from a mix (near / stretch / easy, by chance of success; Steady, Balanced or Push per profile) with guard rails, breakthroughs for beating your fastest hit, and a speed vs. hit-rate curve in Insights. A kill with more than one miss on it counts as a failure, so spraying doesn't fake a rating.
 - [x] `done` Timed scenarios where difficulty is speed: Timed Flicks, Timed Wide Flicks, Timed Micro Flicks, Timed Grid, Timed Strafe Clicks. Every built-in has its own adaptive knobs; user scenarios get sensible defaults.
 - [x] `done` Workouts: TOML lists of scenarios with runs and mode, played back to back in one trainer session with a summary at the end. Four built-ins, editor in the app.
 - [x] `done` Display: borderless, exclusive (any resolution and refresh rate the monitor offers, e.g. stretched 4:3) or windowed; a centered play area of any size with a helper to match a smaller screen (e.g. 24" on a 32" monitor).

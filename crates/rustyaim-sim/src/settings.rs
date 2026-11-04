@@ -15,6 +15,8 @@ pub struct PlayerSettings {
     /// Overwatch and Valorant). Wider screens see more at the sides.
     pub fov: f32,
     pub display: Display,
+    /// How adaptive mode mixes target difficulties around your rating.
+    pub challenge: crate::adaptive::Mix,
     pub show_fps: bool,
     pub crosshair: Crosshair,
 }
@@ -26,6 +28,7 @@ impl Default for PlayerSettings {
             dpi: 800,
             fov: 103.0,
             display: Display::default(),
+            challenge: crate::adaptive::Mix::default(),
             show_fps: false,
             crosshair: Crosshair::default(),
         }

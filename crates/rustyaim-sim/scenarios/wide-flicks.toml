@@ -23,7 +23,7 @@ per_miss = -25.0
 
 [adaptive]
 goal = 0.85
-knobs = [
-    { knob = "lifetime", easy = 2.8, hard = 0.6 },
-    { knob = "radius", easy = 0.38, hard = 0.2 },
-]
+knob = "lifetime"
+easy = 3.5
+hard = 0.5
+start = 1.6

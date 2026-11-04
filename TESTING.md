@@ -35,20 +35,20 @@ These cover pure logic with small, hand-built inputs, one behaviour per test. To
 
 ### 1b. Trainer rules (`rustyaim-sim`)
 
-These are 47 tests over the scenario format, simulation, adaptive difficulty, telemetry, workouts, settings and profiles. Each one steps the simulation at 240 Hz with scripted aim, so no window is needed:
+These are 50 tests over the scenario format, simulation, adaptive ratings, telemetry, workouts, settings and profiles. Each one steps the simulation at 240 Hz with scripted aim, so no window is needed:
 
 - **Format:** an empty file gives the defaults, TOML round-trips, unknown fields are rejected, bad values get plain messages, and the fingerprint ignores the description but not the difficulty.
 - **Field list:** every scenario field is described exactly once, every choice parses, every default is within its limits, and SCENARIOS.md mentions every field.
 - **Simulation:** sphere and capsule hits, countdown blocks shots, kills respawn in the same frame, misses, fire rate on hold, time and kill limits, 60 Hz beam accuracy, moving targets staying inside their area at a fixed distance, lifetime timeouts and shrinking, spawn spacing, and the same seed replaying the same run.
 - **Library:** built-ins are valid, and user scenarios save, load, rename on clash, delete, and reject `../` ids.
-- **Adaptive:** knob values are geometric between easy and hard, defaults add a timeout to clicking, and spread scales around the middle. A simulated player whose success falls with level settles within 7 points of 85% from far above or below. Perfect play climbs, idling drops to the bottom, and tracking gives one outcome per window.
+- **Adaptive ratings:** simulated players with a known 85% speed (0.35–1.6 s) are found within 25% after 25 targets and within 10% after 100, even from a wrong first guess. Each mix keeps success in its band: Steady 82–92%, Balanced 78–90%, Push 72–86%. A surprising result moves the rating more than an expected one: hitting a stretch target vs. one at your level, and missing one at your level vs. a stretch. Breakthroughs only fire past your previous best, and time away widens the uncertainty. In the simulation, perfect play gets faster and idling slower. Spraying clicks doesn't count as success, and tracking rates target speed with one outcome per 2 s segment.
 - **Telemetry:** reaction, time to reach, overshoot and corrections for a scripted flick. Shots past the target read as positive "along", and aiming behind a strafing target reads as negative lead.
 - **Workouts and settings:** built-in workouts only use real scenarios, steps expand in order, display settings round-trip, and the play area is centered and clamped. A 24" area on a 42" 4K screen comes out at 2194x1234.
 - **Profiles:** game sensitivities convert to the known cm/360 (Overwatch 5.3 at 400 DPI is 65.35, Valorant 0.35 at 800 is 46.65, CS2 1.0 at 800 is 51.95). Profiles round-trip, bad ones are explained, and old single-settings files become a Default profile. The engine tests saving profiles and loading the active one or one by name.
 - **Insights** (`rustyaim-core`): synthetic runs with a known weak direction, overshooting, low shots, tracking lag and a 200 ms recovery after direction changes produce those exact figures and coaching notes.
 - **Engine record** (`rustyaim-engine`): an engine run saved through `insert_runs` gets the right score, accuracy, length and `source`, keeps separate bests for variants, and is ignored when matching KovaaK's settings.
 
-**Engine record** also has an end-to-end test: two adaptive runs and a standard one are saved through `record::save`. The second adaptive run must start at the first's level, the names must keep both modes apart, telemetry and traces must be stored, and Insights must read all three back.
+**Engine record** also has an end-to-end test: two adaptive runs and a standard one are saved through `record::save`. The second adaptive run, a day later, must start from the first's rating with the day counted, the names must keep both modes apart, telemetry and traces must be stored, and Insights must read all three back.
 
 **Engine smoke test:** `rustyaim-engine <scenario> --smoke <folder> --db <file>` (or `--workout <id>`) has a bot that plays like a person go through short runs, then saves screenshots mid-run and on each results screen. It needs a GPU, so it's run by hand, not on CI. Check the screenshots and that the runs, with telemetry, are in the test database. Opening the app with `--db <that file>` previews Insights on bot data.
 

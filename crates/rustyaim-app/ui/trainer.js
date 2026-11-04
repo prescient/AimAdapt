@@ -63,6 +63,18 @@ function scenarioFacts(s) {
   return parts.join(" · ");
 }
 
+// Adaptive ratings are in real units: seconds of target lifetime, degrees per second
+// of target speed, or meters of target radius.
+const higherIsHarder = (knob) => knob === "target_speed";
+function fmtKnob(knob, v) {
+  if (v === null || v === undefined) return "–";
+  if (knob === "lifetime") return `${v.toFixed(2)} s`;
+  if (knob === "target_speed") return `${Math.round(v)} °/s`;
+  return `${v.toFixed(2)} m`;
+}
+const knobWord = (knob) => (knob === "target_speed" ? "tracking speed" : knob === "lifetime" ? "speed" : "size");
+const betterThan = (knob, a, b) => (higherIsHarder(knob) ? a > b : a < b);
+
 const scenarioName = (id) => ui.trainer.data?.scenarios.find((e) => e.id === id)?.scenario?.name ?? id.replace(/^(builtin|user):/, "");
 const minutes = (s) => `${Math.max(1, Math.round(s / 60))} min`;
 
@@ -90,7 +102,7 @@ function play() {
     ${tr.message ? `<section class="banner"><div class="banner-body">${esc(tr.message)}</div></section>` : ""}
     ${profileBar()}
     <section class="banner info"><div><div class="banner-title">Adaptive mode keeps you at about 85%</div>
-      <div class="banner-body">It finds your level, then makes each target a little harder after a hit and easier after a miss or timeout, so you hit about 85% of targets (or stay on target 85% of the time when tracking). Your result is a level from 0 to 100, and the next run starts there. Standard mode plays the scenario exactly as written.</div></div></section>
+      <div class="banner-body">Adaptive mode rates you in real units: the target lifetime (or tracking speed) you hit 85% of the time. It finds that in the first 15–25 targets, then mixes targets near your rating with harder stretch targets and a few easy ones (change the mix in Settings). Hitting a stretch target faster than ever is a breakthrough. Standard mode plays the scenario exactly as written.</div></div></section>
     ${workoutsCard()}
     <div class="chips" role="group" aria-label="Filter scenarios">
       ${CATEGORIES.map(([k, label]) => `<button class="chip ${tr.filter === k ? "on" : ""}" type="button" data-action="trainer-filter" data-filter="${k}" aria-pressed="${tr.filter === k}">${label}</button>`).join("")}
@@ -131,9 +143,9 @@ function scenarioCard(e) {
       <div class="chips"><button class="btn" type="button" data-action="delete-scenario" data-id="${id}">Delete file</button></div></section>`;
   }
   const playing = ui.trainer.data.playing ? "disabled" : "";
-  const level = e.level !== null && e.level !== undefined
-    ? `Level <span class="num">${e.level.toFixed(0)}</span>${e.best_level && e.best_level > e.level + 0.5 ? ` <span class="muted">(best ${e.best_level.toFixed(0)})</span>` : ""}`
-    : '<span class="muted">No level yet</span>';
+  const level = e.rating !== null && e.rating !== undefined
+    ? `85% ${knobWord(e.knob)} <span class="num">${esc(fmtKnob(e.knob, e.rating))}</span>${e.best_rating !== null && betterThan(e.knob, e.best_rating, e.rating) ? ` <span class="muted">(best ${esc(fmtKnob(e.knob, e.best_rating))})</span>` : ""}${e.fastest !== null ? ` · fastest hit ${esc(fmtKnob(e.knob, e.fastest))}` : ""}`
+    : '<span class="muted">Not rated yet</span>';
   const standard = e.runs ? ` · best score <span class="num">${num(e.best)}</span>` : "";
   return `<section class="card scenario-card">
     <div class="card-head"><h3>${esc(s.name)}</h3><span>${e.builtin ? "" : '<span class="tag gold">Yours</span> '}<span class="tag grey">${esc(s.category)}</span></span></div>

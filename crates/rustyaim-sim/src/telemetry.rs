@@ -52,8 +52,12 @@ pub struct TargetRecord {
     pub entries: u32,
     pub shots: u32,
     pub hits: u32,
-    /// Adaptive level when the target appeared.
-    pub level: Option<f32>,
+    /// Adaptive mode: the knob value this target (or tracking segment) was given,
+    /// its planned chance of success, and whether it was a near, stretch, easy or
+    /// calibration pick.
+    pub value: Option<f32>,
+    pub chance: Option<f32>,
+    pub pick: Option<&'static str>,
 }
 
 /// One hitscan shot.

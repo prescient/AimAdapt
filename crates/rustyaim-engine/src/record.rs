@@ -1,11 +1,11 @@
 //! Saving finished runs to the shared database. A run is stored as a [`RunFile`]
 //! with the same field names KovaaK's uses, so every progress and training screen
 //! counts RustyAim runs without special cases; `Source` marks where it came from.
-//! The trainer's extra detail (adaptive level, per-target and per-shot records,
+//! The trainer's extra detail (adaptive rating, per-target and per-shot records,
 //! tracking samples, aim trace) goes into the `engine_*` tables for Insights.
 //!
-//! Adaptive runs are stored under "<name> (Adaptive)" so their score (the level)
-//! never mixes with standard scores on the same chart.
+//! Adaptive runs are stored under "<name> (Adaptive)" so their score (the rating,
+//! in seconds or degrees per second) never mixes with standard points.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -15,6 +15,7 @@ use rustyaim_core::db::SOURCE_RUSTYAIM;
 use rustyaim_core::parse::{Kill, WeaponTotal};
 use rustyaim_core::telemetry::{EngineRun, SampleRow, ShotRow, TargetRow};
 use rustyaim_core::{Db, RunFile};
+use rustyaim_sim::adaptive::{Knob, Mix, Prior};
 use rustyaim_sim::scenario::WeaponKind;
 use rustyaim_sim::{PlayerSettings, RunResult, Scenario};
 
@@ -82,9 +83,12 @@ pub fn to_run_file(info: &RunInfo) -> RunFile {
         put("Resolution", res.clone());
     }
     if let Some(a) = adaptive {
-        put("Level", format!("{:.2}", a.level));
-        put("Start Level", format!("{:.2}", a.start_level));
-        put("Final Level", format!("{:.2}", a.final_level));
+        put("Adaptive Knob", knob_id(a.knob).into());
+        put("Rating", format!("{:.4}", a.value));
+        put("Start Rating", format!("{:.4}", a.start_value));
+        if let Some(f) = a.fastest {
+            put("Fastest Hit", format!("{f:.4}"));
+        }
         put("Goal", format!("{}", a.goal));
         if let Some(rate) = a.success_rate {
             put("Success Rate", format!("{rate:.4}"));
@@ -150,12 +154,19 @@ pub fn to_engine_run(info: &RunInfo) -> EngineRun {
         base_scenario: info.scenario.name.clone(),
         category: category(info.scenario),
         adaptive: a.is_some(),
-        start_level: a.map(|a| f(a.start_level)),
-        level: a.map(|a| f(a.level)),
-        final_level: a.map(|a| f(a.final_level)),
+        knob: a.map(|a| knob_id(a.knob).into()),
+        rating: a.map(|a| f(a.value)),
+        rating_low: a.map(|a| f(a.range.0.min(a.range.1))),
+        rating_high: a.map(|a| f(a.range.0.max(a.range.1))),
+        start_rating: a.map(|a| f(a.start_value)),
+        theta: a.map(|a| f(a.theta)),
+        slope: a.map(|a| f(a.slope)),
+        rating_sd: a.map(|a| f(a.sd)),
+        fastest: a.and_then(|a| a.fastest).map(f),
+        mix: a.map(|_| mix_id(info.settings.challenge).into()),
         goal: a.map(|a| f(a.goal)),
         success_rate: a.and_then(|a| a.success_rate).map(f),
-        level_timeline: a.map(|a| a.timeline.iter().map(|(t, l)| (f(*t), f(*l))).collect()).unwrap_or_default(),
+        rating_timeline: a.map(|a| a.timeline.iter().map(|(t, l)| (f(*t), f(*l))).collect()).unwrap_or_default(),
         workout: info.workout.clone(),
         trace: tel.trace_bytes(),
         targets: tel
@@ -177,7 +188,9 @@ pub fn to_engine_run(info: &RunInfo) -> EngineRun {
                 entries: i64::from(t.entries),
                 shots: i64::from(t.shots),
                 hits: i64::from(t.hits),
-                level: t.level.map(f),
+                value: t.value.map(f),
+                chance: t.chance.map(f),
+                pick: t.pick.map(String::from),
             })
             .collect(),
         shots: tel
@@ -220,12 +233,44 @@ pub fn best_score(db: &Db, scenario: &Scenario) -> Option<f64> {
         .flatten()
 }
 
-/// Highest adaptive level reached on a scenario.
-pub fn best_level(db: &Db, scenario: &Scenario) -> Option<f64> {
+pub fn knob_id(k: Knob) -> &'static str {
+    match k {
+        Knob::Lifetime => "lifetime",
+        Knob::TargetSpeed => "target_speed",
+        Knob::Radius | Knob::Auto => "radius",
+    }
+}
+
+fn mix_id(m: Mix) -> &'static str {
+    match m {
+        Mix::Steady => "steady",
+        Mix::Balanced => "balanced",
+        Mix::Push => "push",
+    }
+}
+
+/// The rating to start an adaptive run from: the last one for this scenario with
+/// the same knob, aged by the days since, and the best value ever hit.
+pub fn prior(db: &Db, scenario: &Scenario, now: chrono::NaiveDateTime) -> Option<Prior> {
+    let knob = knob_id(scenario.adaptive.resolve(scenario).knob);
+    let last = db.last_rating(&scenario.name).ok()??;
+    if last.knob != knob {
+        return None;
+    }
+    let then = chrono::NaiveDateTime::parse_from_str(&last.finished_at, "%Y-%m-%dT%H:%M:%S%.3f").ok()?;
+    let days = ((now - then).num_minutes() as f32 / 1440.0).max(0.0);
+    let fastest = db.fastest_hit(&scenario.name, knob).ok().flatten().map(|v| v as f32);
+    Some(Prior { theta: last.theta as f32, slope: last.slope as f32, sd: last.sd as f32, days, fastest })
+}
+
+/// The best rating so far for a scenario's knob (lowest lifetime or size, highest speed).
+pub fn best_rating(db: &Db, scenario: &Scenario) -> Option<f64> {
+    let knob = scenario.adaptive.resolve(scenario).knob;
+    let agg = if knob.higher_is_harder() { "MAX" } else { "MIN" };
     db.conn()
         .query_row(
-            "SELECT MAX(level) FROM engine_runs WHERE base_scenario = ?1 AND adaptive = 1",
-            [&scenario.name],
+            &format!("SELECT {agg}(rating) FROM engine_runs WHERE base_scenario = ?1 AND knob = ?2"),
+            [&scenario.name, knob_id(knob)],
             |r| r.get::<_, Option<f64>>(0),
         )
         .ok()
@@ -251,11 +296,11 @@ mod tests {
     }
 
     /// Plays a short run with a bot that kills every target straight away.
-    fn play(scenario: &Scenario, adaptive: bool, start: Option<f32>) -> RunResult {
+    fn play(scenario: &Scenario, adaptive: bool, prior: Option<Prior>) -> RunResult {
         let mut s = scenario.clone();
         s.timing.countdown_s = 0.0;
         s.timing.duration_s = 10.0;
-        let mut sim = if adaptive { Sim::adaptive(s, 7, start) } else { Sim::new(s, 7) };
+        let mut sim = if adaptive { Sim::adaptive(s, 7, prior, Mix::Balanced) } else { Sim::new(s, 7) };
         while sim.phase() != Phase::Finished {
             let aim = sim.targets()[0].pos.normalize();
             sim.step(1.0 / 240.0, Input { aim, fire_pressed: true, fire_held: true });
@@ -301,7 +346,7 @@ mod tests {
     }
 
     #[test]
-    fn adaptive_runs_save_level_and_telemetry() {
+    fn adaptive_runs_save_rating_and_telemetry() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("t.db");
         let scenario = Scenario { name: "Timed Flicks".into(), ..Default::default() };
@@ -310,12 +355,17 @@ mod tests {
         let first = play(&scenario, true, None);
         save(&path, &info(&scenario, &first, &settings, 1)).unwrap();
         let db = Db::open(&path).unwrap();
-        let level = db.last_adaptive_level("Timed Flicks").unwrap().unwrap();
-        assert!((level - f64::from(first.adaptive.as_ref().unwrap().level)).abs() < 1e-3);
+        let rating = db.last_rating("Timed Flicks").unwrap().unwrap();
+        assert_eq!(rating.knob, "lifetime");
+        assert!((rating.rating - f64::from(first.adaptive.as_ref().unwrap().value)).abs() < 1e-3);
 
-        // The next run starts from the saved level.
-        let second = play(&scenario, true, Some(level as f32));
-        assert!((second.adaptive.as_ref().unwrap().start_level - level as f32).abs() < 1e-3);
+        // The next run starts from the saved rating, a day later.
+        let p = prior(&db, &scenario, finished() + chrono::Duration::days(1) + chrono::Duration::minutes(1)).unwrap();
+        assert!((p.days - 1.0).abs() < 0.01, "{}", p.days);
+        assert!(p.fastest.is_some());
+        let second = play(&scenario, true, Some(p));
+        let start = second.adaptive.as_ref().unwrap().start_value;
+        assert!((f64::from(start) / rating.rating - 1.0).abs() < 0.05, "{start} vs {}", rating.rating);
         save(&path, &info(&scenario, &second, &settings, 2)).unwrap();
         let standard = play(&scenario, false, None);
         save(&path, &info(&scenario, &standard, &settings, 3)).unwrap();
@@ -343,6 +393,7 @@ mod tests {
         let insights = rustyaim_core::insights::scenario(&db, "Timed Flicks").unwrap().unwrap();
         assert_eq!(insights.runs.len(), 3, "both modes group under one scenario");
         assert!(insights.fitts.is_some() && !insights.directions.is_empty());
-        assert!(best_level(&db, &scenario).unwrap() >= level);
+        let best = best_rating(&db, &scenario).unwrap();
+        assert!(best <= rating.rating + 1e-9, "lower lifetime is better: {best}");
     }
 }

@@ -51,10 +51,6 @@ pub enum Kind {
     Choice {
         options: &'static [Choice],
     },
-    /// The adaptive knobs: a list of `{ knob, easy, hard }` rows.
-    Knobs {
-        options: &'static [Choice],
-    },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -105,21 +101,18 @@ const MOVEMENT: &[Choice] = &[
 ];
 
 const KNOBS: &[Choice] = &[
+    Choice { value: "auto", label: "Automatic", help: "Lifetime when clicking, target speed when tracking." },
     Choice {
         value: "lifetime",
         label: "Target lifetime (s)",
-        help: "Seconds before a target times out. Shorter is harder.",
+        help: "Seconds before a target times out. Lower is harder.",
     },
-    Choice { value: "radius", label: "Target radius (m)", help: "Smaller is harder." },
-    Choice { value: "speed", label: "Target speed (m/s)", help: "Top movement speed; the bottom keeps its ratio." },
     Choice {
-        value: "change_every",
-        label: "Direction change (s)",
-        help: "Longest time between direction changes. Shorter is harder.",
+        value: "target_speed",
+        label: "Target speed (°/s)",
+        help: "How fast targets cross your view. Higher is harder.",
     },
-    Choice { value: "spread", label: "Spawn spread (×)", help: "Multiplier on the spawn area's width and height." },
-    Choice { value: "health", label: "Target health", help: "More health means longer to destroy." },
-    Choice { value: "respawn_delay", label: "Respawn delay (s)", help: "Wait before the next target." },
+    Choice { value: "radius", label: "Target size (m)", help: "Target radius. Lower is harder." },
 ];
 
 pub const FIELDS: &[Field] = &[
@@ -278,29 +271,43 @@ pub const FIELDS: &[Field] = &[
         "adaptive.goal",
         "Adaptive",
         "Success goal",
-        "Share of targets (or time on target) adaptive mode aims for. 0.85 means it settles where you hit 85%.",
-        num(0.5, 0.98, 0.01, ""),
+        "Your rating is the difficulty you hit this share of the time. 0.85 = 85%.",
+        num(0.6, 0.95, 0.01, ""),
     ),
     f(
-        "adaptive.start_level",
-        "Adaptive",
-        "First-run level",
-        "Where a first adaptive run starts, 0–100. Later runs start from your last level.",
-        num(0.0, 100.0, 1.0, ""),
-    ),
-    f(
-        "adaptive.window_s",
-        "Adaptive",
-        "Tracking window",
-        "Beam scenarios: seconds of tracking judged as one outcome.",
-        num(0.2, 5.0, 0.1, "s"),
-    ),
-    f(
-        "adaptive.knobs",
+        "adaptive.knob",
         "Adaptive",
         "What gets harder",
-        "Each setting runs from its easy value at level 0 to its hard value at level 100. Leave empty for a default that suits the scenario.",
-        Kind::Knobs { options: KNOBS },
+        "The one setting adaptive mode changes, and the units your rating is shown in.",
+        Kind::Choice { options: KNOBS },
+    ),
+    f(
+        "adaptive.easy",
+        "Adaptive",
+        "Easiest",
+        "Easiest value it will use, in the setting's units. 0 for a default.",
+        num(0.0, 1000.0, 0.05, ""),
+    ),
+    f(
+        "adaptive.hard",
+        "Adaptive",
+        "Hardest",
+        "Hardest value it will use. 0 for a default.",
+        num(0.0, 1000.0, 0.05, ""),
+    ),
+    f(
+        "adaptive.start",
+        "Adaptive",
+        "First guess",
+        "Where a first adaptive run starts looking for your rating. Later runs start from your last rating. 0 for a default.",
+        num(0.0, 1000.0, 0.05, ""),
+    ),
+    f(
+        "adaptive.segment_s",
+        "Adaptive",
+        "Tracking segment",
+        "Tracking: seconds at each speed; the share of time on target is the outcome.",
+        num(0.5, 10.0, 0.5, "s"),
     ),
     f(
         "arena.size",
@@ -338,11 +345,9 @@ mod tests {
         leaves("", &value, &mut paths);
         paths.retain(|p| p != "schema");
         let mut described: Vec<String> = FIELDS.iter().map(|f| f.path.to_string()).collect();
-        // Empty lists aren't written out, so add the ones we know about.
-        for list in ["tags", "adaptive.knobs"] {
-            if !paths.contains(&list.to_string()) {
-                paths.push(list.into());
-            }
+        // Empty lists aren't written out, so add tags if it's missing.
+        if !paths.contains(&"tags".to_string()) {
+            paths.push("tags".into());
         }
         paths.sort();
         described.sort();

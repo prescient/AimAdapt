@@ -8,12 +8,15 @@
 
 use glam::Vec3;
 
-use crate::adaptive::{Adaptive, Controller};
+use crate::adaptive::{Knob, Mix, Pick, Prior, Rating};
 use crate::scenario::{Movement, MovementKind, Range, Scenario, Shape, Trigger, WeaponKind};
 use crate::telemetry::{Outcome, ShotRecord, TargetRecord, Telemetry, TrackSample, angle_deg, screen_offset};
 
 /// Beam damage and accuracy are sampled at this rate, independent of frame rate.
 pub const BEAM_TICK_HZ: f32 = 60.0;
+/// Adaptive clicking: a kill after more misses than this counts as a failure, so
+/// spraying clicks can't fake a fast rating.
+pub const MAX_MISSES_PER_TARGET: u32 = 1;
 /// Tracking telemetry sample rate.
 const SAMPLE_HZ: f32 = 30.0;
 /// Aim trace rate.
@@ -62,6 +65,8 @@ pub struct Target {
     height: f32,
     shots: u32,
     hits: u32,
+    /// Misses while this was the nearest target.
+    misses: u32,
     damage: f32,
     track: Track,
 }
@@ -81,11 +86,13 @@ struct Track {
     inside: bool,
     overshoot_deg: f32,
     entries: u32,
-    level: Option<f32>,
+    /// Adaptive mode: the knob value this target was given, its planned chance of
+    /// success, and what kind of pick it was.
+    value: Option<(f32, f32, Pick)>,
 }
 
 impl Track {
-    fn begin(no: u32, now: f32, origin: Vec3, pos: Vec3, radius: f32, level: Option<f32>) -> Track {
+    fn begin(no: u32, now: f32, origin: Vec3, pos: Vec3, radius: f32, value: Option<(f32, f32, Pick)>) -> Track {
         let mut t = Track {
             no,
             start_at: now,
@@ -98,7 +105,7 @@ impl Track {
             inside: false,
             overshoot_deg: 0.0,
             entries: 0,
-            level,
+            value,
         };
         t.restart(now, origin, pos, radius);
         t
@@ -155,7 +162,9 @@ impl Target {
             entries: k.entries,
             shots: self.shots,
             hits: self.hits,
-            level: k.level,
+            value: k.value.map(|v| v.0),
+            chance: k.value.map(|v| v.1),
+            pick: k.value.map(|v| v.2.as_str()),
         }
     }
 }
@@ -163,11 +172,23 @@ impl Target {
 /// Things that happened during a step, for effects and sounds.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Event {
-    Spawned { id: u64 },
-    Hit { id: u64 },
-    Killed { id: u64 },
+    Spawned {
+        id: u64,
+    },
+    Hit {
+        id: u64,
+    },
+    Killed {
+        id: u64,
+    },
     Miss,
-    TimedOut { id: u64 },
+    TimedOut {
+        id: u64,
+    },
+    /// Adaptive mode: a success at a harder value than ever before.
+    Breakthrough {
+        value: f32,
+    },
     Finished,
 }
 
@@ -205,22 +226,29 @@ pub struct KillRecord {
 /// How an adaptive run went.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AdaptiveSummary {
-    pub start_level: f32,
-    /// The run's result: the level it settled at.
-    pub level: f32,
-    /// Level at the very end.
-    pub final_level: f32,
+    pub knob: Knob,
+    /// The rating: the knob value hit at the goal rate, and a ±1 standard deviation range.
+    pub value: f32,
+    pub range: (f32, f32),
+    /// The rating going in.
+    pub start_value: f32,
+    /// Model parameters, kept to start the next run (log scale).
+    pub theta: f32,
+    pub slope: f32,
+    pub sd: f32,
     pub goal: f32,
     pub success_rate: Option<f32>,
     pub outcomes: usize,
-    /// (seconds, level), thinned to at most 300 points.
+    /// Hardest value succeeded at this run.
+    pub fastest: Option<f32>,
+    /// (seconds, rating), thinned to at most 300 points.
     pub timeline: Vec<(f32, f32)>,
 }
 
 /// The finished run, ready to save.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunResult {
-    /// Points, or the settled level for adaptive runs.
+    /// Points, or the rating (in the knob's units) for adaptive runs.
     pub score: f32,
     pub stats: Stats,
     pub kills: Vec<KillRecord>,
@@ -236,12 +264,20 @@ impl RunResult {
     }
 }
 
+/// Adaptive state for a run.
+struct AdaptiveRun {
+    rating: Rating,
+    mix: Mix,
+    /// Tracking: the current segment's value, planned chance and pick.
+    segment: Option<(f32, f32, Pick)>,
+}
+
 pub struct Sim {
     /// The scenario as written.
     scenario: Scenario,
-    /// What's being played: `scenario` with adaptive knobs applied.
+    /// What's being played: `scenario` with the adaptive knob applied.
     current: Scenario,
-    adaptive: Option<(Adaptive, Controller)>,
+    adaptive: Option<AdaptiveRun>,
     rng: Rng,
     /// Seconds since the countdown began.
     clock: f32,
@@ -257,7 +293,7 @@ pub struct Sim {
     kills: Vec<KillRecord>,
     cooldown: f32,
     beam_acc: f32,
-    /// Ticks and on-target ticks in the current adaptive tracking window.
+    /// Ticks, on-target ticks and seconds in the current adaptive tracking segment.
     window: (u32, u32, f32),
     telemetry: Telemetry,
     next_sample: f32,
@@ -270,19 +306,15 @@ impl Sim {
         Sim::build(scenario, seed, None)
     }
 
-    /// An adaptive run. `start` is the level the player reached last time; `None`
-    /// starts at the scenario's `adaptive.start_level` with a wider search.
-    pub fn adaptive(scenario: Scenario, seed: u64, start: Option<f32>) -> Sim {
-        let cfg = scenario.adaptive.clone();
-        let c = Controller::new(start.unwrap_or(cfg.start_level), cfg.goal, start.is_some());
-        Sim::build(scenario, seed, Some((cfg, c)))
+    /// An adaptive run, starting from the player's previous rating if there is one.
+    pub fn adaptive(scenario: Scenario, seed: u64, prior: Option<Prior>, mix: Mix) -> Sim {
+        let cfg = scenario.adaptive.resolve(&scenario);
+        let run = AdaptiveRun { rating: Rating::new(cfg, prior), mix, segment: None };
+        Sim::build(scenario, seed, Some(run))
     }
 
-    fn build(base: Scenario, seed: u64, adaptive: Option<(Adaptive, Controller)>) -> Sim {
-        let current = match &adaptive {
-            Some((cfg, c)) => cfg.apply(&base, c.level),
-            None => base.clone(),
-        };
+    fn build(base: Scenario, seed: u64, adaptive: Option<AdaptiveRun>) -> Sim {
+        let current = base.clone();
         let mut sim = Sim {
             scenario: base,
             current,
@@ -305,6 +337,7 @@ impl Sim {
             next_sample: 0.0,
             next_trace: 0.0,
         };
+        sim.start_segment();
         let mut events = Vec::new();
         for _ in 0..sim.scenario.targets.count {
             sim.spawn(&mut events);
@@ -329,9 +362,9 @@ impl Sim {
         self.adaptive.is_some()
     }
 
-    /// Current adaptive level and success rate so far.
-    pub fn level(&self) -> Option<(f32, Option<f32>)> {
-        self.adaptive.as_ref().map(|(_, c)| (c.level, c.success_rate()))
+    /// Adaptive mode: the knob, current rating and success rate so far.
+    pub fn rating(&self) -> Option<(Knob, f32, Option<f32>)> {
+        self.adaptive.as_ref().map(|a| (a.rating.cfg.knob, a.rating.value(), a.rating.success_rate()))
     }
 
     pub fn phase(&self) -> Phase {
@@ -375,26 +408,33 @@ impl Sim {
         let now = self.elapsed();
         telemetry.targets.extend(self.targets.iter().map(|t| t.record(now, Outcome::Open)));
         telemetry.targets.sort_by_key(|t| t.no);
-        let adaptive = self.adaptive.as_ref().map(|(cfg, c)| {
-            let step = c.timeline.len().div_ceil(300).max(1);
-            let mut timeline: Vec<(f32, f32)> = c.timeline.iter().step_by(step).copied().collect();
-            if let Some(last) = c.timeline.last()
+        let adaptive = self.adaptive.as_ref().map(|a| {
+            let r = &a.rating;
+            let step = r.timeline.len().div_ceil(300).max(1);
+            let mut timeline: Vec<(f32, f32)> = r.timeline.iter().step_by(step).copied().collect();
+            if let Some(last) = r.timeline.last()
                 && timeline.last() != Some(last)
             {
                 timeline.push(*last);
             }
+            let e = r.estimate();
             AdaptiveSummary {
-                start_level: c.timeline[0].1,
-                level: c.settled_level(),
-                final_level: c.level,
-                goal: cfg.goal,
-                success_rate: c.success_rate(),
-                outcomes: c.outcomes(),
+                knob: r.cfg.knob,
+                value: r.value(),
+                range: r.range(),
+                start_value: r.start_value,
+                theta: e.theta,
+                slope: e.slope,
+                sd: e.sd,
+                goal: r.cfg.goal,
+                success_rate: r.success_rate(),
+                outcomes: r.outcomes(),
+                fastest: r.fastest,
                 timeline,
             }
         });
         RunResult {
-            score: adaptive.as_ref().map_or(self.score(), |a| a.level),
+            score: adaptive.as_ref().map_or(self.score(), |a| a.value),
             stats: self.stats.clone(),
             kills: self.kills.clone(),
             duration_s: self.elapsed(),
@@ -451,12 +491,57 @@ impl Sim {
         events
     }
 
-    /// Feeds an outcome to the adaptive controller and re-applies the knobs.
-    fn outcome(&mut self, value: f32) {
+    /// Whether the adaptive knob is set per target (lifetime, or size when clicking)
+    /// rather than per tracking segment.
+    fn per_target(&self) -> bool {
+        self.adaptive.as_ref().is_some_and(|a| {
+            a.rating.cfg.knob == Knob::Lifetime
+                || (a.rating.cfg.knob == Knob::Radius && self.scenario.weapon.kind == WeaponKind::Hitscan)
+        })
+    }
+
+    /// Feeds an outcome at a knob value to the rating.
+    fn outcome(&mut self, value: f32, outcome: f32, tracking: bool, events: &mut Vec<Event>) {
         let now = self.elapsed();
-        if let Some((cfg, c)) = &mut self.adaptive {
-            let level = c.update(now, value);
-            self.current = cfg.apply(&self.scenario, level);
+        if let Some(a) = &mut self.adaptive
+            && a.rating.update(now, value, outcome, tracking)
+        {
+            events.push(Event::Breakthrough { value });
+        }
+    }
+
+    /// Tracking: picks the next segment's difficulty and applies it to every target.
+    fn start_segment(&mut self) {
+        if self.per_target() {
+            return;
+        }
+        let Some(a) = &mut self.adaptive else { return };
+        let (value, chance, pick) = a.rating.pick(&mut self.rng, a.mix);
+        a.segment = Some((value, chance, pick));
+        match a.rating.cfg.knob {
+            Knob::TargetSpeed => {
+                let sp = &self.scenario.targets.spawn;
+                let d = (sp.distance.0 + sp.distance.1) / 2.0;
+                let mps = value.to_radians() * d;
+                self.current.targets.movement.speed = Range(mps * 0.85, mps);
+                // Change speed now, keeping each target's direction.
+                for t in &mut self.targets {
+                    let screen = (t.rate[0] * t.pitch.to_radians().cos(), t.rate[1]);
+                    let now = (screen.0 * screen.0 + screen.1 * screen.1).sqrt();
+                    if now > 1e-3 {
+                        let k = value * (0.85 + 0.15 * self.rng.next_f32()) / now;
+                        t.rate = [t.rate[0] * k, t.rate[1] * k];
+                    }
+                }
+            }
+            Knob::Radius => {
+                self.current.targets.radius = value;
+                for t in &mut self.targets {
+                    t.radius = value;
+                    t.base_radius = value;
+                }
+            }
+            Knob::Lifetime | Knob::Auto => {}
         }
     }
 
@@ -554,15 +639,15 @@ impl Sim {
                 across: (-dx * fy + dy * fx) / r,
             });
             self.targets[i].shots += 1;
+            if hit.is_none() {
+                self.targets[i].misses += 1;
+            }
         }
         match hit {
             Some(i) => self.damage(i, damage, events),
             None => {
                 self.stats.misses += 1;
                 events.push(Event::Miss);
-                if !self.targets.is_empty() {
-                    self.outcome(0.0);
-                }
             }
         }
     }
@@ -589,7 +674,7 @@ impl Sim {
             let on = self.pick(aim);
             // Adaptive tracking judges aim, firing or not, so holding fire only when
             // on target can't game the level.
-            self.adaptive_tick(on.is_some(), tick);
+            self.adaptive_tick(on.is_some(), tick, events);
             if !firing {
                 continue;
             }
@@ -605,16 +690,22 @@ impl Sim {
         }
     }
 
-    fn adaptive_tick(&mut self, on: bool, tick: f32) {
-        let Some((cfg, _)) = &self.adaptive else { return };
-        let window = cfg.window_s;
+    fn adaptive_tick(&mut self, on: bool, tick: f32, events: &mut Vec<Event>) {
+        if self.per_target() {
+            return;
+        }
+        let Some(a) = &self.adaptive else { return };
+        let (segment, current) = (a.rating.cfg.segment_s, a.segment);
         self.window.0 += 1;
         self.window.1 += u32::from(on);
         self.window.2 += tick;
-        if self.window.2 >= window {
+        if self.window.2 >= segment {
             let share = self.window.1 as f32 / self.window.0.max(1) as f32;
             self.window = (0, 0, 0.0);
-            self.outcome(share);
+            if let Some((value, _, _)) = current {
+                self.outcome(value, share, true, events);
+            }
+            self.start_segment();
         }
     }
 
@@ -645,8 +736,12 @@ impl Sim {
         events.push(Event::Killed { id: t.id });
         self.pending.push(now + self.current.targets.respawn_delay_s);
         self.next_target(now);
-        if self.scenario.weapon.kind == WeaponKind::Hitscan {
-            self.outcome(1.0);
+        if self.per_target()
+            && let Some((value, _, _)) = t.track.value
+        {
+            // A kill counts as a success unless it took a spray of misses.
+            let ok = if t.misses <= MAX_MISSES_PER_TARGET { 1.0 } else { 0.0 };
+            self.outcome(value, ok, false, events);
         }
     }
 
@@ -685,7 +780,7 @@ impl Sim {
         let tc = self.current.targets.clone();
         let mv = tc.movement.clone();
         let shrink = tc.shrink_to;
-        let mut timed_out = 0;
+        let mut timed_out: Vec<f32> = Vec::new();
         let mut i = 0;
         while i < self.targets.len() {
             let t = &mut self.targets[i];
@@ -697,7 +792,12 @@ impl Sim {
                     self.telemetry.targets.push(t.record(now, Outcome::TimedOut));
                     events.push(Event::TimedOut { id: t.id });
                     self.pending.push(now + tc.respawn_delay_s);
-                    timed_out += 1;
+                    if let Some((value, _, _)) = t.track.value {
+                        timed_out.push(value);
+                    }
+                    if t.track.value.is_none() {
+                        timed_out.push(f32::NAN);
+                    }
                     continue;
                 }
                 let k = t.age / t.lifetime;
@@ -722,11 +822,11 @@ impl Sim {
             }
             i += 1;
         }
-        if timed_out > 0 {
+        if !timed_out.is_empty() {
             self.next_target(now);
-            if self.scenario.weapon.kind == WeaponKind::Hitscan {
-                for _ in 0..timed_out {
-                    self.outcome(0.0);
+            if self.per_target() {
+                for value in timed_out.into_iter().filter(|v| v.is_finite()) {
+                    self.outcome(value, 0.0, false, events);
                 }
             }
         }
@@ -762,12 +862,26 @@ impl Sim {
         let rate = new_rate(&mut self.rng, &tc.movement, distance, pitch, [0.0, 0.0]);
         let next_change = self.rng.range(tc.movement.change_every_s);
         let now = self.elapsed();
-        let level = self.adaptive.as_ref().map(|(_, c)| c.level);
-        let height = tc.height * tc.radius / self.scenario.targets.radius.max(1e-6);
+        let mut lifetime = tc.lifetime_s;
+        let mut radius = tc.radius;
+        let mut value = None;
+        if self.per_target()
+            && let Some(a) = &mut self.adaptive
+        {
+            let (v, chance, pick) = a.rating.pick(&mut self.rng, a.mix);
+            match a.rating.cfg.knob {
+                Knob::Lifetime => lifetime = v,
+                _ => radius = v,
+            }
+            value = Some((v, chance, pick));
+        } else if let Some(seg) = self.adaptive.as_ref().and_then(|a| a.segment) {
+            value = Some(seg);
+        }
+        let height = tc.height * radius / self.scenario.targets.radius.max(1e-6);
         self.targets.push(Target {
             id,
             pos,
-            radius: tc.radius,
+            radius,
             health: tc.health,
             max_health: tc.health,
             yaw,
@@ -778,13 +892,14 @@ impl Sim {
             last_change: now,
             age: 0.0,
             spawned_at: now,
-            lifetime: tc.lifetime_s,
-            base_radius: tc.radius,
+            lifetime,
+            base_radius: radius,
             height,
             shots: 0,
             hits: 0,
+            misses: 0,
             damage: 0.0,
-            track: Track::begin(no, now, self.last_aim, pos, tc.radius, level),
+            track: Track::begin(no, now, self.last_aim, pos, radius, value),
         });
         events.push(Event::Spawned { id });
     }
@@ -1124,11 +1239,12 @@ mod tests {
     }
 
     #[test]
-    fn adaptive_level_rises_for_hits_and_falls_for_timeouts() {
+    fn adaptive_rating_speeds_up_for_hits_and_slows_for_timeouts() {
         let mut s = no_countdown(Scenario::default());
-        s.timing.duration_s = 20.0;
+        s.timing.duration_s = 30.0;
         // A perfect player: kills each target the frame it appears.
-        let mut sim = Sim::adaptive(s.clone(), 1, Some(40.0));
+        let mut sim = Sim::adaptive(s.clone(), 1, None, Mix::Balanced);
+        let start = sim.rating().unwrap().1;
         while sim.phase() != Phase::Finished {
             let at = sim.targets()[0].pos;
             sim.step(FRAME, shoot(at));
@@ -1136,39 +1252,68 @@ mod tests {
         }
         let r = sim.result();
         let a = r.adaptive.clone().unwrap();
-        assert!(a.level > 60.0, "perfect play climbs: {a:?}");
-        assert_eq!(r.score, a.level, "the result is the level");
-        // Targets get shorter-lived as the level rises.
-        let first = r.telemetry.targets.first().unwrap().lifetime_s;
-        let last = r.telemetry.targets.last().unwrap().lifetime_s;
-        assert!(last < first, "{first} -> {last}");
+        assert_eq!(a.knob, Knob::Lifetime);
+        assert!(a.value < start * 0.5, "perfect play gets fast: {start} -> {}", a.value);
+        assert_eq!(r.score, a.value, "the result is the rating");
+        assert!(a.fastest.unwrap() <= a.value);
+        // Targets got their lifetimes from the rating, and record them.
+        let t = &r.telemetry.targets[3];
+        assert_eq!(t.value, Some(t.lifetime_s));
+        assert!(t.chance.is_some() && t.pick.is_some());
 
-        // A player who never shoots only sees timeouts.
-        let mut sim = Sim::adaptive(s, 1, Some(40.0));
+        // A player who never shoots only sees timeouts and the rating slows down.
+        let mut sim = Sim::adaptive(s, 1, None, Mix::Balanced);
         while sim.phase() != Phase::Finished {
             sim.step(FRAME, idle());
         }
         let a = sim.result().adaptive.unwrap();
-        assert!(a.level < 10.0 && a.success_rate == Some(0.0), "{a:?}");
+        assert!(a.value > start && a.success_rate == Some(0.0), "{a:?}");
     }
 
     #[test]
-    fn adaptive_tracking_follows_time_on_target() {
+    fn spraying_clicks_does_not_count_as_success() {
+        let mut s = no_countdown(Scenario::default());
+        s.timing.duration_s = 10.0;
+        let mut sim = Sim::adaptive(s, 2, None, Mix::Balanced);
+        while sim.phase() != Phase::Finished {
+            let at = sim.targets()[0].pos;
+            // Two misses, then the kill.
+            sim.step(FRAME, shoot(-at));
+            sim.step(FRAME, idle());
+            sim.step(FRAME, shoot(-at));
+            sim.step(FRAME, idle());
+            sim.step(FRAME, shoot(at));
+            sim.step(FRAME, idle());
+        }
+        let a = sim.result().adaptive.unwrap();
+        assert_eq!(a.success_rate, Some(0.0));
+    }
+
+    #[test]
+    fn adaptive_tracking_rates_target_speed() {
         let mut s = no_countdown(Scenario::default());
         s.weapon.kind = WeaponKind::Beam;
         s.weapon.trigger = Trigger::Always;
         s.targets.health = 1e9;
+        s.targets.spawn.yaw = Range(-40.0, 40.0);
         s.targets.movement = Movement { kind: MovementKind::Strafe, ..Default::default() };
-        s.timing.duration_s = 10.0;
-        let mut sim = Sim::adaptive(s, 3, None);
+        s.timing.duration_s = 20.0;
+        let mut sim = Sim::adaptive(s, 3, None, Mix::Balanced);
+        let start = sim.rating().unwrap().1;
         while sim.phase() != Phase::Finished {
             let at = sim.targets()[0].pos;
             sim.step(FRAME, Input { aim: at.normalize(), fire_pressed: false, fire_held: false });
         }
-        let a = sim.result().adaptive.unwrap();
+        let r = sim.result();
+        let a = r.adaptive.unwrap();
+        assert_eq!(a.knob, Knob::TargetSpeed);
         assert_eq!(a.success_rate, Some(1.0));
-        assert!(a.level > a.start_level, "{a:?}");
-        assert!((19..=20).contains(&a.outcomes), "one outcome per 0.5 s window: {}", a.outcomes);
+        assert!(a.value > start, "perfect tracking rates faster: {start} -> {}", a.value);
+        assert!((9..=10).contains(&a.outcomes), "one outcome per 2 s segment: {}", a.outcomes);
+        // Samples show the target really moving at the chosen speeds.
+        let late: Vec<f32> = r.telemetry.samples.iter().filter(|x| x.t > 15.0).map(|x| x.target_speed_dps).collect();
+        let mean = late.iter().sum::<f32>() / late.len() as f32;
+        assert!(mean > start, "targets sped up: {mean} vs {start}");
     }
 
     #[test]

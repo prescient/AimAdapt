@@ -22,14 +22,14 @@ It imports new runs on startup, watches the stats folder while open, and refresh
 
 The **Play** screen lists the built-in and your own scenarios and workouts.
 
-- **Adaptive** (the default) finds your level and keeps the difficulty where you hit about 85% of targets, or stay on target 85% of the time when tracking. Your result is a level from 0 to 100, and the next run starts from it. **Standard** plays the scenario exactly as written and scores points.
+- **Adaptive** (the default) rates you in real units: the target lifetime you hit 85% of the time on timed clicking scenarios (for example "0.62 s"), or the target speed you stay on 85% of the time when tracking (for example "48 °/s"). It finds your rating within the first 15–25 targets, then mixes targets near your rating with harder stretch targets and a few easy ones. Hitting a stretch target faster than ever is a breakthrough. The next run starts from your rating, and the trainer re-checks faster after time away. **Standard** plays the scenario exactly as written and scores points.
 - **Workouts** play several scenarios back to back in one session. There are four built-ins, and you can build your own.
 - **Copy & edit** opens a form with every setting the engine supports, including what adaptive mode makes harder.
 - The Play screen shows which settings profile you're playing with and lets you switch.
 
 **Settings** holds your profiles, usually one per game. A profile takes your sensitivity in that game's own units (Overwatch 2, Valorant, Counter-Strike 2, Apex Legends and Call of Duty, or cm/360 directly) and converts it. Each profile also has its own DPI, FOV (with each game's usual value one click away), crosshair (with a live preview), display mode (borderless, exclusive at any resolution and refresh rate, or windowed) and a centered play area. The play area lets a big monitor play like a smaller one, and a helper sizes it from screen diagonals. Your first profile is matched to your latest KovaaK's run. Adding a profile for another game converts your current sensitivity, so it feels the same.
 
-**Insights** shows what the trainer measured: your level over time, flick speed for size and distance (Fitts' law throughput), success by direction and distance, where shots land relative to the target, reaction time, tracking accuracy by target speed and after direction changes, whether you trail or lead targets, and coaching notes. RustyAim runs also show up in Progress and Training time next to your KovaaK's runs. Adaptive runs are listed as "<scenario> (Adaptive)" so levels and scores stay on separate charts.
+**Insights** shows what the trainer measured: your rating over time, your speed vs. hit-rate curve (where you're reliable and where it's a coin flip), flick speed for size and distance (Fitts' law throughput), success by direction and distance, where shots land relative to the target, reaction time, tracking accuracy by target speed and after direction changes, whether you trail or lead targets, and coaching notes. RustyAim runs also show up in Progress and Training time next to your KovaaK's runs. Adaptive runs are listed as "<scenario> (Adaptive)" and charted in Insights, not on Progress, because their result is a time or speed rather than points.
 
 To run the trainer on its own while developing:
 

@@ -1,6 +1,6 @@
 //! Detailed records for runs played in RustyAim's own trainer: one row per target,
-//! per shot and per tracking sample, plus the adaptive level history and the aim
-//! trace. KovaaK's runs have none of this; [`crate::insights`] builds analytics on it.
+//! per shot and per tracking sample, plus the adaptive rating and its history and the
+//! aim trace. KovaaK's runs have none of this; [`crate::insights`] builds analytics on it.
 
 use rusqlite::{OptionalExtension, params};
 
@@ -12,13 +12,25 @@ pub struct EngineRun {
     pub base_scenario: String,
     pub category: String,
     pub adaptive: bool,
-    pub start_level: Option<f64>,
-    pub level: Option<f64>,
-    pub final_level: Option<f64>,
+    /// Adaptive mode: `lifetime`, `target_speed` or `radius`.
+    pub knob: Option<String>,
+    /// The rating in the knob's units, with its ±1 SD range and the rating going in.
+    pub rating: Option<f64>,
+    pub rating_low: Option<f64>,
+    pub rating_high: Option<f64>,
+    pub start_rating: Option<f64>,
+    /// Model parameters (log scale), to start the next run from.
+    pub theta: Option<f64>,
+    pub slope: Option<f64>,
+    pub rating_sd: Option<f64>,
+    /// Hardest value succeeded at this run.
+    pub fastest: Option<f64>,
+    /// Target mix: `steady`, `balanced` or `push`.
+    pub mix: Option<String>,
     pub goal: Option<f64>,
     pub success_rate: Option<f64>,
-    /// (seconds, level)
-    pub level_timeline: Vec<(f64, f64)>,
+    /// (seconds, rating)
+    pub rating_timeline: Vec<(f64, f64)>,
     pub workout: Option<String>,
     /// Little-endian f32 triples (seconds, yaw°, pitch°).
     pub trace: Vec<u8>,
@@ -45,7 +57,22 @@ pub struct TargetRow {
     pub entries: i64,
     pub shots: i64,
     pub hits: i64,
-    pub level: Option<f64>,
+    /// Adaptive mode: the knob value this target was given, its planned chance of
+    /// success, and the kind of pick (`near`, `stretch`, `easy`, `calibrate`).
+    pub value: Option<f64>,
+    pub chance: Option<f64>,
+    pub pick: Option<String>,
+}
+
+/// A rating as stored, for starting the next run.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StoredRating {
+    pub knob: String,
+    pub rating: f64,
+    pub theta: f64,
+    pub slope: f64,
+    pub sd: f64,
+    pub finished_at: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -131,6 +158,23 @@ CREATE TABLE engine_samples (
 CREATE INDEX engine_samples_run ON engine_samples (run_id);
 "#;
 
+/// Schema v4: adaptive ratings in real units replace levels.
+pub(crate) const MIGRATION_RATINGS: &str = r#"
+ALTER TABLE engine_runs ADD COLUMN knob TEXT;
+ALTER TABLE engine_runs ADD COLUMN rating REAL;
+ALTER TABLE engine_runs ADD COLUMN rating_low REAL;
+ALTER TABLE engine_runs ADD COLUMN rating_high REAL;
+ALTER TABLE engine_runs ADD COLUMN start_rating REAL;
+ALTER TABLE engine_runs ADD COLUMN theta REAL;
+ALTER TABLE engine_runs ADD COLUMN slope REAL;
+ALTER TABLE engine_runs ADD COLUMN rating_sd REAL;
+ALTER TABLE engine_runs ADD COLUMN fastest REAL;
+ALTER TABLE engine_runs ADD COLUMN mix TEXT;
+ALTER TABLE engine_targets ADD COLUMN value REAL;
+ALTER TABLE engine_targets ADD COLUMN chance REAL;
+ALTER TABLE engine_targets ADD COLUMN pick TEXT;
+"#;
+
 fn timeline_json(points: &[(f64, f64)]) -> String {
     let inner: Vec<String> = points.iter().map(|(t, l)| format!("[{t:.3},{l:.2}]")).collect();
     format!("[{}]", inner.join(","))
@@ -157,22 +201,30 @@ impl Db {
             return Ok(false);
         };
         let changed = tx.execute(
-            "INSERT OR IGNORE INTO engine_runs (run_id, base_scenario, category, adaptive, start_level, level,
-                final_level, goal, success_rate, level_timeline, workout, trace)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            "INSERT OR IGNORE INTO engine_runs (run_id, base_scenario, category, adaptive, goal, success_rate,
+                level_timeline, workout, trace, knob, rating, rating_low, rating_high, start_rating, theta, slope,
+                rating_sd, fastest, mix)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
             params![
                 run_id,
                 e.base_scenario,
                 e.category,
                 e.adaptive,
-                e.start_level,
-                e.level,
-                e.final_level,
                 e.goal,
                 e.success_rate,
-                timeline_json(&e.level_timeline),
+                timeline_json(&e.rating_timeline),
                 e.workout,
                 e.trace,
+                e.knob,
+                e.rating,
+                e.rating_low,
+                e.rating_high,
+                e.start_rating,
+                e.theta,
+                e.slope,
+                e.rating_sd,
+                e.fastest,
+                e.mix,
             ],
         )?;
         if changed == 0 {
@@ -182,8 +234,8 @@ impl Db {
             let mut st = tx.prepare_cached(
                 "INSERT INTO engine_targets (run_id, no, spawned_at, start_at, ended_at, outcome, distance_deg,
                     direction_deg, radius_deg, lifetime_s, reaction_s, reach_s, overshoot_deg, entries, shots,
-                    hits, level)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+                    hits, value, chance, pick)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
             )?;
             for t in &e.targets {
                 st.execute(params![
@@ -203,7 +255,9 @@ impl Db {
                     t.entries,
                     t.shots,
                     t.hits,
-                    t.level
+                    t.value,
+                    t.chance,
+                    t.pick
                 ])?;
             }
             let mut st = tx.prepare_cached(
@@ -234,17 +288,38 @@ impl Db {
         Ok(true)
     }
 
-    /// The level the player settled at in their latest adaptive run of a scenario.
-    pub fn last_adaptive_level(&self, base_scenario: &str) -> Result<Option<f64>, DbError> {
+    /// The latest adaptive rating for a scenario, to start the next run from.
+    pub fn last_rating(&self, base_scenario: &str) -> Result<Option<StoredRating>, DbError> {
         self.conn()
             .query_row(
-                "SELECT e.level FROM engine_runs e JOIN runs r ON r.id = e.run_id
-                 WHERE e.base_scenario = ?1 AND e.adaptive = 1 AND e.level IS NOT NULL
+                "SELECT e.knob, e.rating, e.theta, e.slope, e.rating_sd, r.finished_at
+                 FROM engine_runs e JOIN runs r ON r.id = e.run_id
+                 WHERE e.base_scenario = ?1 AND e.adaptive = 1 AND e.rating IS NOT NULL AND e.theta IS NOT NULL
                  ORDER BY r.finished_at DESC LIMIT 1",
                 [base_scenario],
-                |r| r.get(0),
+                |r| {
+                    Ok(StoredRating {
+                        knob: r.get(0)?,
+                        rating: r.get(1)?,
+                        theta: r.get(2)?,
+                        slope: r.get(3)?,
+                        sd: r.get(4)?,
+                        finished_at: r.get(5)?,
+                    })
+                },
             )
             .optional()
+    }
+
+    /// The hardest value ever succeeded at on a scenario with this knob: the
+    /// shortest lifetime or smallest size, or the highest tracking speed.
+    pub fn fastest_hit(&self, base_scenario: &str, knob: &str) -> Result<Option<f64>, DbError> {
+        let agg = if knob == "target_speed" { "MAX" } else { "MIN" };
+        self.conn().query_row(
+            &format!("SELECT {agg}(fastest) FROM engine_runs WHERE base_scenario = ?1 AND knob = ?2"),
+            [base_scenario, knob],
+            |r| r.get(0),
+        )
     }
 }
 

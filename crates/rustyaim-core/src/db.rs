@@ -99,6 +99,7 @@ ALTER TABLE runs ADD COLUMN source TEXT NOT NULL DEFAULT 'kovaaks';
 CREATE INDEX runs_source ON runs (source, scenario);
 "#,
     crate::telemetry::MIGRATION,
+    crate::telemetry::MIGRATION_RATINGS,
 ];
 
 /// Value of the `Source` field (and `runs.source`) for runs played in RustyAim's engine.

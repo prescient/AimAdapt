@@ -34,7 +34,7 @@ per_timeout = -40.0
 
 [adaptive]
 goal = 0.85
-knobs = [
-    { knob = "lifetime", easy = 2.8, hard = 0.6 },
-    { knob = "speed", easy = 3.0, hard = 9.0 },
-]
+knob = "lifetime"
+easy = 3.5
+hard = 0.5
+start = 1.6

@@ -21,6 +21,7 @@ use bevy::window::{
     VideoModeSelection, WindowMode,
 };
 use chrono::{Local, NaiveDateTime};
+use rustyaim_sim::adaptive::Knob;
 use rustyaim_sim::scenario::{Shape, parse_color};
 use rustyaim_sim::settings::DisplayMode;
 use rustyaim_sim::sim::from_angles;
@@ -83,6 +84,7 @@ pub fn run(opts: PlayOptions) -> AppExit {
         best: None,
         saved: None,
         flashes: HashMap::new(),
+        banner: None,
         done: Vec::new(),
         world_dirty: true,
         display_note: None,
@@ -150,6 +152,8 @@ struct Game {
     saved: Option<Result<(), String>>,
     /// Seconds of hit flash left, by target id.
     flashes: HashMap<u64, f32>,
+    /// A message shown mid-screen for a moment (breakthroughs), and seconds left.
+    banner: Option<(String, f32)>,
     done: Vec<Done>,
     world_dirty: bool,
     display_note: Option<String>,
@@ -185,9 +189,10 @@ impl Game {
         let db = self.db_path.as_deref().and_then(|p| rustyaim_core::Db::open(p).ok());
         let s = step.scenario.clone();
         self.sim = if step.adaptive {
-            let start = db.as_ref().and_then(|db| db.last_adaptive_level(&s.name).ok().flatten());
-            self.best = db.as_ref().and_then(|db| record::best_level(db, &s));
-            Sim::adaptive(s, self.seed, start.map(|l| l as f32))
+            let now = Local::now().naive_local();
+            let prior = db.as_ref().and_then(|db| record::prior(db, &s, now));
+            self.best = db.as_ref().and_then(|db| record::best_rating(db, &s));
+            Sim::adaptive(s, self.seed, prior, self.settings.challenge)
         } else {
             self.best = db.as_ref().and_then(|db| record::best_score(db, &s));
             Sim::new(s, self.seed)
@@ -198,6 +203,7 @@ impl Game {
         self.run_time = 0.0;
         self.saved = None;
         self.flashes.clear();
+        self.banner = None;
         if changed {
             self.world_dirty = true;
         }
@@ -211,9 +217,9 @@ impl Game {
         let r = self.sim.result();
         let line = match &r.adaptive {
             Some(a) => format!(
-                "Level {:.0} ({:+.0}), hit {:.0}%",
-                a.level,
-                a.level - a.start_level,
+                "85% at {} (was {}), hit {:.0}%",
+                fmt_value(a.knob, a.value),
+                fmt_value(a.knob, a.start_value),
                 a.success_rate.unwrap_or(0.0) * 100.0
             ),
             None => format!(
@@ -660,6 +666,11 @@ fn step(
             Event::Hit { id } => {
                 game.flashes.insert(id, 0.06);
             }
+            Event::Breakthrough { value } => {
+                if let Some((knob, _, _)) = game.sim.rating() {
+                    game.banner = Some((format!("Fastest hit: {}!", fmt_value(knob, value)), 1.6));
+                }
+            }
             Event::Finished => {
                 let size = camera
                     .physical_viewport_size()
@@ -672,6 +683,12 @@ fn step(
     }
     for f in game.flashes.values_mut() {
         *f -= dt;
+    }
+    if let Some((_, left)) = &mut game.banner {
+        *left -= dt;
+        if *left <= 0.0 {
+            game.banner = None;
+        }
     }
     game.flashes.retain(|_, f| *f > 0.0);
 }
@@ -764,12 +781,12 @@ fn update_hud(
     let st = sim.stats();
     texts.p0().0 = format!("{:.1}", sim.time_left().max(0.0));
     let acc = st.accuracy().map_or("-".into(), |a| format!("{:.1}%", a * 100.0));
-    match sim.level() {
-        Some((level, rate)) => {
-            texts.p1().0 = format!("Level {level:.1}");
+    match sim.rating() {
+        Some((knob, value, rate)) => {
             let goal = sim.scenario().adaptive.goal * 100.0;
+            texts.p1().0 = format!("{goal:.0}%: {}", fmt_value(knob, value));
             let rate = rate.map_or("-".into(), |r| format!("{:.0}%", r * 100.0));
-            texts.p2().0 = format!("Hit rate {rate} (goal {goal:.0}%)\nKills {}", st.kills);
+            texts.p2().0 = format!("{} {rate}\nKills {}", rate_word(knob), st.kills);
         }
         None => {
             texts.p1().0 = format!("{:.0}", sim.score());
@@ -778,7 +795,7 @@ fn update_hud(
     }
     texts.p3().0 = match sim.phase() {
         Phase::Countdown => format!("{}", sim.countdown_left().ceil() as u32),
-        _ => String::new(),
+        _ => game.banner.as_ref().map(|b| b.0.clone()).unwrap_or_default(),
     };
     texts.p4().0 = if game.settings.show_fps { format!("{:.0} fps", game.fps) } else { String::new() };
     let step = game.step_info();
@@ -808,18 +825,24 @@ fn update_overlay(
     let ttk = r.avg_ttk_s().map_or("-".into(), |t| format!("{:.0} ms", t * 1000.0));
     let headline = match &r.adaptive {
         Some(a) => {
+            let k = a.knob;
+            let better = |x: f32, y: f64| if k.higher_is_harder() { f64::from(x) > y } else { f64::from(x) < y };
             let best = match game.best {
-                None => "First adaptive run".to_string(),
-                Some(b) if f64::from(a.level) > b => format!("New best level! (was {b:.0})"),
-                Some(b) => format!("Best level {b:.0}"),
+                None => "First adaptive run on this scenario".to_string(),
+                Some(b) if better(a.value, b) => format!("Your best yet! (was {})", fmt_value(k, b as f32)),
+                Some(b) => format!("Best {}", fmt_value(k, b as f32)),
             };
+            let (lo, hi) = (a.range.0.min(a.range.1), a.range.0.max(a.range.1));
+            let fastest = a.fastest.map_or(String::new(), |f| format!("\nFastest hit this run: {}", fmt_value(k, f)));
             format!(
-                "Level {:.1}   ({:+.1} from {:.0})\n{best}\nHit rate {:.0}% | goal {:.0}%",
-                a.level,
-                a.level - a.start_level,
-                a.start_level,
+                "You hit {:.0}% at {}   (likely {} to {})\nStarted at {} | {best}{fastest}\n{} {:.0}%",
+                a.goal * 100.0,
+                fmt_value(k, a.value),
+                fmt_value(k, lo),
+                fmt_value(k, hi),
+                fmt_value(k, a.start_value),
+                rate_word(k),
                 a.success_rate.unwrap_or(0.0) * 100.0,
-                a.goal * 100.0
             )
         }
         None => {
@@ -892,4 +915,14 @@ fn smoke_capture(mut commands: Commands, time: Res<Time>, mut game: ResMut<Game>
             }
         }
     }
+}
+
+/// A rating in the knob's units. The game font has no degree sign, so speeds read
+/// "deg/s" in game.
+fn fmt_value(knob: Knob, v: f32) -> String {
+    knob.format(v).replace("°/s", "deg/s")
+}
+
+fn rate_word(knob: Knob) -> &'static str {
+    if knob == Knob::TargetSpeed { "On target" } else { "Hit rate" }
 }

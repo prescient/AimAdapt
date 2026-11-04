@@ -119,29 +119,43 @@ Score = kills × `per_kill` + hits × `per_hit` + misses × `per_miss` + damage 
 
 ### `[adaptive]`
 
-Every scenario can be played in **Standard** mode, at the difficulty written in the file, or **Adaptive** mode. In adaptive mode, difficulty is a single level from 0 (easy) to 100 (hard). The level sets the knobs listed here, and it moves after every outcome so you succeed about `goal` of the time:
+Every scenario can be played in **Standard** mode, at the difficulty written in the file, or **Adaptive** mode. Adaptive mode rates you on one setting, the `knob`, in real units:
 
-- **Clicking:** a kill is a success. A miss or a timeout is a failure.
-- **Tracking (beam):** every `window_s` seconds, the share of time the crosshair was on target. This counts whether or not you're firing, so firing only when on target doesn't help.
+- **Target lifetime** (seconds) for timed clicking. Your rating might be "0.62 s": you hit 85% of targets that last 0.62 s.
+- **Target speed** (degrees per second across your view) for tracking. "48 °/s" means you stay on target 85% of the time at that speed.
+- **Target size** (radius in meters).
 
-The update is `level += step × (outcome − goal)`. With an 85% goal, a hit raises the level a little and a miss lowers it about five times as much. That's why it settles where you hit 85%. The step starts large, so a first run finds your level quickly. Each time the direction reverses, the step shrinks, so it narrows in on what you can reliably do. The run's result is the level it settled at, which is the average over its second half. The next adaptive run starts there.
+**How the rating works.** The trainer models your chance of success at each value as an S-shaped curve. It keeps a probability estimate of where that curve sits and how steep it is, so it knows how sure it is, much like the Glicko version of Elo. Each outcome updates the estimate by how surprising it was. Hitting a target faster than your rating moves it more than hitting one at your level. Missing a target faster than your rating costs less than missing one at your level. While the estimate is uncertain the updates are big, so a first run finds your speed in roughly 15–25 targets. After that they shrink. The next run starts from your last rating. Its uncertainty grows with the days since you played, so after a break it re-checks quickly.
+
+- **Clicking:** a target is a success if you destroy it before it times out with at most one miss on it. Spraying clicks doesn't count. A timeout is a failure.
+- **Tracking:** the target speed is set for each `segment_s`-second segment. The share of that time the crosshair was on target is the outcome, whether or not you're firing.
+
+**Which difficulty each target gets.** The trainer first picks a chance of success, then turns it into a value using your current curve:
+
+| Pick | Chance of success | Balanced | Steady | Push |
+|---|---|---|---|---|
+| Near your rating | 80–90% | 65% | 85% | 50% |
+| Stretch | 45–70% | 20% | 5% | 35% |
+| Easy | 95–98% | 15% | 10% | 15% |
+
+Hitting a stretch target faster than your best ever counts as a breakthrough. It shows in the game and is saved as your fastest hit. A stretch target never comes right after a miss or straight after another stretch. Until the rating has settled, every target is picked between 65% and 90%. The mix is a setting in your profile.
 
 | Field | Default | Meaning |
 |---|---|---|
-| `adaptive.goal` | `0.85` | Success rate to hold (0.5–0.98). |
-| `adaptive.start_level` | `25.0` | Level for your first adaptive run. |
-| `adaptive.window_s` | `0.5` | Seconds of tracking judged as one outcome. |
-| `adaptive.knobs` | `[]` | What gets harder, as `{ knob, easy, hard }` rows. `easy` is the value at level 0 and `hard` the value at level 100, spaced geometrically in between. |
-
-Knobs: `lifetime` (seconds before a target times out), `radius` (m), `speed` (top movement speed in m/s; the bottom keeps its ratio), `change_every` (longest time between direction changes), `spread` (multiplier on the spawn area), `health` and `respawn_delay`. With no knobs listed, hitscan scenarios use lifetime and radius, adding a timeout if the scenario has none. Moving beam scenarios use speed and radius.
+| `adaptive.goal` | `0.85` | Your rating is the value you succeed at this share of the time (0.6–0.95). |
+| `adaptive.knob` | `"auto"` | `lifetime`, `target_speed` or `radius`. `auto` uses lifetime for hitscan, target speed for moving beam targets, and size otherwise. |
+| `adaptive.easy` | `0` | Easiest value it will use, in the knob's units. 0 for a default (3 s lifetime, 3 °/s, 2× the radius). |
+| `adaptive.hard` | `0` | Hardest value it will use. 0 for a default (0.25 s, 180 °/s, 0.3× the radius). |
+| `adaptive.start` | `0` | First guess at your rating. 0 for the scenario's own lifetime, speed or size. |
+| `adaptive.segment_s` | `2.0` | Tracking: seconds at each speed. |
 
 ```toml
 [adaptive]
 goal = 0.85
-knobs = [
-    { knob = "lifetime", easy = 2.2, hard = 0.45 },
-    { knob = "radius", easy = 0.38, hard = 0.22 },
-]
+knob = "lifetime"
+easy = 3.0
+hard = 0.3
+start = 1.1
 ```
 
 ### `[arena]`

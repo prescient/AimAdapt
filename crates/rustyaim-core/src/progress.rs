@@ -343,7 +343,7 @@ pub fn load(db: &Db, time: &TimeSettings) -> Result<Progress, DbError> {
 
     let mut stmt = db.conn().prepare(
         "SELECT id, scenario, finished_at, score, accuracy, avg_ttk_s, sens_scale, horiz_sens, dpi, fov
-         FROM runs ORDER BY finished_at, id",
+         FROM runs WHERE mode != 'RustyAim Adaptive' ORDER BY finished_at, id",
     )?;
     let rows = stmt.query_map([], |r| {
         let finished: String = r.get(2)?;

@@ -2,7 +2,8 @@
 //! per-shot and tracking records in [`crate::telemetry`]. Each section answers a
 //! question that helps you decide what to practice:
 //!
-//! - **Level:** where adaptive mode settles, run by run.
+//! - **Rating:** the speed you hit 85% of the time (in seconds or °/s), run by
+//!   run, and the speed–accuracy curve behind it.
 //! - **Speed vs. distance:** how long flicks take for their size and distance (a
 //!   Fitts' law fit). Throughput in bits per second is one number for flick speed
 //!   that doesn't depend on how far or small the targets were.
@@ -32,8 +33,26 @@ pub struct ScenarioSummary {
     pub runs: usize,
     pub adaptive_runs: usize,
     pub last_played: String,
-    pub latest_level: Option<f64>,
-    pub best_level: Option<f64>,
+    /// Adaptive mode: the knob, the latest rating and the best one, and the
+    /// hardest value ever hit.
+    pub knob: Option<String>,
+    pub latest_rating: Option<f64>,
+    pub best_rating: Option<f64>,
+    pub fastest: Option<f64>,
+}
+
+/// Whether a bigger value of this knob is harder.
+pub fn higher_is_harder(knob: &str) -> bool {
+    knob == "target_speed"
+}
+
+/// Formats a knob value with its unit.
+pub fn format_value(knob: &str, v: f64) -> String {
+    match knob {
+        "lifetime" => format!("{v:.2} s"),
+        "target_speed" => format!("{v:.0} °/s"),
+        _ => format!("{v:.2} m"),
+    }
 }
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
@@ -42,7 +61,12 @@ pub struct RunPoint {
     pub run_id: i64,
     pub finished_at: String,
     pub adaptive: bool,
-    pub level: Option<f64>,
+    pub knob: Option<String>,
+    /// The rating and its ±1 SD range, in the knob's units.
+    pub rating: Option<f64>,
+    pub rating_low: Option<f64>,
+    pub rating_high: Option<f64>,
+    pub fastest: Option<f64>,
     pub success_rate: Option<f64>,
     pub score: Option<f64>,
     pub accuracy: Option<f64>,
@@ -166,8 +190,11 @@ pub struct Insights {
     pub scenario: String,
     pub category: String,
     pub runs: Vec<RunPoint>,
-    /// The latest adaptive run's level over time.
+    /// Adaptive knob of the latest adaptive run, and its rating over time.
+    pub knob: Option<String>,
     pub latest_timeline: Vec<(f64, f64)>,
+    /// Speed–accuracy curve from the latest adaptive run.
+    pub curve: Option<Curve>,
     pub recent_runs: usize,
     pub targets: usize,
     pub success: Option<f64>,
@@ -183,6 +210,22 @@ pub struct Insights {
     pub notes: Vec<Note>,
 }
 
+/// Chance of success at each value of the knob, from the latest rating, plus
+/// what actually happened at each value in recent runs.
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[derive(Debug, Clone, PartialEq)]
+pub struct Curve {
+    pub knob: String,
+    /// (value, chance) from the model.
+    pub model: Vec<(f64, f64)>,
+    /// (value, share hit, targets) in bins, clicking only.
+    pub observed: Vec<(f64, f64, usize)>,
+    /// Values at 95%, 85% and 50% chance: how quickly you fall off.
+    pub at95: f64,
+    pub at85: f64,
+    pub at50: f64,
+}
+
 #[derive(Debug, Clone)]
 struct T {
     run_id: i64,
@@ -196,6 +239,7 @@ struct T {
     reaction: Option<f64>,
     overshoot: f64,
     entries: i64,
+    value: Option<f64>,
 }
 
 fn median(v: &mut [f64]) -> Option<f64> {
@@ -224,8 +268,7 @@ fn id_bits(t: &T) -> f64 {
 /// Every scenario played in the trainer, most recent first.
 pub fn overview(db: &Db) -> Result<Vec<ScenarioSummary>, DbError> {
     let mut stmt = db.conn().prepare(
-        "SELECT e.base_scenario, e.category, COUNT(*), SUM(e.adaptive), MAX(r.finished_at),
-                MAX(CASE WHEN e.adaptive = 1 THEN e.level END)
+        "SELECT e.base_scenario, e.category, COUNT(*), SUM(e.adaptive), MAX(r.finished_at)
          FROM engine_runs e JOIN runs r ON r.id = e.run_id
          GROUP BY e.base_scenario ORDER BY MAX(r.finished_at) DESC",
     )?;
@@ -236,13 +279,25 @@ pub fn overview(db: &Db) -> Result<Vec<ScenarioSummary>, DbError> {
             runs: r.get::<_, i64>(2)? as usize,
             adaptive_runs: r.get::<_, i64>(3)? as usize,
             last_played: r.get(4)?,
-            latest_level: None,
-            best_level: r.get(5)?,
+            knob: None,
+            latest_rating: None,
+            best_rating: None,
+            fastest: None,
         })
     })?;
     let mut out: Vec<ScenarioSummary> = rows.collect::<Result<_, _>>()?;
     for s in &mut out {
-        s.latest_level = db.last_adaptive_level(&s.scenario)?;
+        if let Some(last) = db.last_rating(&s.scenario)? {
+            let agg = if higher_is_harder(&last.knob) { "MAX" } else { "MIN" };
+            s.best_rating = db.conn().query_row(
+                &format!("SELECT {agg}(rating) FROM engine_runs WHERE base_scenario = ?1 AND knob = ?2"),
+                [&s.scenario, &last.knob],
+                |r| r.get(0),
+            )?;
+            s.fastest = db.fastest_hit(&s.scenario, &last.knob)?;
+            s.latest_rating = Some(last.rating);
+            s.knob = Some(last.knob);
+        }
     }
     Ok(out)
 }
@@ -250,20 +305,24 @@ pub fn overview(db: &Db) -> Result<Vec<ScenarioSummary>, DbError> {
 pub fn scenario(db: &Db, base_scenario: &str) -> Result<Option<Insights>, DbError> {
     let conn = db.conn();
     let mut stmt = conn.prepare(
-        "SELECT r.id, r.finished_at, e.adaptive, e.level, e.success_rate, r.score, r.accuracy, e.workout,
-                e.category, e.level_timeline
+        "SELECT r.id, r.finished_at, e.adaptive, e.rating, e.success_rate, r.score, r.accuracy, e.workout,
+                e.category, e.level_timeline, e.knob, e.rating_low, e.rating_high, e.fastest, e.theta, e.slope
          FROM engine_runs e JOIN runs r ON r.id = e.run_id
          WHERE e.base_scenario = ?1 ORDER BY r.finished_at, r.id",
     )?;
     #[allow(clippy::type_complexity)]
-    let rows: Vec<(RunPoint, String, Option<String>)> = stmt
+    let rows: Vec<(RunPoint, String, Option<String>, Option<(f64, f64)>)> = stmt
         .query_map([base_scenario], |r| {
             Ok((
                 RunPoint {
                     run_id: r.get(0)?,
                     finished_at: r.get(1)?,
                     adaptive: r.get(2)?,
-                    level: r.get(3)?,
+                    knob: r.get(10)?,
+                    rating: r.get(3)?,
+                    rating_low: r.get(11)?,
+                    rating_high: r.get(12)?,
+                    fastest: r.get(13)?,
                     success_rate: r.get(4)?,
                     score: r.get(5)?,
                     accuracy: r.get(6)?,
@@ -274,6 +333,10 @@ pub fn scenario(db: &Db, base_scenario: &str) -> Result<Option<Insights>, DbErro
                 },
                 r.get(8)?,
                 r.get(9)?,
+                match (r.get::<_, Option<f64>>(14)?, r.get::<_, Option<f64>>(15)?) {
+                    (Some(t), Some(sl)) => Some((t, sl)),
+                    _ => None,
+                },
             ))
         })?
         .collect::<Result<_, _>>()?;
@@ -281,15 +344,17 @@ pub fn scenario(db: &Db, base_scenario: &str) -> Result<Option<Insights>, DbErro
         return Ok(None);
     }
     let category = rows.last().map(|r| r.1.clone()).unwrap_or_default();
-    let latest_timeline =
-        rows.iter().rev().find(|r| r.0.adaptive).and_then(|r| r.2.as_deref()).map(parse_timeline).unwrap_or_default();
+    let latest = rows.iter().rev().find(|r| r.0.adaptive && r.0.rating.is_some());
+    let latest_timeline = latest.and_then(|r| r.2.as_deref()).map(parse_timeline).unwrap_or_default();
+    let knob = latest.and_then(|r| r.0.knob.clone());
+    let model = latest.and_then(|r| r.3).zip(knob.clone());
     let mut runs: Vec<RunPoint> = rows.into_iter().map(|r| r.0).collect();
 
     // Targets for every run, grouped by run.
     let mut by_run: HashMap<i64, Vec<T>> = HashMap::new();
     let mut stmt = conn.prepare(
         "SELECT t.run_id, t.start_at, t.ended_at, t.outcome, t.distance_deg, t.direction_deg, t.radius_deg,
-                t.reaction_s, t.overshoot_deg, t.entries
+                t.reaction_s, t.overshoot_deg, t.entries, t.value
          FROM engine_targets t JOIN engine_runs e ON e.run_id = t.run_id
          WHERE e.base_scenario = ?1",
     )?;
@@ -307,6 +372,7 @@ pub fn scenario(db: &Db, base_scenario: &str) -> Result<Option<Insights>, DbErro
             reaction: r.get(7)?,
             overshoot: r.get(8)?,
             entries: r.get(9)?,
+            value: r.get(10)?,
         })
     })?;
     for t in iter {
@@ -362,12 +428,15 @@ pub fn scenario(db: &Db, base_scenario: &str) -> Result<Option<Insights>, DbErro
     let shots = shot_map(db, &recent_ids)?;
     let tracking = tracking_stats(db, &recent_ids, &before_ids)?;
     let segments = segment_stats(&decided);
+    let curve = model.map(|((theta, slope), knob)| speed_curve(&knob, theta, slope, &decided));
 
     let mut ins = Insights {
         scenario: base_scenario.to_string(),
         category,
         runs,
+        knob,
         latest_timeline,
+        curve,
         recent_runs: recent_ids.len(),
         targets: decided.len(),
         success,
@@ -383,6 +452,53 @@ pub fn scenario(db: &Db, base_scenario: &str) -> Result<Option<Insights>, DbErro
     };
     ins.notes = notes(&ins);
     Ok(Some(ins))
+}
+
+/// Must match `rustyaim_sim::adaptive` (lapse rate and the log-scale knob).
+const LAPSE: f64 = 0.04;
+
+fn knob_h(knob: &str, v: f64) -> f64 {
+    let l = v.max(1e-4).ln();
+    if higher_is_harder(knob) { l } else { -l }
+}
+
+fn knob_value(knob: &str, h: f64) -> f64 {
+    if higher_is_harder(knob) { h.exp() } else { (-h).exp() }
+}
+
+fn speed_curve(knob: &str, theta: f64, slope: f64, decided: &[&T]) -> Curve {
+    let chance = |h: f64| LAPSE / 2.0 + (1.0 - LAPSE) / (1.0 + ((h - theta) / slope).exp());
+    // Value at a given chance, inverting the model.
+    let at = |p: f64| {
+        let q = ((p - LAPSE / 2.0) / (1.0 - LAPSE)).clamp(1e-3, 1.0 - 1e-3);
+        knob_value(knob, theta - slope * (q / (1.0 - q)).ln())
+    };
+    let (h95, h20) = (knob_h(knob, at(0.95)), knob_h(knob, at(0.2)));
+    let model = (0..=40)
+        .map(|i| {
+            let h = h95 - 0.15 + (h20 - h95 + 0.3) * f64::from(i) / 40.0;
+            (knob_value(knob, h), chance(h))
+        })
+        .collect();
+    // Observed: recent targets in bins of equal width on the log scale.
+    let mut pts: Vec<(f64, bool)> =
+        decided.iter().filter_map(|t| t.value.map(|v| (knob_h(knob, v), t.killed))).collect();
+    pts.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut observed = Vec::new();
+    if pts.len() >= 20 {
+        let (lo, hi) = (pts[0].0, pts[pts.len() - 1].0);
+        let bins = 8;
+        for b in 0..bins {
+            let (a, z) = (lo + (hi - lo) * b as f64 / bins as f64, lo + (hi - lo) * (b + 1) as f64 / bins as f64);
+            let g: Vec<&(f64, bool)> =
+                pts.iter().filter(|p| p.0 >= a && (p.0 < z || (b == bins - 1 && p.0 <= z))).collect();
+            if g.len() >= 4 {
+                let hit = g.iter().filter(|p| p.1).count() as f64 / g.len() as f64;
+                observed.push((knob_value(knob, (a + z) / 2.0), hit, g.len()));
+            }
+        }
+    }
+    Curve { knob: knob.to_string(), model, observed, at95: at(0.95), at85: at(0.85), at50: at(0.5) }
 }
 
 fn fit_fitts(recent: &[T], before: &[T]) -> Option<Fitts> {
@@ -626,19 +742,58 @@ fn notes(i: &Insights) -> Vec<Note> {
     let mut out = Vec::new();
     let mut push = |title: String, body: String| out.push(Note { title, body });
 
-    let adaptive: Vec<&RunPoint> = i.runs.iter().filter(|r| r.adaptive && r.level.is_some()).collect();
-    if adaptive.len() >= 2 {
-        let first = adaptive[0].level.unwrap_or(0.0);
-        let last = adaptive[adaptive.len() - 1].level.unwrap_or(0.0);
-        let best = adaptive.iter().filter_map(|r| r.level).fold(0.0, f64::max);
-        push(
-            format!("Level {last:.0}{}", if last >= best - 0.5 { " — your best" } else { "" }),
-            format!(
-                "Up {:+.0} from your first adaptive run ({first:.0}) over {} runs. Each level is the same relative step in difficulty.",
-                last - first,
-                adaptive.len()
-            ),
-        );
+    let rated: Vec<&RunPoint> = i.runs.iter().filter(|r| r.adaptive && r.rating.is_some()).collect();
+    if let (Some(knob), Some(last)) = (&i.knob, rated.last()) {
+        let fmt = |v: f64| format_value(knob, v);
+        let now = last.rating.unwrap_or(0.0);
+        let unit_word = if knob == "target_speed" {
+            "tracking speed"
+        } else if knob == "lifetime" {
+            "speed"
+        } else {
+            "size"
+        };
+        let mut body = format!("You hit {:.0}% at {}.", 85.0, fmt(now));
+        if rated.len() >= 2 {
+            let first = rated[0].rating.unwrap_or(now);
+            let better = if higher_is_harder(knob) { now > first } else { now < first };
+            body = format!(
+                "{body} Your first rating was {} {} runs ago, so you're {} by {}.",
+                fmt(first),
+                rated.len() - 1,
+                if better { "better" } else { "behind" },
+                fmt((now - first).abs())
+            );
+        }
+        push(format!("85% {unit_word}: {}", fmt(now)), body);
+        if let Some(f) = rated
+            .iter()
+            .filter_map(|r| r.fastest)
+            .reduce(|a, b| if higher_is_harder(knob) { a.max(b) } else { a.min(b) })
+        {
+            push(
+                format!("Fastest hit: {}", fmt(f)),
+                "The hardest target you've ever hit on this scenario. Stretch targets give you the chance to beat it."
+                    .into(),
+            );
+        }
+    }
+    if let Some(c) = &i.curve {
+        let fmt = |v: f64| format_value(&c.knob, v);
+        // Spread between reliable (95%) and coin-flip (50%) on a relative scale.
+        let spread = (knob_h(&c.knob, c.at50) - knob_h(&c.knob, c.at95)).abs();
+        let (title, advice) = if spread < 0.25 {
+            (
+                "Consistent: you drop off sharply",
+                "You're reliable up to your rating and fall away quickly past it. Push speed with stretch targets (the Push mix).",
+            )
+        } else {
+            (
+                "You fade gradually",
+                "Your hit rate falls slowly as targets get faster, so misses happen even at easy speeds. Work on consistency (the Steady mix).",
+            )
+        };
+        push(title.into(), format!("Reliable (95%) at {}, coin-flip (50%) at {}. {advice}", fmt(c.at95), fmt(c.at50)));
     }
 
     if i.directions.len() >= 4 {
@@ -851,7 +1006,7 @@ mod tests {
 
     /// A clicking run where flicks to the left are slow and often time out, and
     /// misses land past the target.
-    fn clicking_run(level: f64) -> EngineRun {
+    fn clicking_run(rating: f64) -> EngineRun {
         let mut targets = Vec::new();
         let mut shots = Vec::new();
         for i in 0..80 {
@@ -877,7 +1032,9 @@ mod tests {
                 entries: 1,
                 shots: 1,
                 hits: i64::from(killed),
-                level: Some(level),
+                value: Some(0.4 + (i % 10) as f64 * 0.08),
+                chance: Some(0.85),
+                pick: Some("near".into()),
             });
             shots.push(ShotRow {
                 t: start + time,
@@ -893,9 +1050,19 @@ mod tests {
             base_scenario: "Timed Flicks".into(),
             category: "clicking".into(),
             adaptive: true,
-            level: Some(level),
+            knob: Some("lifetime".into()),
+            rating: Some(rating),
+            rating_low: Some(rating * 0.95),
+            rating_high: Some(rating * 1.05),
+            start_rating: Some(rating + 0.1),
+            theta: Some(-(rating.ln()) + 0.12 * 1.7346),
+            slope: Some(0.12),
+            rating_sd: Some(0.05),
+            fastest: Some(rating * 0.8),
+            mix: Some("balanced".into()),
+            goal: Some(0.85),
             success_rate: Some(0.85),
-            level_timeline: vec![(0.0, level - 5.0), (60.0, level)],
+            rating_timeline: vec![(0.0, rating + 0.1), (60.0, rating)],
             targets,
             shots,
             ..Default::default()
@@ -905,11 +1072,15 @@ mod tests {
     #[test]
     fn clicking_insights_find_the_weak_side_and_overshoot() {
         let mut db = Db::open_in_memory().unwrap();
-        save(&mut db, 1, &clicking_run(30.0));
-        save(&mut db, 2, &clicking_run(36.0));
+        save(&mut db, 1, &clicking_run(0.8));
+        save(&mut db, 2, &clicking_run(0.62));
         let i = scenario(&db, "Timed Flicks").unwrap().unwrap();
         assert_eq!(i.runs.len(), 2);
-        assert_eq!(i.latest_timeline.last(), Some(&(60.0, 36.0)));
+        assert_eq!(i.latest_timeline.last(), Some(&(60.0, 0.62)));
+        let c = i.curve.as_ref().unwrap();
+        assert!((c.at85 - 0.62).abs() < 0.01, "{c:?}");
+        assert!(c.at95 > c.at85 && c.at85 > c.at50, "lifetime: reliable is slower than coin-flip");
+        assert!(!c.observed.is_empty());
         let left = i.directions.iter().find(|d| d.label == "Left").unwrap();
         assert!((left.success - 0.5).abs() < 1e-9, "{left:?}");
         let f = i.fitts.as_ref().unwrap();
@@ -924,12 +1095,17 @@ mod tests {
         assert!(titles.contains(&"Weakest direction: left"), "{titles:?}");
         assert!(titles.contains(&"You overshoot"), "{titles:?}");
         assert!(titles.contains(&"Shots land low"), "{titles:?}");
-        assert!(titles.iter().any(|t| t.starts_with("Level 36")), "{titles:?}");
+        assert!(titles.contains(&"85% speed: 0.62 s"), "{titles:?}");
+        assert!(titles.contains(&"Fastest hit: 0.50 s"), "{titles:?}");
+        let better = &i.notes.iter().find(|n| n.title.starts_with("85% speed")).unwrap().body;
+        assert!(better.contains("better by 0.18 s"), "{better}");
 
         let o = overview(&db).unwrap();
         assert_eq!(o[0].scenario, "Timed Flicks");
-        assert_eq!(o[0].latest_level, Some(36.0));
-        assert_eq!(db.last_adaptive_level("Timed Flicks").unwrap(), Some(36.0));
+        assert_eq!(o[0].latest_rating, Some(0.62));
+        assert_eq!(o[0].best_rating, Some(0.62), "lower lifetime is better");
+        assert_eq!(o[0].fastest, Some(0.62 * 0.8));
+        assert_eq!(db.last_rating("Timed Flicks").unwrap().unwrap().knob, "lifetime");
     }
 
     #[test]

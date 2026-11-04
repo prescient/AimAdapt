@@ -48,10 +48,13 @@ pub struct TrainerScenario {
     runs: i64,
     best: Option<f64>,
     last_played: Option<String>,
-    /// Adaptive mode: runs, the level the last run settled at, and the best level.
+    /// Adaptive mode: runs, the knob, the latest and best ratings in its units, and
+    /// the hardest value ever hit.
     adaptive_runs: i64,
-    level: Option<f64>,
-    best_level: Option<f64>,
+    knob: Option<String>,
+    rating: Option<f64>,
+    best_rating: Option<f64>,
+    fastest: Option<f64>,
 }
 
 #[derive(Serialize)]
@@ -129,8 +132,10 @@ pub fn build_trainer(state: &AppData, t: &TrainerState) -> Result<Trainer, Strin
                 best,
                 last_played: last_played.or_else(|| lv.map(|l| l.last_played.clone())),
                 adaptive_runs: lv.map_or(0, |l| l.adaptive_runs as i64),
-                level: lv.and_then(|l| l.latest_level),
-                best_level: lv.and_then(|l| l.best_level),
+                knob: lv.and_then(|l| l.knob.clone()),
+                rating: lv.and_then(|l| l.latest_rating),
+                best_rating: lv.and_then(|l| l.best_rating),
+                fastest: lv.and_then(|l| l.fastest),
             }
         })
         .collect();

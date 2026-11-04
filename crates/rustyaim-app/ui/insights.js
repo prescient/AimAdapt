@@ -59,7 +59,7 @@ function insights(name) {
         <h2>Scenarios</h2>
         <div class="scenario-list">${st.overview.map((s) => `<a class="scenario-item ${s.scenario === selected ? "on" : ""}" href="#insights/${encodeURIComponent(s.scenario)}">
           <span class="main"><span class="name">${esc(s.scenario)}</span>
-          <span class="sub">${s.runs} run${s.runs === 1 ? "" : "s"} · ${esc(s.category)}${s.latest_level !== null ? ` · level ${s.latest_level.toFixed(0)}` : ""}</span></span></a>`).join("")}</div>
+          <span class="sub">${s.runs} run${s.runs === 1 ? "" : "s"} · ${esc(s.category)}${s.latest_rating !== null ? ` · 85% at ${esc(fmtKnob(s.knob, s.latest_rating))}` : ""}</span></span></a>`).join("")}</div>
       </section>
       <div style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column;gap:16px">
         ${data === undefined ? `<div class="empty-state">Loading…</div>` : data === null ? `<div class="card note-body">No data for this scenario.</div>` : data.error ? `<div class="card error">${esc(data.error)}</div>` : insightDetail(data)}
@@ -69,12 +69,13 @@ function insights(name) {
 }
 
 function insightDetail(d) {
-  const adaptive = d.runs.filter((r) => r.adaptive && r.level !== null);
+  const adaptive = d.runs.filter((r) => r.adaptive && r.rating !== null && r.knob === d.knob);
   const latest = adaptive.at(-1);
-  const best = adaptive.reduce((m, r) => Math.max(m, r.level), 0);
+  const best = adaptive.reduce((m, r) => (m === null || betterThan(d.knob, r.rating, m) ? r.rating : m), null);
+  const fastest = adaptive.reduce((m, r) => (r.fastest !== null && (m === null || betterThan(d.knob, r.fastest, m)) ? r.fastest : m), null);
   const t = d.tracking;
   const kpis = [
-    latest ? kpi("Level", latest.level.toFixed(0), `best ${best.toFixed(0)} · ${adaptive.length} adaptive runs`) : "",
+    latest ? kpi(`85% ${knobWord(d.knob)}`, esc(fmtKnob(d.knob, latest.rating)), `best ${esc(fmtKnob(d.knob, best))}${fastest !== null ? ` · fastest hit ${esc(fmtKnob(d.knob, fastest))}` : ""}`) : "",
     d.success !== null ? kpi("Targets hit", share(d.success), `destroyed before timing out · last ${d.recent_runs} runs`) : "",
     d.fitts ? kpi("Flick speed", `${d.fitts.throughput.toFixed(1)}<small> bits/s</small>`, delta(d.fitts.throughput, d.fitts.throughput_before, "bits/s") || "speed for size and distance") : "",
     d.reaction ? kpi("Reaction", `${Math.round(d.reaction.median_ms)}<small> ms</small>`, delta(d.reaction.median_ms, d.reaction.median_before_ms, "ms", -1) || "median, before moving") : "",
@@ -85,7 +86,8 @@ function insightDetail(d) {
       <div class="kpis">${kpis}</div>
       ${d.notes.length ? `<div class="grid">${d.notes.map((n) => `<div class="note"><div class="note-title">${esc(n.title)}</div><div class="note-body">${esc(n.body)}</div></div>`).join("")}</div>` : `<div class="note-body">Play a few more runs for coaching notes.</div>`}
     </section>
-    ${adaptive.length ? levelCard(d, adaptive) : ""}
+    ${adaptive.length ? ratingCard(d, adaptive) : ""}
+    ${d.curve ? curveCard(d.curve) : ""}
     <div class="insight-grid">
       ${d.fitts ? fittsCard(d.fitts) : ""}
       ${d.directions.length >= 3 ? directionCard(d.directions) : ""}
@@ -95,9 +97,9 @@ function insightDetail(d) {
       ${t ? trackingCard(t) : ""}
       ${d.segments.some((s) => s.success !== null) ? segmentCard(d.segments) : ""}
     </div>
-    <section class="card"><h2>Runs</h2><div class="table-wrap"><table><thead><tr><th>When</th><th>Mode</th><th class="r">Level</th><th class="r">Hit</th><th class="r">Score</th><th class="r">Flick speed</th><th class="r">Reaction</th><th class="r">On target</th><th>Workout</th></tr></thead><tbody>
+    <section class="card"><h2>Runs</h2><div class="table-wrap"><table><thead><tr><th>When</th><th>Mode</th><th class="r">85% rating</th><th class="r">Hit</th><th class="r">Score</th><th class="r">Flick speed</th><th class="r">Reaction</th><th class="r">On target</th><th>Workout</th></tr></thead><tbody>
       ${[...d.runs].reverse().slice(0, 30).map((r) => `<tr><td style="white-space:nowrap">${esc(fmtShort(dt(r.finished_at)))}, ${esc(fmtTime(dt(r.finished_at)))}</td><td>${r.adaptive ? "Adaptive" : "Standard"}</td>
-        <td class="r num">${r.level !== null ? r.level.toFixed(1) : "–"}</td><td class="r mono">${share(r.success_rate ?? r.accuracy)}</td><td class="r mono">${r.adaptive ? "–" : num(r.score)}</td>
+        <td class="r num">${r.rating !== null ? esc(fmtKnob(r.knob, r.rating)) : "–"}</td><td class="r mono">${share(r.success_rate ?? r.accuracy)}</td><td class="r mono">${r.adaptive ? "–" : num(r.score)}</td>
         <td class="r mono">${r.throughput ? `${r.throughput.toFixed(1)}` : "–"}</td><td class="r mono">${ms(r.reaction_ms)}</td><td class="r mono">${share(r.on_target)}</td><td class="muted">${esc(r.workout ?? "")}</td></tr>`).join("")}
     </tbody></table></div></section>`;
 }
@@ -119,26 +121,69 @@ function axes(xlo, xhi, ylo, yhi, xlabel, ylabel, yfmt = (v) => v, yn = 4) {
 
 const svg = (body, h = H, w = W) => `<svg viewBox="0 0 ${w} ${h}" width="100%" role="img" style="max-height:${h + 40}px">${body}</svg>`;
 
-function levelCard(d, adaptive) {
-  const pts = adaptive.map((r, i) => [i, r.level]);
-  const lo = Math.max(0, Math.floor(Math.min(...pts.map((p) => p[1])) / 10) * 10 - 10);
-  const hi = Math.min(100, Math.ceil(Math.max(...pts.map((p) => p[1])) / 10) * 10 + 10);
-  const n = Math.max(1, pts.length - 1);
-  const line = pts.map((p, i) => `${i ? "L" : "M"}${sx(p[0], 0, n)},${sy(p[1], lo, hi)}`).join("");
+// Rating by run, drawn so "better" is always up: for lifetime and size the axis is
+// flipped, since lower is better.
+function ratingCard(d, adaptive) {
+  const knob = d.knob;
+  const up = higherIsHarder(knob);
+  const vals = adaptive.flatMap((r) => [r.rating, r.rating_low ?? r.rating, r.rating_high ?? r.rating]);
+  const pad = (Math.max(...vals) - Math.min(...vals)) * 0.15 || Math.max(...vals) * 0.1;
+  let lo = Math.min(...vals) - pad, hi = Math.max(...vals) + pad;
+  if (!up) [lo, hi] = [hi, lo];
+  const n = Math.max(1, adaptive.length - 1);
+  const fmtTick = (v) => fmtKnob(knob, v).replace(" °/s", "").replace(" s", "").replace(" m", "");
+  const band = adaptive.map((r, i) => `${sx(i, 0, n)},${sy(r.rating_high ?? r.rating, lo, hi)}`).join(" ") + " " +
+    [...adaptive].reverse().map((r, j) => `${sx(adaptive.length - 1 - j, 0, n)},${sy(r.rating_low ?? r.rating, lo, hi)}`).join(" ");
+  const line = adaptive.map((r, i) => `${i ? "L" : "M"}${sx(i, 0, n)},${sy(r.rating, lo, hi)}`).join("");
   const tl = d.latest_timeline;
-  const tmax = tl.length ? tl.at(-1)[0] : 60;
-  const tlo = Math.max(0, Math.floor(Math.min(...tl.map((p) => p[1]), 100) / 10) * 10 - 5);
-  const thi = Math.min(100, Math.ceil(Math.max(...tl.map((p) => p[1]), 0) / 10) * 10 + 5);
-  const tline = tl.map((p, i) => `${i ? "L" : "M"}${sx(p[0], 0, tmax)},${sy(p[1], tlo, thi)}`).join("");
+  let tchart = "";
+  if (tl.length > 2) {
+    const tmax = tl.at(-1)[0] || 60;
+    const tv = tl.map((p) => p[1]);
+    let tlo = Math.min(...tv), thi = Math.max(...tv);
+    const tp = (thi - tlo) * 0.1 || thi * 0.05;
+    tlo -= tp;
+    thi += tp;
+    if (!up) [tlo, thi] = [thi, tlo];
+    const tline = tl.map((p, i) => `${i ? "L" : "M"}${sx(p[0], 0, tmax)},${sy(p[1], tlo, thi)}`).join("");
+    tchart = `<section class="card grow-1"><div class="card-head"><h2>Last run</h2><span class="small muted">Your rating as the run went on</span></div>
+      ${svg(`${axes(0, tmax, tlo, thi, "seconds", knob === "target_speed" ? "°/s" : knob === "lifetime" ? "s" : "m", fmtTick)}<path d="${tline}" fill="none" stroke="var(--blue)" stroke-width="2"/>`)}
+      <div class="small muted">Big early moves are the trainer finding your speed; it settles as it gets more certain.</div></section>`;
+  }
   return `<div class="row">
-    <section class="card grow-2"><div class="card-head"><h2>Level by run</h2><span class="small muted">Where adaptive mode settled each run</span></div>
-      ${svg(`${axes(1, n + 1, lo, hi, "run", "level", (v) => v, (hi - lo) / ((hi - lo) > 60 ? 20 : 10))}<path d="${line}" fill="none" stroke="var(--rust)" stroke-width="2.5"/>
-        ${pts.map((p) => `<circle cx="${sx(p[0], 0, n)}" cy="${sy(p[1], lo, hi)}" r="3.5" fill="var(--rust)"><title>Run ${p[0] + 1}: level ${p[1].toFixed(1)}</title></circle>`).join("")}`)}
+    <section class="card grow-2"><div class="card-head"><h2>85% ${knobWord(knob)} by run</h2><span class="small muted">Up is better · shaded = likely range</span></div>
+      ${svg(`${axes(1, n + 1, lo, hi, "run", knob === "target_speed" ? "°/s" : knob === "lifetime" ? "s" : "m", fmtTick)}
+        <polygon points="${band}" fill="var(--rust)" opacity="0.15"/>
+        <path d="${line}" fill="none" stroke="var(--rust)" stroke-width="2.5"/>
+        ${adaptive.map((r, i) => `<circle cx="${sx(i, 0, n)}" cy="${sy(r.rating, lo, hi)}" r="3.5" fill="var(--rust)"><title>Run ${i + 1}: ${esc(fmtKnob(knob, r.rating))}</title></circle>`).join("")}`)}
     </section>
-    ${tl.length > 2 ? `<section class="card grow-1"><div class="card-head"><h2>Last run</h2><span class="small muted">Level during the run</span></div>
-      ${svg(`${axes(0, tmax, tlo, thi, "seconds", "level")}<path d="${tline}" fill="none" stroke="var(--blue)" stroke-width="2"/>`)}
-      <div class="small muted">Big early jumps are the search finding your level; the steps get smaller as it narrows in.</div></section>` : ""}
+    ${tchart}
   </div>`;
+}
+
+// Chance of success at each speed, from the model, with what actually happened.
+function curveCard(c) {
+  const knob = c.knob;
+  const h = (v) => (higherIsHarder(knob) ? Math.log(v) : -Math.log(v));
+  const xs = c.model.map((p) => h(p[0]));
+  const xlo = Math.min(...xs), xhi = Math.max(...xs);
+  const X = (v) => sx(h(v), xlo, xhi);
+  const line = c.model.map((p, i) => `${i ? "L" : "M"}${X(p[0])},${sy(p[1] * 100, 0, 100)}`).join("");
+  // Labels sit low on the chart, staggered, so they don't cover the curve's top.
+  const mark = (v, label, row) => `<line x1="${X(v)}" x2="${X(v)}" y1="${PAD.t}" y2="${H - PAD.b}" stroke="var(--dim)" stroke-dasharray="3 4"/>
+    <text x="${X(v) + 4}" y="${H - PAD.b - 8 - row * 14}" font-size="11" fill="var(--muted)">${label} ${esc(fmtKnob(knob, v))}</text>`;
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((k) => {
+    const v = c.model[Math.round(k * (c.model.length - 1))][0];
+    return `<text x="${X(v)}" y="${H - PAD.b + 16}" text-anchor="middle" font-size="11" fill="var(--dim)">${esc(fmtKnob(knob, v))}</text>`;
+  }).join("");
+  return `<section class="card"><div class="card-head"><h2>Speed vs. hit rate</h2><span class="small muted">Harder to the right</span></div>
+    ${svg(`${[0, 25, 50, 75, 100].map((v) => `<line x1="${PAD.l}" x2="${W - PAD.r}" y1="${sy(v, 0, 100)}" y2="${sy(v, 0, 100)}" stroke="var(--border)"/><text x="${PAD.l - 6}" y="${sy(v, 0, 100) + 4}" text-anchor="end" font-size="11" fill="var(--dim)">${v}%</text>`).join("")}
+      ${ticks}
+      ${mark(c.at95, "95%", 2)}${mark(c.at85, "85%", 1)}${mark(c.at50, "50%", 0)}
+      <path d="${line}" fill="none" stroke="var(--rust)" stroke-width="2.5"/>
+      ${c.observed.map((o) => `<circle cx="${X(o[0])}" cy="${sy(o[1] * 100, 0, 100)}" r="${3 + Math.min(6, Math.sqrt(o[2]))}" fill="var(--blue)" opacity="0.6"><title>${esc(fmtKnob(knob, o[0]))}: ${Math.round(o[1] * 100)}% of ${o[2]} targets</title></circle>`).join("")}`)}
+    <div class="note-body">The line is your current curve: the chance of hitting a target at each ${knob === "target_speed" ? "speed" : knob === "lifetime" ? "lifetime" : "size"}. ${c.observed.length ? "Blue dots are what actually happened in recent runs (bigger = more targets). " : ""}You're reliable (95%) at ${esc(fmtKnob(knob, c.at95))} and it's a coin flip at ${esc(fmtKnob(knob, c.at50))}. A steep drop means you're consistent up to your limit; a gentle slope means misses creep in early.</div>
+  </section>`;
 }
 
 function fittsCard(f) {
