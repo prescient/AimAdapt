@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use chrono::NaiveDate;
-use rustyaim_core::{Db, import::import_dir_at, parse_file, summary};
+use rustyaim_core::{Db, import::import_dir_at, parse_file, summary, training};
 
 const CLICKING: &str = "shimPressure Micro Novice - Challenge - 2026.11.03-06.31.39 Stats.csv";
 const TRACKING: &str = "Whisphere 80% - Challenge - 2026.11.02-11.19.59 Stats.csv";
@@ -97,6 +97,28 @@ fn import_is_incremental_and_records_errors() {
     assert_eq!(kills, 155 + run_kills(SHORT));
     let fields: i64 = db.conn().query_row("SELECT COUNT(*) FROM run_fields", [], |r| r.get(0)).unwrap();
     assert!(fields > 3 * 40, "expected every Key:,value line to be stored, got {fields}");
+}
+
+#[test]
+fn training_report_from_imported_runs() {
+    let dir = tempfile::tempdir().unwrap();
+    for name in [CLICKING, TRACKING, SHORT] {
+        std::fs::copy(fixtures().join(name), dir.path().join(name)).unwrap();
+    }
+    let mut db = Db::open_in_memory().unwrap();
+    import_dir_at(&mut db, dir.path(), now()).unwrap();
+
+    let settings = training::TimeSettings::default();
+    let report = training::report(&db, &settings, now()).unwrap();
+    assert_eq!(report.runs.len(), 3);
+    // Nov 2 11:19 on its own; Nov 3 06:24 and 06:30 are 6 minutes apart, so one session.
+    assert_eq!(report.sessions.len(), 2);
+    assert_eq!(report.sessions[1].runs, 2);
+    assert_eq!(report.days.len(), 2);
+    // Trained Nov 2 and 3, checked on Nov 4 before training: streak still alive.
+    assert_eq!(report.streak, training::Streak { current: 2, best: 2, trained_today: false });
+    assert_eq!(report.runs_by_hour[6], 2);
+    assert_eq!(report.runs_by_hour[11], 1);
 }
 
 #[test]

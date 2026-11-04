@@ -45,13 +45,17 @@ The stats file name holds the scenario name, the mode (`Challenge`) and the fini
 
 ## Epic 2: Sessions and training time (P0)
 
-- [ ] `todo` Run length = finish time − `Challenge Start`, handling runs that cross midnight. Subtract pause duration.
-- [ ] `todo` Group runs into sessions: a gap of N minutes (default 15) starts a new one.
-- [ ] `todo` Active time (inside scenarios) vs. session time (first run to last).
-- [ ] `todo` Training-day boundary (default 4 AM) so late-night sessions count toward the right day.
-- [ ] `todo` Streaks, daily goal hit or miss, weekly totals.
-- [ ] `todo` Detect restarted runs: shorter than X% of that scenario's usual length. Per scenario, because some scenarios are meant to last 1–2 seconds.
-- [ ] `todo` Averages by day of week and runs by hour of day.
+All in `crates/rustyaim-core/src/training.rs`. Reported by `rustyaim-cli time`.
+
+- [x] `done` Run length = finish time − `Challenge Start`, handling runs that cross midnight. Pause duration is subtracted.
+- [ ] `spike` Confirm the units of `Pause Duration`. None of the first 213 runs has a pause, so it's assumed to be seconds, and a pause as long as the run itself is ignored. Pause a run once and check the file.
+- [x] `done` Group runs into sessions: a break of more than N minutes (default 15) starts a new one.
+- [x] `done` Active time (inside runs) vs. session time (first run to last).
+- [x] `done` Training-day boundary (default 4 AM) so late-night sessions count toward the day they started on.
+- [x] `done` Streaks (current and best; today stays open until the day ends), daily goal met or not, weekly totals.
+- [x] `done` Detect restarted runs: shorter than 50% of that scenario's median length, for scenarios with 3+ runs. 1-second scenarios aren't flagged.
+- [x] `done` Averages by day of week (missed days count as 0) and runs by hour of day.
+- [ ] `todo` Store sessions in the database once the UI needs them faster. They're cheap to recompute for now.
 
 ## Epic 3: Progress tracking (P1)
 

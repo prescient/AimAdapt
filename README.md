@@ -19,8 +19,14 @@ cargo run -p rustyaim-cli -- summary
 ```
 
 ```bash
+cargo run -p rustyaim-cli -- time
+```
+
+```bash
 cargo run -p rustyaim-cli -- watch
 ```
+
+`time` shows training time: active vs. session time, sessions, days, streak, weekday averages and runs by hour. Options: `--gap 15` (break in minutes that starts a new session), `--day-start 4` (hour a training day begins), `--goal 30` (daily goal in minutes).
 
 The stats folder is found in your Steam libraries automatically; override it with `--stats <dir>`. The database defaults to `%APPDATA%\RustyAim\rustyaim.db`; override it with `--db <file>`. `errors` lists files that couldn't be imported.
 

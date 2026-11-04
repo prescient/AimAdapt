@@ -6,8 +6,10 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
+use chrono::Local;
 use clap::{Parser, Subcommand};
 use notify::{RecursiveMode, Watcher};
+use rustyaim_core::training::{self, TimeSettings, TrainingReport};
 use rustyaim_core::{Db, ImportReport, discover, import, summary};
 
 #[derive(Parser)]
@@ -37,6 +39,21 @@ enum Command {
         #[arg(long, default_value_t = 10)]
         top: usize,
     },
+    /// Training time: sessions, days, streak, weekdays and hours
+    Time {
+        /// Break length (minutes) that starts a new session
+        #[arg(long, default_value_t = 15)]
+        gap: i64,
+        /// Hour a training day starts (so late-night sessions count toward the previous day)
+        #[arg(long, default_value_t = 4)]
+        day_start: u32,
+        /// Daily goal in minutes of active time
+        #[arg(long, default_value_t = 30.0)]
+        goal: f64,
+        /// How many recent sessions to list
+        #[arg(long, default_value_t = 10)]
+        sessions: usize,
+    },
     /// List files that couldn't be imported
     Errors,
 }
@@ -57,6 +74,13 @@ fn main() -> Result<()> {
         }
         Command::Watch => watch(&mut db, &stats_dir(cli.stats)?)?,
         Command::Summary { top } => print_summary(&db, top)?,
+        Command::Time { gap, day_start, goal, sessions } => {
+            if day_start > 23 {
+                bail!("--day-start must be an hour from 0 to 23");
+            }
+            let settings = TimeSettings { session_gap_min: gap, day_start_hour: day_start, daily_goal_min: goal, ..Default::default() };
+            print_time(&training::report(&db, &settings, Local::now().naive_local())?, &settings, sessions);
+        }
         Command::Errors => {
             let errors = db.import_errors()?;
             if errors.is_empty() {
@@ -146,6 +170,87 @@ fn print_summary(db: &Db, top: usize) -> Result<()> {
         println!("  {:>3}x  best {:>10}  {:>6}  {}", s.runs, s.best.map(num).unwrap_or_default(), change, s.scenario);
     }
     Ok(())
+}
+
+fn print_time(r: &TrainingReport, settings: &TimeSettings, recent: usize) {
+    let Some(first) = r.days.first() else {
+        println!("No runs imported yet. Run `rustyaim import` first.");
+        return;
+    };
+    let active = r.active_s();
+    let session = r.session_s();
+    let calendar_days = (r.today - first.day).num_days() + 1;
+    let restarted = r.runs.iter().filter(|x| x.restarted).count();
+
+    println!("Since {} ({} days)", first.day.format("%a %b %-d"), calendar_days);
+    println!("  Active time    {}  (inside runs)", hm(active));
+    println!("  Session time   {}  (first run to last, incl. menus and breaks)", hm(session));
+    if session > 0.0 {
+        println!("  Active share   {:.0}%", active / session * 100.0);
+    }
+    println!("  Days trained   {} of {}", r.days.len(), calendar_days);
+    println!("  Per day        {} active", hm(active / r.days.len() as f64));
+    println!("  Sessions       {}, {} active on average", r.sessions.len(), hm(active / r.sessions.len() as f64));
+    println!("  Restarted runs {restarted} of {}", r.runs.len());
+
+    let s = r.streak;
+    let today_note = if s.trained_today { "trained today" } else { "not trained yet today" };
+    println!("\nStreak: {} days (best {}), {today_note}", s.current, s.best);
+    if let Some(w) = r.weeks.last() {
+        println!(
+            "This week (from {}): {} active over {} days, goal {}",
+            w.week_start.format("%a %b %-d"),
+            hm(w.active_s),
+            w.days_trained,
+            hm(settings.daily_goal_min * 60.0 * 7.0)
+        );
+    }
+
+    println!("\nDays                runs  sessions   active  session  goal ({:.0}m)", settings.daily_goal_min);
+    for d in &r.days {
+        let goal = if d.goal_met { "met" } else { "-" };
+        println!(
+            "  {}  {:>4}  {:>8}  {:>7}  {:>7}  {goal}",
+            d.day.format("%a %Y-%m-%d"),
+            d.runs,
+            d.sessions,
+            hm(d.active_s),
+            hm(d.session_s)
+        );
+    }
+
+    println!("\nRecent sessions");
+    for s in r.sessions.iter().rev().take(recent) {
+        let restarts = if s.restarted > 0 { format!(", {} restarted", s.restarted) } else { String::new() };
+        println!(
+            "  {} {}-{}  {:>3} runs  {} active of {}{restarts}",
+            s.start.format("%a %b %-d"),
+            s.start.format("%H:%M"),
+            s.end.format("%H:%M"),
+            s.runs,
+            hm(s.active_s),
+            hm(s.length_s())
+        );
+    }
+
+    println!("\nAverage active minutes by weekday (missed days count as 0)");
+    for (i, avg) in r.weekday_avg_min.iter().enumerate() {
+        let name = chrono::Weekday::try_from(i as u8).map(|w| format!("{w}")).unwrap_or_default();
+        match avg {
+            Some(m) => println!("  {name}  {m:>5.0}m  {}", bar(*m, 90.0, 30)),
+            None => println!("  {name}      -  (hasn't come up yet)"),
+        }
+    }
+
+    println!("\nRuns by hour started");
+    let max = r.runs_by_hour.iter().copied().max().unwrap_or(1).max(1) as f64;
+    for (hour, n) in r.runs_by_hour.iter().enumerate().filter(|(_, n)| **n > 0) {
+        println!("  {hour:02}:00  {n:>4}  {}", bar(*n as f64, max, 30));
+    }
+}
+
+fn bar(value: f64, max: f64, width: usize) -> String {
+    "#".repeat(((value / max) * width as f64).round().clamp(0.0, width as f64) as usize)
 }
 
 fn hm(seconds: f64) -> String {

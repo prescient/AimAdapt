@@ -6,6 +6,7 @@ pub mod discover;
 pub mod import;
 pub mod parse;
 pub mod summary;
+pub mod training;
 
 pub use db::Db;
 pub use import::{ImportReport, import_dir};
