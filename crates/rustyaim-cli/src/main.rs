@@ -100,7 +100,12 @@ fn main() -> Result<()> {
             if day_start > 23 {
                 bail!("--day-start must be an hour from 0 to 23");
             }
-            let settings = TimeSettings { session_gap_min: gap, day_start_hour: day_start, daily_goal_min: goal, ..Default::default() };
+            let settings = TimeSettings {
+                session_gap_min: gap,
+                day_start_hour: day_start,
+                daily_goal_min: goal,
+                ..Default::default()
+            };
             print_time(&training::report(&db, &settings, Local::now().naive_local())?, &settings, sessions);
         }
         Command::Progress { scenario, sort, top } => {
@@ -136,7 +141,13 @@ fn stats_dir(given: Option<PathBuf>) -> Result<PathBuf> {
 }
 
 fn print_report(r: &ImportReport) {
-    println!("Found {} stats files: {} imported, {} already in database, {} errors", r.found, r.imported, r.skipped, r.errors.len());
+    println!(
+        "Found {} stats files: {} imported, {} already in database, {} errors",
+        r.found,
+        r.imported,
+        r.skipped,
+        r.errors.len()
+    );
     for (file, error) in &r.errors {
         println!("  ! {file}: {error}");
     }
@@ -313,7 +324,12 @@ fn print_progress_list(p: &Progress, settings: &ProgressSettings, sort: SortBy, 
         SortBy::Name => stats.sort_by_key(|s| s.scenario.to_lowercase()),
     }
 
-    println!("{} scenarios. Change = first run to best. Trend = last {} runs vs the {} before.", stats.len(), settings.trend_window, settings.trend_window);
+    println!(
+        "{} scenarios. Change = first run to best. Trend = last {} runs vs the {} before.",
+        stats.len(),
+        settings.trend_window,
+        settings.trend_window
+    );
     println!("\n  runs        best   change   trend   since PB  scenario");
     for s in stats.iter().take(top) {
         let flag = if s.plateau { "  [plateau]" } else { "" };
@@ -358,7 +374,14 @@ fn print_progress_list(p: &Progress, settings: &ProgressSettings, sort: SortBy, 
     if !fatigue.is_empty() {
         println!("\nScore vs. minutes into session (100% = that scenario's average)");
         for b in &fatigue {
-            println!("  {:>3}-{:<3} min  {:>4} runs  {:>4.0}%  {}", b.from_min, b.to_min, b.runs, b.relative_score_pct, bar(b.relative_score_pct, 150.0, 30));
+            println!(
+                "  {:>3}-{:<3} min  {:>4} runs  {:>4.0}%  {}",
+                b.from_min,
+                b.to_min,
+                b.runs,
+                b.relative_score_pct,
+                bar(b.relative_score_pct, 150.0, 30)
+            );
         }
         println!("  (Mixes in which scenarios you play when, so treat it as a rough signal.)");
     }
@@ -375,8 +398,16 @@ fn print_scenario(p: &Progress, scenario: &str, settings: &ProgressSettings) {
     println!("  Average        {}", opt_num(s.average.map(|a| (a * 10.0).round() / 10.0)));
     println!("  Change         {} (first run to best)", opt_pct(s.improvement_pct));
     println!("  Trend          {}", opt_pct(s.trend_pct));
-    println!("  Variation      {}", s.variation_pct.map(|v| format!("{v:.0}% (lower is steadier)")).unwrap_or_else(|| "-".into()));
-    println!("  Accuracy       {}", s.recent_accuracy.map(|a| format!("{:.1}% (last {} runs)", a * 100.0, settings.trend_window)).unwrap_or_else(|| "-".into()));
+    println!(
+        "  Variation      {}",
+        s.variation_pct.map(|v| format!("{v:.0}% (lower is steadier)")).unwrap_or_else(|| "-".into())
+    );
+    println!(
+        "  Accuracy       {}",
+        s.recent_accuracy
+            .map(|a| format!("{:.1}% (last {} runs)", a * 100.0, settings.trend_window))
+            .unwrap_or_else(|| "-".into())
+    );
     println!("  Since PB       {} runs{}", s.runs_since_pb, if s.plateau { " (plateau)" } else { "" });
 
     println!("\n     #  when             score    acc   ttk");
@@ -387,7 +418,13 @@ fn print_scenario(p: &Progress, scenario: &str, settings: &ProgressSettings) {
             println!("        --- settings changed: {} ---", describe_sens(sens));
         }
         period = Some(r.sens_period);
-        let mark = if r.restarted { "restarted" } else if r.is_pb { "PB" } else { "" };
+        let mark = if r.restarted {
+            "restarted"
+        } else if r.is_pb {
+            "PB"
+        } else {
+            ""
+        };
         println!(
             "  {:>4}  {}  {:>8}  {:>5}  {:>4}  {mark}",
             i + 1,
@@ -403,7 +440,13 @@ fn print_scenario(p: &Progress, scenario: &str, settings: &ProgressSettings) {
         println!("\nFirst run of the day vs. earlier best");
         for c in cold {
             let rest = c.vs_rest_of_day_pct.map(|v| format!(", {v:+.0}% vs. the rest of that day")).unwrap_or_default();
-            println!("  {}  {} vs {} ({:+.0}%{rest})", c.day.format("%b %-d"), num(c.first_score), num(c.previous_best), c.vs_previous_best_pct);
+            println!(
+                "  {}  {} vs {} ({:+.0}%{rest})",
+                c.day.format("%b %-d"),
+                num(c.first_score),
+                num(c.previous_best),
+                c.vs_previous_best_pct
+            );
         }
     }
 }

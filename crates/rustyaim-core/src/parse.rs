@@ -76,9 +76,7 @@ impl RunFile {
     }
 
     pub fn field_i64(&self, key: &str) -> Option<i64> {
-        self.field(key).and_then(|v| {
-            v.parse::<i64>().ok().or_else(|| v.parse::<f64>().ok().map(|f| f as i64))
-        })
+        self.field(key).and_then(|v| v.parse::<i64>().ok().or_else(|| v.parse::<f64>().ok().map(|f| f as i64)))
     }
 
     pub fn score(&self) -> Option<f64> {
@@ -111,10 +109,8 @@ impl RunFile {
 }
 
 pub fn parse_file(path: &Path) -> Result<RunFile, ParseError> {
-    let file_name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or_else(|| ParseError::FileName(path.display().to_string()))?;
+    let file_name =
+        path.file_name().and_then(|n| n.to_str()).ok_or_else(|| ParseError::FileName(path.display().to_string()))?;
     let bytes = std::fs::read(path)?;
     parse_contents(file_name, &String::from_utf8_lossy(&bytes))
 }

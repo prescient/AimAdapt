@@ -1,6 +1,8 @@
 # RustyAim
 
-Tracks your KovaaK's aim training: imports the per-run stats files into a local SQLite database, then reports progress and training time. See [BACKLOG.md](BACKLOG.md) for the plan.
+Tracks your KovaaK's aim training: imports the per-run stats files into a local SQLite database, then reports progress and training time. See [BACKLOG.md](BACKLOG.md) for the plan and [TESTING.md](TESTING.md) for how it's tested.
+
+Windows only for now. Installers are attached to [releases](../../releases) once a version is tagged.
 
 ## Layout
 
@@ -63,8 +65,28 @@ cargo run -p rustyaim-cli -- watch
 
 The stats folder is found in your Steam libraries automatically; override it with `--stats <dir>`. The database defaults to `%APPDATA%\RustyAim\rustyaim.db`; override it with `--db <file>`. `errors` lists files that couldn't be imported.
 
-## Tests
+## Development
+
+Needs Rust (stable, MSVC toolchain) and the Visual Studio C++ build tools. WebView2 ships with Windows 11.
+
+Enable the pre-commit hook once per clone. It checks formatting, runs clippy and the tests, and builds `dist/RustyAim.exe`:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Build the release executable by hand:
+
+```bash
+sh scripts/release-exe.sh
+```
+
+Run the tests:
 
 ```bash
 cargo test --workspace
 ```
+
+If the repo lives in a synced folder like OneDrive, move build output out of it with a local, gitignored `.cargo/config.toml` containing `[build]` and `target-dir = "C:/some/other/folder"`.
+
+To publish installers, push a version tag (for example `git tag v0.1.0` then `git push origin v0.1.0`). `.github/workflows/release.yml` builds the MSI and NSIS installers and attaches them to a GitHub release.

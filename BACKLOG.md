@@ -124,6 +124,22 @@ Goal: each day the app builds a plan (which scenarios, how many runs, at what di
 - [ ] `spike` Downsides: generated scenarios aren't on public leaderboards, and scores aren't comparable to the original scenario. Decide whether to keep a "speed %" field linking each variant back to its original.
 - [ ] `todo` If it works: continuous difficulty (e.g. +5% speed per step) instead of fixed rungs.
 
+## Epic T: Testing and releases (P1)
+
+The plan is in [TESTING.md](TESTING.md).
+
+- [x] `done` Pre-commit hook (`.githooks/pre-commit`): formatting, clippy with warnings as errors, tests, release build to `dist/RustyAim.exe`.
+- [x] `done` CI on every push/PR (`.github/workflows/ci.yml`), with the exe uploaded as an artifact.
+- [x] `done` Installer workflow on version tags (`.github/workflows/release.yml`). It hasn't been run yet.
+- [ ] `todo` Treat files missing `Score:`/`Challenge Start:` as incomplete and retry them (half-written file risk), with a fixture test.
+- [ ] `todo` Golden snapshot tests of the reports with `insta`.
+- [ ] `todo` Ignored real-data test over the local stats folder (`cargo test -- --ignored`).
+- [ ] `todo` Property tests for the parser and session grouping (`proptest`).
+- [ ] `todo` Backend tests for the Tauri commands against an in-memory fixture database.
+- [ ] `todo` Playwright smoke test of every screen on CI, using a fixture-only snapshot (needs a `--db` option on the app).
+- [ ] `todo` Daylight-saving and very-long-run handling: cap run length and add fixtures that span a DST change.
+- [ ] `todo` Import timing test with 10k generated files.
+
 ## Epic 7: Later (P3)
 
 - [ ] `todo` Session notes: sleep, energy, mood, hardware changes, linked to sessions so you can see how they relate to scores.

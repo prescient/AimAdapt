@@ -32,7 +32,13 @@ pub struct TimeSettings {
 
 impl Default for TimeSettings {
     fn default() -> Self {
-        Self { session_gap_min: 15, day_start_hour: 4, restart_fraction: 0.5, restart_min_runs: 3, daily_goal_min: 30.0 }
+        Self {
+            session_gap_min: 15,
+            day_start_hour: 4,
+            restart_fraction: 0.5,
+            restart_min_runs: 3,
+            daily_goal_min: 30.0,
+        }
     }
 }
 
@@ -255,7 +261,8 @@ pub fn weekly(days: &[DayStat]) -> Vec<WeekStat> {
     let mut weeks: BTreeMap<NaiveDate, WeekStat> = BTreeMap::new();
     for d in days {
         let week_start = d.day - Duration::days(i64::from(d.day.weekday().num_days_from_monday()));
-        let w = weeks.entry(week_start).or_insert(WeekStat { week_start, days_trained: 0, active_s: 0.0, session_s: 0.0 });
+        let w =
+            weeks.entry(week_start).or_insert(WeekStat { week_start, days_trained: 0, active_s: 0.0, session_s: 0.0 });
         w.days_trained += 1;
         w.active_s += d.active_s;
         w.session_s += d.session_s;
@@ -324,8 +331,8 @@ mod tests {
         let s = TimeSettings::default();
         let runs = vec![
             run("a", t(2, 7, 0, 0), 60),
-            run("a", t(2, 7, 10, 0), 60),  // 9 min after previous end: same session
-            run("a", t(2, 7, 30, 0), 60),  // 19 min gap: new session
+            run("a", t(2, 7, 10, 0), 60), // 9 min after previous end: same session
+            run("a", t(2, 7, 30, 0), 60), // 19 min gap: new session
         ];
         let sessions = group_sessions(&runs, &s);
         assert_eq!(sessions.len(), 2);

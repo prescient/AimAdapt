@@ -172,10 +172,7 @@ impl Db {
     }
 
     pub fn last_finished_at(&self) -> Result<Option<String>, DbError> {
-        self.conn
-            .query_row("SELECT MAX(finished_at) FROM runs", [], |r| r.get(0))
-            .optional()
-            .map(Option::flatten)
+        self.conn.query_row("SELECT MAX(finished_at) FROM runs", [], |r| r.get(0)).optional().map(Option::flatten)
     }
 }
 
@@ -256,8 +253,18 @@ fn insert_run(tx: &Transaction, run: &RunFile, imported_at: NaiveDateTime) -> Re
     )?;
     for k in &run.kills {
         kill.execute(params![
-            run_id, k.kill_no, k.timestamp, k.bot, k.weapon, k.ttk_s, k.shots, k.hits, k.damage_done,
-            k.damage_possible, k.cheated, k.overshots
+            run_id,
+            k.kill_no,
+            k.timestamp,
+            k.bot,
+            k.weapon,
+            k.ttk_s,
+            k.shots,
+            k.hits,
+            k.damage_done,
+            k.damage_possible,
+            k.cheated,
+            k.overshots
         ])?;
     }
 

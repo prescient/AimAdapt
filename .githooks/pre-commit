@@ -1,0 +1,18 @@
+#!/bin/sh
+# Runs before every commit: formatting, lint, tests, then a release build of the app
+# (dist/RustyAim.exe). CI runs the same checks. Enable once per clone with:
+#   git config core.hooksPath .githooks
+set -e
+cd "$(git rev-parse --show-toplevel)"
+
+echo "pre-commit: formatting"
+cargo fmt --all -- --check || { echo "Run 'cargo fmt --all' and stage the changes."; exit 1; }
+
+echo "pre-commit: clippy"
+cargo clippy --workspace --all-targets --quiet -- -D warnings
+
+echo "pre-commit: tests"
+cargo test --workspace --quiet
+
+echo "pre-commit: release executable"
+sh scripts/release-exe.sh

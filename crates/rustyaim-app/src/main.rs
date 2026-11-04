@@ -10,7 +10,9 @@ use std::sync::{Mutex, mpsc};
 use std::time::Duration;
 
 use chrono::Local;
-use rustyaim_core::progress::{self, ColdStart, FatigueBucket, ProgressSettings, ScenarioRun, ScenarioStats, SensPeriod};
+use rustyaim_core::progress::{
+    self, ColdStart, FatigueBucket, ProgressSettings, ScenarioRun, ScenarioStats, SensPeriod,
+};
 use rustyaim_core::training::{self, TimeSettings, TrainingReport};
 use rustyaim_core::{Db, ImportReport, discover, import};
 use serde::Serialize;

@@ -392,9 +392,8 @@ pub fn load(db: &Db, time: &TimeSettings) -> Result<Progress, DbError> {
             }
         }
 
-        let minutes_into_session = session_start
-            .get(&run_id)
-            .map_or(0.0, |s| (started_at - *s).num_seconds().max(0) as f64 / 60.0);
+        let minutes_into_session =
+            session_start.get(&run_id).map_or(0.0, |s| (started_at - *s).num_seconds().max(0) as f64 / 60.0);
 
         runs.push(ScenarioRun {
             run_id,
@@ -493,12 +492,8 @@ mod tests {
 
     #[test]
     fn cold_start_compares_with_earlier_days() {
-        let p = with_pbs(vec![
-            run(2, 22, 0, 8000.0),
-            run(2, 22, 3, 8350.0),
-            run(3, 6, 28, 7250.0),
-            run(3, 6, 29, 9200.0),
-        ]);
+        let p =
+            with_pbs(vec![run(2, 22, 0, 8000.0), run(2, 22, 3, 8350.0), run(3, 6, 28, 7250.0), run(3, 6, 29, 9200.0)]);
         let cs = p.cold_starts();
         assert_eq!(cs.len(), 1);
         assert_eq!(cs[0].previous_best, 8350.0);

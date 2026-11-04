@@ -13,3 +13,8 @@ tauri = "2"
 
 [build-dependencies]
 tauri-build = "2"
+
+[features]
+# Serve the bundled UI as a production build. `cargo tauri build` turns this on;
+# scripts/release-exe.sh passes it for a plain `cargo build --release`.
+custom-protocol = ["tauri/custom-protocol"]

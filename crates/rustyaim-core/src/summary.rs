@@ -40,7 +40,13 @@ pub fn totals(db: &Db) -> Result<Totals, DbError> {
          FROM runs",
         [],
         |r| {
-            Ok(Totals { runs: r.get(0)?, scenarios: r.get(1)?, first: r.get(2)?, last: r.get(3)?, run_seconds: r.get(4)? })
+            Ok(Totals {
+                runs: r.get(0)?,
+                scenarios: r.get(1)?,
+                first: r.get(2)?,
+                last: r.get(3)?,
+                run_seconds: r.get(4)?,
+            })
         },
     )
 }
@@ -50,8 +56,7 @@ pub fn by_day(db: &Db) -> Result<Vec<DayTotal>, DbError> {
         "SELECT substr(finished_at, 1, 10) AS day, COUNT(*), COALESCE(SUM(duration_s), 0)
          FROM runs GROUP BY day ORDER BY day",
     )?;
-    stmt.query_map([], |r| Ok(DayTotal { day: r.get(0)?, runs: r.get(1)?, run_seconds: r.get(2)? }))?
-        .collect()
+    stmt.query_map([], |r| Ok(DayTotal { day: r.get(0)?, runs: r.get(1)?, run_seconds: r.get(2)? }))?.collect()
 }
 
 pub fn top_scenarios(db: &Db, limit: usize) -> Result<Vec<ScenarioTotal>, DbError> {

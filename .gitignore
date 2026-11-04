@@ -5,3 +5,5 @@
 *.db-wal
 *.db-shm
 /crates/rustyaim-app/ui/dev-snapshot.json
+/.cargo/config.toml
+/dist
