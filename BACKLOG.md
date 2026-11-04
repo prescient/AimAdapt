@@ -1,201 +1,196 @@
 # RustyAim Backlog
 
-A Rust desktop app that imports KovaaK's stats files into a local database, tracks progress and training time, and builds daily training plans that get harder as you improve.
+RustyAim is an aim trainer for Windows. It rates you in real units, keeps each drill at the difficulty you hit about 85% of the time, runs a weekly training program, and records every target and shot for analytics. Importing KovaaK's stats files is a secondary feature.
 
-UI mockup: https://claude.ai/artifact/Bv4XCqQQwy3aRVuU6wEgP1
-
-**Priority:** P0 = needed for a first usable build · P1 = core features · P2 = the adaptive training feature · P3 = later
+**Priority:** P1 = next up · P2 = planned · P3 = later or optional
 
 **Status:** `todo` · `doing` · `done` · `spike` (research before committing)
 
----
-
-## Known data sources (checked against a real install, Nov 2026)
-
-| What | Where (default Steam library) | Format |
-|---|---|---|
-| Run results | `FPSAimTrainer\FPSAimTrainer\stats\*.csv` | One file per run. Kill rows, weapon totals, summary `Key:,value` lines, and the settings used for the run |
-| Playlists | `FPSAimTrainer\Saved\SaveGames\Playlists\*.json` | `playlistName`, `scenarioList[{scenario_name, play_Count}]`, `shareCode`, … |
-| Active playlist | `Saved\SaveGames\PlaylistInProgress.json`, `PlaylistOrder.json` | Current playlist and which scenario you're on |
-| Local scenarios | `Saved\SaveGames\Scenarios\*.sce` | INI-like text: `Timescale=`, bot profiles, speeds, map scale |
-| Workshop scenarios | `steamapps\workshop\content\824270\<id>\` | Same `.sce` format (196 items installed) |
-
-The stats file name holds the scenario name, the mode (`Challenge`) and the finish time: `<Scenario> - Challenge - 2026.11.03-06.31.39 Stats.csv`. The run length is the finish time minus `Challenge Start:`.
+Last reviewed: Nov 4, 2026 (after Core Week, `d9a0ea8`).
 
 ---
 
-## Epic 0: Foundations (P0)
+## 1. Trainer engine
 
-- [x] `done` **Pick the UI stack:** Tauri 2 (`crates/rustyaim-app`). The frontend is plain HTML/CSS/JS in `crates/rustyaim-app/ui` with no Node or bundler; it talks to Rust through `window.__TAURI__`.
-- [x] `done` Set up a Cargo workspace: `crates/rustyaim-core` (parsing, database, stats logic) and `crates/rustyaim-cli` (command line for now; the UI app comes later). All logic lives in core so it can be tested without a UI.
-- [x] `done` SQLite database (`rusqlite`, migrations tracked in `PRAGMA user_version`). Schema v1 has `runs`, `run_fields`, `kills`, `weapons` and `import_errors`. `sessions`, `tags`, `plans` and `plan_items` get added in later migrations.
-- [ ] `todo` Config file: stats folder path, session gap, daily goal, time a training day starts. (For now the CLI takes `--stats` and `--db` options.)
-- [ ] `doing` Logging plus a "parse errors" list shown in the UI. Errors are stored in `import_errors` and listed by `rustyaim errors`; there's no UI or logging yet.
+`crates/rustyaim-engine` (Bevy window) on top of `crates/rustyaim-sim` (rules, no graphics).
 
-## Epic 1: Importing files (P0)
+### Done
+- [x] Full-screen window with raw mouse input and no frame cap. Sensitivity in cm/360 and DPI; FOV horizontal at 16:9.
+- [x] Display modes: borderless; exclusive at any resolution and refresh rate the monitor offers (e.g. stretched 4:3); windowed. Optional centered play area, with a helper that sizes it from screen diagonals.
+- [x] Gridded room, sphere and capsule targets, hit flash, and a HUD showing timer, score or rating, hit rate, kills and FPS.
+- [x] Countdown, results screen, and Esc, R and Space controls.
+- [x] Simulation: angle-space movement with bounces at the spawn edge, ray hits, 60 Hz beam ticks, and a seeded RNG, so a seed replays the same run.
+- [x] Workouts and program days play back to back in one session, with a summary at the end.
+- [x] Runs saved to the shared database with KovaaK's field names plus `source = 'rustyaim'`.
+- [x] The app's exe runs the trainer with `--play`, `--workout` or `--program`, so the release is a single file.
+- [x] `--smoke` bot that plays like a person, for end-to-end checks and demo data.
 
-- [x] `done` Find the KovaaK's install automatically, including Steam libraries on other drives (reads `libraryfolders.vdf`). The CLI's `--stats` option is the fallback until the UI has a folder picker.
-- [x] `done` Parse the file name: scenario, mode, finish time (local time). Handles scenario names that contain ` - `.
-- [x] `done` Parse the CSV sections: kill rows, weapon totals, summary values (score, hits, misses, TTK, damage, `Challenge Start`, pause count and duration, `Avg Target Scale`, `Avg Time Dilation`), and settings (sens, sens scale, DPI, FOV, FPS cap, average FPS, resolution, game version).
-- [x] `done` Make parsing tolerant: columns are looked up by header name, bad or missing values become null, and every `Key:,value` line is kept in `run_fields`.
-- [x] `done` Skip duplicates: the file name is unique per run (scenario plus finish time to the second), so it's the key.
-- [x] `done` Import incrementally: files already in the database are skipped by name, so a rescan is cheap.
-- [ ] `doing` Watch the folder (`notify` crate) and import new runs live. `rustyaim watch` is built but hasn't been tested against a live KovaaK's session yet.
-- [x] `done` Tests that use real sample files as fixtures (`crates/rustyaim-core/tests/fixtures`: a clicking run, a tracking run and a 1-second run).
+### To do
+- [ ] `todo` P1 Pause menu and pausing on focus loss (Esc quits straight away today).
+- [ ] `todo` P1 Hit and kill sounds (generated, no asset files), with volume in settings.
+- [ ] `todo` P2 Measure input-to-photon latency and frame pacing; optional frame cap.
+- [ ] `todo` P2 List the monitor's real video modes in Settings instead of free-typed resolutions (the engine can already read them).
+- [ ] `todo` P2 More crosshair options: outline, and a color change on hit.
+- [ ] `todo` P2 In-game results: a small chart of recent ratings for the scenario.
+- [ ] `todo` P3 Game font with a degree sign; speeds read "deg/s" in game for now.
 
-## Epic 2: Sessions and training time (P0)
+## 2. Scenarios
 
-All in `crates/rustyaim-core/src/training.rs`. Reported by `rustyaim-cli time`.
+### Done
+- [x] TOML format covering timing, arena, weapon (hitscan or beam; click, hold or always), targets (count, shape, size, health, regen, lifetime, shrink), spawn area, movement (static, strafe, random), scoring, adaptive settings and sub-skill. Validation with plain-language messages. Documented in [SCENARIOS.md](SCENARIOS.md).
+- [x] Field list (`spec.rs`) that drives the editor. Tests keep it in step with the format and the docs.
+- [x] Editor in the app with live validation; built-ins are copied before editing.
+- [x] 19 built-in scenarios tagged with nine sub-skills:
+  - **Clicking:** static, dynamic, linear.
+  - **Tracking:** precise, reactive, control.
+  - **Switching:** speed, evasive, stability.
 
-- [x] `done` Run length = finish time − `Challenge Start`, handling runs that cross midnight. Pause duration is subtracted.
-- [ ] `spike` Confirm the units of `Pause Duration`. None of the first 213 runs has a pause, so it's assumed to be seconds, and a pause as long as the run itself is ignored. Pause a run once and check the file.
-- [x] `done` Group runs into sessions: a break of more than N minutes (default 15) starts a new one.
-- [x] `done` Active time (inside runs) vs. session time (first run to last).
-- [x] `done` Training-day boundary (default 4 AM) so late-night sessions count toward the day they started on.
-- [x] `done` Streaks (current and best; today stays open until the day ends), daily goal met or not, weekly totals.
-- [x] `done` Detect restarted runs: shorter than 50% of that scenario's median length, for scenarios with 3+ runs. 1-second scenarios aren't flagged.
-- [x] `done` Averages by day of week (missed days count as 0) and runs by hour of day.
-- [ ] `todo` Store sessions in the database once the UI needs them faster. They're cheap to recompute for now.
+### To do
+- [ ] `todo` P1 At least two scenarios per sub-skill. Linear clicking, precise and control tracking, and speed and stability switching each have one, which limits Core Week's variety within a skill.
+- [ ] `todo` P2 Smoother target paths: curves and noise-based drift for control tracking, plus jumps with gravity.
+- [ ] `todo` P2 Targets that move toward or away from the player.
+- [ ] `todo` P3 Player movement (WASD strafing).
+- [ ] `todo` P3 Projectile weapons with travel time; spread and recoil.
+- [ ] `todo` P3 Visual themes: room colors, target outlines, high contrast.
 
-## Epic 3: Progress tracking (P1)
+## 3. Adaptive rating
 
-All in `crates/rustyaim-core/src/progress.rs`. Reported by `rustyaim-cli progress [scenario]` and `rustyaim-cli sens`. Restarted runs stay in the history but never count as bests and are left out of averages.
+### Done
+- [x] Each scenario rates one knob in real units: target lifetime (s), tracking speed (°/s) or size (m).
+- [x] A Bayesian, Glicko-like estimate of the 85% point and how steeply success falls off.
+  - It settles within about 15–25 targets.
+  - It carries over between runs, and its uncertainty widens with days away.
+- [x] Target mix by chance of success: near (80–90%), stretch (45–70%) and easy (95%+).
+  - Steady, Balanced and Push mixes are set per profile.
+  - Guard rails: no stretch target right after a miss, and never two in a row.
+  - Breakthroughs are recorded when you beat your fastest hit.
+- [x] Clicking success needs a kill before the timeout with at most one miss on it. Tracking is scored per 2-second segment by the share of time on target.
+- [x] Replaced the first version, which used 0–100 levels and a staircase.
 
-- [x] `done` Per-scenario history: score, accuracy, average TTK, personal-best flags.
-- [x] `done` Improvement measures: first run → best, average, trend (last 5 runs vs. the 5 before).
-- [x] `done` Sensitivity history from each run's settings (sens, scale, DPI, FOV), with cm/360. Changes are marked in scenario histories, ready for chart markers.
-- [ ] `spike` cm/360 is only verified for the "Overwatch" scale. Valorant/CS/Apex use standard values but KovaaK's names for those scales are unconfirmed.
-- [x] `done` Plateau detection: 10+ runs without a new best and a trend within ±3%.
-- [x] `done` Cold-start dip: the day's first run vs. the best from earlier days, and vs. the rest of that day's runs (the better warm-up measure).
-- [x] `done` Consistency: variation (stdev / mean) of the last 10 runs.
-- [x] `done` Fatigue curve: score relative to each scenario's average, in 10-minute buckets into the session. It's a rough signal because it mixes in which scenarios you play when.
-- [ ] `todo` Compare scores before and after a sensitivity change per scenario (moved here from Epic 7 now that periods exist).
+### To do
+- [ ] `spike` P1 Tune against real play. The default easy/hard ranges, first guesses and the "consistent vs. fades gradually" cut-off are educated guesses that have only been checked with the bot.
+- [ ] `todo` P2 Show the stretch/near/easy split and breakthroughs per run in Insights.
 
-## Epic 4: Scenario classification and benchmarks (P1)
+## 4. Programs and workouts
 
-- [ ] `todo` Tag each scenario's skill from its name (static clicking / dynamic clicking / tracking / switching), with manual overrides saved in the database.
-- [ ] `spike` Read the `.sce` files (local and workshop) to tag scenarios from their settings, which is more reliable than names.
-- [ ] `todo` Benchmark packs: import scenario lists and rank thresholds (e.g. Voltaic S5 Novice/Intermediate/Advanced) from a file.
-- [ ] `todo` Rank per scenario, overall rank, and score needed for the next rank.
+### Done
+- [x] Workouts: TOML lists of scenarios, each with a run count, mode and block. There are built-ins and an editor.
+- [x] Programs: weekdays mapped to workouts, or to a weak-spots day built from the skill profile.
+- [x] Core Week, Monday to Saturday, about 29 minutes a day:
+  - Five drills per day: warm-up, main ×5, secondary ×4, maintenance ×3.
+  - Saturday covers your weak spots; Sunday is rest.
+- [x] Program page:
+  - Week grid that allows catching up a missed day later in the week.
+  - Skill profile measured from the end of your first day on each drill.
+  - Weekly summary and streak.
+  - Rep and carry-over gains for each drill.
+- [x] Today card on the Play screen.
 
-## Epic 5: UI screens (P1)
+### To do
+- [ ] `todo` P1 Start Core Week from the real app window and play it by hand for a full week; fix whatever comes up.
+- [ ] `todo` P2 Pick the active program, and add more programs (e.g. a clicking-heavy or tracking-heavy week).
+- [ ] `todo` P2 Program editor.
+- [ ] `todo` P2 Weak-spots day from Insights detail, not just sub-skills: e.g. your weakest flick direction, distance band or tracking speed.
+- [ ] `todo` P3 Hide Core Week's day workouts from the general Workouts list, or group them under the program.
 
-The app imports on startup, watches the stats folder, and refreshes when new runs arrive (`runs-imported` event). Commands: `snapshot`, `scenario`, `rescan`.
+## 5. Insights and analytics
 
-- [x] `done` Dashboard: totals, streak banner, 7-day chart against the daily goal, most played, recent sessions, most improved, coach notes. The skill split waits on tags (Epic 4).
-- [x] `done` Progress: searchable, sortable scenario list and a detail view with score chart (PBs, 3-run average, day and settings-change markers), runs table and insights.
-- [x] `done` Training time: calendar heatmap with month navigation, weekday averages, 7-day session timeline, runs by hour, active vs. idle.
-- [ ] `doing` Benchmarks: lists your Voltaic S5 bests for now. Ranks need Epic 4.
-- [ ] `doing` Library & import: folder, counts, errors, rescan, rules (read-only), sensitivity history, FPS/resolution. Still to do: editable rules (needs the settings file), a folder picker, and the tags table (Epic 4).
-- [ ] `todo` Today's plan screen (Epic 6)
-- [x] `done` Coach notes: repeat-before-switching, warm-up, plateau and settings-change notes, from the stats.
-- [x] `done` Packaging: portable single exe plus MSI and NSIS installers, built by the release workflow.
-- [ ] `todo` Date range control on the dashboard (7 days / 30 days / all time) from the mockup.
+### Done
+- [x] Telemetry per run:
+  - Every target: flick distance and direction, reaction, time to reach, overshoot, corrections, outcome, knob value and pick type.
+  - Every shot: offset relative to the target, along and across the flick.
+  - Tracking samples at 30 Hz.
+  - A 240 Hz aim trace.
+- [x] Insights per scenario:
+  - Rating by run with its likely range, and the rating during the last run.
+  - Speed vs. hit-rate curve with your 95%, 85% and 50% points.
+  - Fitts' law flick speed.
+  - Hit rate and time by direction and by distance.
+  - Shot placement, reaction histogram and 10-second segments.
+  - Tracking: time on target by speed, recovery after direction changes, and lead or lag.
+  - Coaching notes.
+- [x] Skill profile across the nine sub-skills, three groups and overall (on the Program page).
 
-## Epic 6: Adaptive daily training plans (P2, headline feature)
+### To do
+- [ ] `todo` P2 Replay a run from its aim trace, with targets, at any speed.
+- [ ] `todo` P2 Flick shape from the trace: peak speed, deceleration, and where corrections start.
+- [ ] `todo` P3 Rate of improvement per sub-skill (gain per week), with a projection.
 
-Goal: each day the app builds a plan (which scenarios, how many runs, at what difficulty), puts it into KovaaK's as a playlist, then reads the results back and adjusts the next plan.
+## 6. Settings and profiles
 
-### 6a. Model your skill level (read only)
-- [ ] `todo` Skill estimate per category from recent scores, normalized per scenario (percentile of your own history, or benchmark rank once thresholds are loaded).
-- [ ] `todo` Find the weakest category and recent plateaus. These drive what each plan focuses on.
-- [ ] `todo` Detect the playlist you're currently running (`PlaylistInProgress.json`) and which day of a program you're on (e.g. *FAR 4 AimGod Day 1–7*).
+### Done
+- [x] Settings tab with profiles, usually one per game. Each profile holds sensitivity in that game's units (Overwatch 2, Valorant, CS2, Apex, Call of Duty, or cm/360), DPI, FOV with the game's usual value, adaptive mix, crosshair with a preview, and display settings.
+- [x] Switch profiles from the Play screen; `--profile <name>` in the engine. The first profile is matched to your latest KovaaK's run.
 
-### 6b. Build the plan inside the app (no game files touched)
-- [ ] `todo` Plan inputs: time budget (default 30 min), focus categories, rest days.
-- [ ] `todo` Plan shape: warm-up → main block on the weak skill → maintenance on the other skills → optional benchmark run.
-- [ ] `todo` 3–5 runs per scenario, chosen from scenarios you've already played.
-- [ ] `todo` Mark each plan item done as matching runs arrive from the stats folder.
+### To do
+- [ ] `todo` P2 More games (Fortnite, Rainbow Six Siege, Marvel Rivals, The Finals) once their sensitivity formulas are checked.
+- [ ] `todo` P3 Editable training-time rules (session gap, day start, daily goal), which are fixed defaults today.
 
-### 6c. Difficulty ladders using existing scenarios
-- [ ] `todo` Ladder format: an ordered list of scenarios for one skill, from easiest to hardest (e.g. `Easy` → `Novice` → `Intermediate`, or `80%` → `90%` → `100%` speed variants).
-- [ ] `todo` Build starter ladders from scenario names, plus user-edited ladders.
-- [ ] `todo` Step-up rule: move up a rung when your last K runs clear a target (e.g. 3 runs at or above your 80th percentile, or a rank threshold) with accuracy above a floor.
-- [ ] `todo` Step-down rule: move down after two sessions below a floor, so a bad day doesn't drop you.
-- [ ] `todo` Show why: every change comes with a reason ("Moved to Intermediate: 3 runs above 900 at 88% accuracy").
+## 7. App screens
 
-### 6d. Write plans into KovaaK's as playlists
-- [ ] `spike` Does KovaaK's pick up a new playlist file while running, or only after a restart? Does it need `playlistId` and `shareCode`?
-- [ ] `todo` Write `RustyAim - <date> - <focus>.json` into the Playlists folder. Only create files with the `RustyAim -` prefix and never edit the user's own playlists.
-- [ ] `todo` Back up the Playlists folder before the first write, and clean up old generated plans.
+### Done
+- [x] Navigation: Dashboard, Play, Progress, Program, Insights, Training time, Benchmarks, Library & import, Settings.
+- [x] Dashboard, Progress, Training time and Benchmarks cover KovaaK's runs and standard trainer runs. Adaptive runs are charted in Insights instead, because their result is a time or speed.
 
-### 6e. Generated difficulty variants (stretch)
-- [ ] `spike` Copy a scenario's `.sce` file with `Timescale` (speed), target size or bot speed changed to make finer difficulty steps (e.g. `RustyAim 1w4ts 85%`). Check that KovaaK's loads it and that stats files are written normally.
-- [ ] `spike` Downsides: generated scenarios aren't on public leaderboards, and scores aren't comparable to the original scenario. Decide whether to keep a "speed %" field linking each variant back to its original.
-- [ ] `todo` If it works: continuous difficulty (e.g. +5% speed per step) instead of fixed rungs.
+### To do
+- [ ] `todo` P1 Rework the Dashboard around the trainer: today's program day, this week, skill profile and recent ratings. It's still KovaaK's-centric.
+- [ ] `todo` P2 Date range control on the Dashboard (7 days, 30 days, all time).
+- [ ] `todo` P3 Folder picker for the KovaaK's stats folder.
 
-## Epic E: Built-in aim trainer (P1)
+## 8. KovaaK's import (secondary)
 
-Goal: RustyAim runs its own scenarios instead of relying only on KovaaK's. The engine is Bevy, in its own window with raw mouse input and no frame cap. Scenarios are TOML files with a published schema (SCENARIOS.md), and the app has a form-based editor built from that schema. KovaaK's import keeps working; engine runs go into the same database tagged `source = 'rustyaim'`.
+`crates/rustyaim-core` and `rustyaim-cli`.
 
-Layout: `rustyaim-sim` (scenario format, field descriptions, simulation; no graphics, fully tested) → `rustyaim-engine` (Bevy window, HUD, saving runs) → the app, which starts the trainer by running its own exe with `--play <id>` so it stays a single file.
+### Done
+- [x] Finds the install across Steam libraries and parses stats files (kills, weapons, summary, settings). Parsing is tolerant, duplicates are skipped, and imports are incremental. The app imports on startup and watches the folder.
+- [x] Sessions, active time, the 4 AM day boundary, streaks, daily goal, weekday and hour breakdowns, and restarted-run detection.
+- [x] Progress: personal bests, improvement, trend, plateaus, cold-start dip, consistency, fatigue and sensitivity history (cm/360).
 
-### E1. First playable version
-- [x] `done` Scenario format: timing, arena, weapon (hitscan or beam; click, hold or always), targets (count, sphere or capsule, size, health, regen, lifetime, shrink), spawn area (distance, yaw, pitch, spacing, max distance from the last kill), movement (static, strafe, random) and scoring. Validation with plain-language messages.
-- [x] `done` Field list (`spec.rs`) with labels, help, limits and choices; tests keep it in step with the format.
-- [x] `done` Simulation: spawning, angle-space movement with bouncing at the area edge, ray hits on spheres and capsules, 60 Hz beam ticks, kill/TTK records, seeded RNG so a seed replays the same run.
-- [x] `done` Engine: full-screen Bevy window, raw mouse look in cm/360 and DPI, FOV in horizontal 16:9 degrees, gridded room, hit flash, HUD (timer, score, accuracy, kills, FPS), countdown, results with personal best, Esc / R / Space.
-- [x] `done` Runs saved with KovaaK's field names (score, hits, misses, TTK, sens, FOV, FPS), so progress and training screens include them. A scenario fingerprint keeps easier and harder variants apart.
-- [x] `done` Settings start from your latest KovaaK's sensitivity and FOV.
-- [x] `done` Play screen: scenario cards with bests, filters, settings, play button. Editor: every field from the spec, live validation, copy-and-edit for built-ins.
-- [x] `done` Eight original starter scenarios: Static Grid, Wide Flicks, Micro Flicks, Shrink Reflex, Strafe Clicks, Strafe Track, Float Track, Switch Track.
+### To do
+- [ ] `spike` P2 Confirm the units of `Pause Duration` (assumed to be seconds) by pausing a run once.
+- [ ] `spike` P2 Confirm KovaaK's sensitivity-scale names for Valorant, CS2 and Apex; only Overwatch is verified.
+- [ ] `todo` P2 Voltaic benchmark ranks: load rank thresholds for the scenarios you play and show a rank per scenario and overall. The Benchmarks screen lists Voltaic S5 bests without ranks today.
+- [ ] `todo` P3 Tag KovaaK's scenarios with the nine sub-skills (from names, or from `.sce` settings) so they can feed the skill profile.
+- [ ] `todo` P3 Compare scores before and after a sensitivity change.
+- [ ] `todo` P3 Test the live folder watcher during a real KovaaK's session.
 
-### E2. Feel and feedback
-- [ ] `todo` Hit and kill sounds (generated, no asset files), with volume in settings.
-- [ ] `todo` Measure input-to-photon latency and frame pacing; option for a frame cap.
-- [ ] `todo` Pause on focus loss, and a pause menu instead of Esc quitting straight away.
-- [ ] `todo` Crosshair editor preview in the app; more crosshair options (outline, color on hit).
-- [ ] `todo` In-game results: score chart for this scenario and accuracy by target.
+### Superseded by the built-in trainer
+These were the original plan for adaptive training through KovaaK's. The trainer's adaptive rating and Core Week now cover them, so they're parked:
+- Writing generated plans into KovaaK's as `RustyAim -` playlists, and the spike on whether KovaaK's reloads playlist files.
+- Difficulty ladders of existing KovaaK's scenarios, with step-up and step-down rules.
+- Generated `.sce` difficulty variants.
+- Detecting the KovaaK's playlist in progress.
 
-### E3. More of what the engine allows
-- [ ] `todo` Player movement (WASD strafing) and targets that move toward or away from the player.
-- [ ] `todo` Target paths beyond strafe and random: circles, smooth noise, jumps with gravity.
-- [ ] `todo` Projectile weapons with travel time; spread and recoil.
-- [ ] `todo` Time dilation (play at 80% speed) and a target-scale setting, like KovaaK's difficulty variants.
-- [ ] `todo` Visual themes: room colors, target outlines, high-contrast mode.
+KovaaK's file locations, checked against a real install:
 
-### E1b. Adaptive training, workouts, display and analytics
-- [x] `done` Adaptive mode for every scenario (first version: 0–100 levels and a staircase; replaced below).
-- [x] `done` Ratings in real units instead of levels: a Bayesian (Glicko-like) estimate of the knob value you hit 85% of the time (target lifetime in s, tracking speed in °/s, or size), with its uncertainty. It finds you in ~15–25 targets, carries over between runs and widens with days away. Targets come from a mix (near / stretch / easy, by chance of success; Steady, Balanced or Push per profile) with guard rails, breakthroughs for beating your fastest hit, and a speed vs. hit-rate curve in Insights. A kill with more than one miss on it counts as a failure, so spraying doesn't fake a rating.
-- [x] `done` Timed scenarios where difficulty is speed: Timed Flicks, Timed Wide Flicks, Timed Micro Flicks, Timed Grid, Timed Strafe Clicks. Every built-in has its own adaptive knobs; user scenarios get sensible defaults.
-- [x] `done` Workouts: TOML lists of scenarios with runs and mode, played back to back in one trainer session with a summary at the end. Four built-ins, editor in the app.
-- [x] `done` Display: borderless, exclusive (any resolution and refresh rate the monitor offers, e.g. stretched 4:3) or windowed; a centered play area of any size with a helper to match a smaller screen (e.g. 24" on a 32" monitor).
-- [x] `done` Telemetry per run: every target (flick distance and direction, reaction, time to reach, overshoot, corrections, outcome, level), every shot (offset in target radii along/across the flick), tracking samples at 30 Hz (on target, error, target speed, lead/lag, time since direction change) and a 240 Hz aim trace.
-- [x] `done` Insights screen: level by run and within the last run, speed vs. difficulty (Fitts' law fit and throughput in bits/s), success and time by flick direction and distance, shot placement map (overshoot vs. stopping short, vertical bias), reaction histogram, tracking by target speed and after direction changes (recovery time), lead/lag, success by 10-second segment, and coaching notes generated from all of it.
-- [x] `done` Settings tab with profiles (one per game): sensitivity in the game's own units (Overwatch 2, Valorant, CS2, Apex, Call of Duty, or cm/360), DPI, FOV with each game's usual value, crosshair with preview, and display options. Switch profiles from the Play screen; `--profile <name>` in the engine.
-- [ ] `todo` More games in the profile list (Fortnite, Rainbow Six Siege, Marvel Rivals, The Finals) once their sensitivity formulas are checked.
-- [x] `done` Core Week program (Mon–Sat, ~30 min, 5 drills with 3–5 reps each, Saturday built from weak spots, Sunday rest); nine sub-skill tags; six new scenarios (Linear Clicks, Close Strafe Track, Precise Track, Control Track, Speed Switch, Stability Switch); Program page with week grid, skill profile, weekly summary, streak, and per-drill rep and carry-over gains; Today card on Play.
-- [ ] `todo` More programs (e.g. a clicking- or tracking-heavy week) and a program editor; pick the active program.
-- [x] `done` `--smoke` bot that plays like a person (reaction delay, aim error, corrections), for end-to-end checks and preview data.
+| What | Where (default Steam library) |
+|---|---|
+| Run results | `FPSAimTrainer\FPSAimTrainer\stats\*.csv` |
+| Playlists | `FPSAimTrainer\Saved\SaveGames\Playlists\*.json` (UTF-16) |
+| Active playlist | `Saved\SaveGames\PlaylistInProgress.json`, `PlaylistOrder.json` |
+| Local and workshop scenarios | `Saved\SaveGames\Scenarios\*.sce`, `steamapps\workshop\content\824270\<id>\` |
 
-### E4. Plans with the engine
-- [ ] `todo` Daily plan from Insights: pick the scenarios that train your weakest direction, distance or tracking speed, as a generated workout.
-- [ ] `todo` Replay a run from its aim trace, with targets, at any speed.
-- [ ] `todo` Flick shape analysis from the trace: peak speed, deceleration, and where corrections start.
-- [ ] `todo` Compare levels across scenarios on one skill profile (clicking, tracking, switching), and show how fast each is improving.
-- [ ] `todo` Per-run adaptive knobs in Insights (e.g. "you're reliable at 0.62 s lifetimes").
-- [ ] `todo` List the monitor's real video modes in the app (the engine can read them) instead of free-typed resolutions.
-
-## Epic T: Testing and releases (P1)
+## 9. Testing and releases
 
 The plan is in [TESTING.md](TESTING.md).
 
-- [x] `done` Pre-commit hook (`.githooks/pre-commit`): formatting, clippy with warnings as errors, tests, release build to `dist/RustyAim.exe`.
-- [x] `done` CI on every push/PR (`.github/workflows/ci.yml`), with the exe uploaded as an artifact.
-- [x] `done` Release workflow on version tags (`.github/workflows/release.yml`): portable exe plus installers. First run published v0.1.0.
-- [ ] `todo` Treat files missing `Score:`/`Challenge Start:` as incomplete and retry them (half-written file risk), with a fixture test.
-- [ ] `todo` Golden snapshot tests of the reports with `insta`.
-- [ ] `todo` Ignored real-data test over the local stats folder (`cargo test -- --ignored`).
-- [ ] `todo` Property tests for the parser and session grouping (`proptest`).
-- [ ] `todo` Backend tests for the Tauri commands against an in-memory fixture database.
-- [ ] `todo` Playwright smoke test of every screen on CI, using a fixture-only snapshot (needs a `--db` option on the app).
-- [ ] `todo` Daylight-saving and very-long-run handling: cap run length and add fixtures that span a DST change.
-- [ ] `todo` Import timing test with 10k generated files.
+### Done
+- [x] Pre-commit hook: formatting, clippy with warnings as errors, tests, and a release build to `dist/RustyAim.exe`.
+- [x] CI on every push, with the exe as an artifact.
+- [x] Release workflow on version tags: portable exe plus installers. v0.1.0 is published; it predates the trainer.
+- [x] App options `--db <file>` and `--no-import` for test and demo databases.
 
-## Epic 7: Later (P3)
+### To do
+- [ ] `todo` P1 Release v0.2.0 with the trainer, adaptive ratings, Core Week and Insights.
+- [ ] `todo` P2 Playwright smoke test of every screen on CI, against a bot-generated demo database.
+- [ ] `todo` P2 Backend tests for the Tauri commands against an in-memory database.
+- [ ] `todo` P2 Treat KovaaK's files missing `Score:` or `Challenge Start:` as incomplete and retry them (the half-written file risk), with a fixture test.
+- [ ] `todo` P3 Golden snapshot tests of the reports (`insta`); property tests for the parser and session grouping (`proptest`).
+- [ ] `todo` P3 Daylight-saving handling: cap run length and add fixtures that span a clock change.
+- [ ] `todo` P3 Ignored real-data test over the local stats folder; an import timing test with 10k files.
 
-- [ ] `todo` Session notes: sleep, energy, mood, hardware changes, linked to sessions so you can see how they relate to scores.
-- [ ] `todo` Export to CSV and database backup/restore.
-- [ ] `todo` Auto-update, and code signing so SmartScreen stops warning.
-- [ ] `todo` Import older history from other trackers' exports, if needed.
-- [ ] `spike` Use the per-kill data (TTK spread, overshots) for richer insights, e.g. "you overflick on small targets".
+## 10. Later
+
+- [ ] `todo` P3 Session notes (sleep, energy, hardware changes) linked to sessions.
+- [ ] `todo` P3 Export to CSV, and database backup and restore.
+- [ ] `todo` P3 Auto-update, and code signing so SmartScreen stops warning.
