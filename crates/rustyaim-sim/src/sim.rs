@@ -232,7 +232,8 @@ impl Stats {
 pub struct KillRecord {
     /// Seconds into the run when the target was destroyed.
     pub at_s: f32,
-    /// Seconds from the target appearing (or the clock starting) to its destruction.
+    /// Seconds from when the player could start on the target (it appearing, the
+    /// clock starting, or the previous kill, whichever is latest) to its destruction.
     pub ttk_s: f32,
     pub shots: u32,
     pub hits: u32,
@@ -352,6 +353,8 @@ pub struct Sim {
     /// Running-clock times at which a replacement target should appear.
     pending: Vec<f32>,
     last_killed_dir: Option<Vec3>,
+    /// Seconds into the run of the last kill.
+    last_kill_at: f32,
     last_aim: Vec3,
     stats: Stats,
     kills: Vec<KillRecord>,
@@ -419,6 +422,7 @@ impl Sim {
             next_no: 1,
             pending: Vec::new(),
             last_killed_dir: None,
+            last_kill_at: 0.0,
             last_aim: Vec3::NEG_Z,
             stats: Stats::default(),
             kills: Vec::new(),
@@ -900,11 +904,14 @@ impl Sim {
         self.stats.kills += 1;
         self.kills.push(KillRecord {
             at_s: now,
-            ttk_s: now - t.spawned_at,
+            // Not from spawn: with several targets up, that counts time spent
+            // killing the others.
+            ttk_s: now - t.spawned_at.max(self.last_kill_at),
             shots: t.shots,
             hits: t.hits,
             damage: t.damage,
         });
+        self.last_kill_at = now;
         self.telemetry.targets.push(t.record(now, Outcome::Killed));
         self.last_killed_dir = Some(t.pos.normalize());
         events.push(Event::Killed { id: t.id });
@@ -1710,6 +1717,26 @@ mod tests {
         let windows = (30.0 / (value * 1.7)) as usize;
         assert!(a.outcomes.abs_diff(windows) <= 2, "one failure per empty window: {} vs {windows}", a.outcomes);
         assert!(a.value > 1.0, "the rating slows down: {}", a.value);
+    }
+
+    /// Playtest: a workout showed a 1320 ms time to kill at 132 kills a minute.
+    /// With several targets up, each one was timed from when it appeared, so it
+    /// counted the time spent killing the others. TTK starts when you could start
+    /// on the target: when it appears or at the previous kill, whichever is later.
+    #[test]
+    fn time_to_kill_doesnt_count_time_spent_on_other_targets() {
+        let s = speed_switch();
+        assert!(s.targets.count >= 3);
+        let r = kill_every(Sim::new(s, 2), 0.45);
+        let per_min = r.stats.kills as f32 * 2.0;
+        assert!(per_min > 110.0, "{per_min} kills a minute");
+        let ttk = r.avg_ttk_s().unwrap();
+        assert!(ttk < 0.5, "a kill every 0.45 s can't average {ttk:.2} s to kill");
+        // One target at a time: unchanged, from spawn to kill.
+        let mut one = speed_switch();
+        one.targets.count = 1;
+        let r = kill_every(Sim::new(one, 2), 0.45);
+        assert!((r.avg_ttk_s().unwrap() - 0.45).abs() < 0.05, "{:?}", r.avg_ttk_s());
     }
 
     #[test]
