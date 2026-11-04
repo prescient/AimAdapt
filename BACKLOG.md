@@ -26,6 +26,7 @@ Last reviewed: Nov 4, 2026 (after Core Week, `d9a0ea8`).
 - [x] `--smoke` bot that plays like a person, for end-to-end checks and demo data.
 
 ### To do
+- [ ] `todo` P1 **Next up:** a visible countdown on timed targets, e.g. shrinking slightly or fading color as time runs out, so you can tell which target expires first. From playtesting Speed Switch ([PLAYTEST.md](PLAYTEST.md)).
 - [ ] `todo` P1 Pause menu and pausing on focus loss (Esc quits straight away today).
 - [ ] `todo` P1 Hit and kill sounds (generated, no asset files), with volume in settings.
 - [ ] `todo` P2 Measure input-to-photon latency and frame pacing; optional frame cap.

@@ -780,6 +780,10 @@ impl Sim {
         let tc = self.current.targets.clone();
         let mv = tc.movement.clone();
         let shrink = tc.shrink_to;
+        let shape = self.scenario.targets.shape;
+        let a = &self.scenario.arena;
+        let (half_w, half_d) = (a.size[0] / 2.0, a.size[2] / 2.0);
+        let (floor, ceiling) = (-a.eye_height, a.size[1] - a.eye_height);
         let mut timed_out: Vec<f32> = Vec::new();
         let mut i = 0;
         while i < self.targets.len() {
@@ -810,11 +814,30 @@ impl Sim {
                     t.rate = new_rate(&mut self.rng, &mv, t.distance, t.pitch, t.rate);
                     t.last_change = now;
                 }
-                // Bounce off the edges of the spawn area.
-                let (yr, pr) = (self.scenario.targets.spawn.yaw, self.scenario.targets.spawn.pitch);
+                // Bounce off the edges of the spawn area, and off the floor, ceiling
+                // and walls: the spawn area can reach further than the room allows.
+                let half_h = match shape {
+                    Shape::Sphere => t.radius,
+                    Shape::Capsule => (t.height * t.radius / t.base_radius.max(1e-6) / 2.0).max(t.radius),
+                };
+                let (yr, mut pr) = (self.scenario.targets.spawn.yaw, self.scenario.targets.spawn.pitch);
+                let d = t.distance.max(1e-3);
+                let pitch_at = |y: f32| (y / d).clamp(-1.0, 1.0).asin().to_degrees();
+                pr = Range(pr.0.max(pitch_at(floor + half_h)), pr.1.min(pitch_at(ceiling - half_h)));
+                if pr.0 > pr.1 {
+                    let mid = (pr.0 + pr.1) / 2.0;
+                    pr = Range(mid, mid);
+                }
                 let before = t.rate;
+                let (old_yaw, old_rate) = (t.yaw, t.rate[0]);
                 (t.yaw, t.rate[0]) = bounce(t.yaw + t.rate[0] * dt, t.rate[0], yr);
                 (t.pitch, t.rate[1]) = bounce(t.pitch + t.rate[1] * dt, t.rate[1], pr);
+                let p = from_angles(t.yaw, t.pitch) * t.distance;
+                if p.x.abs() + t.radius > half_w || p.z.abs() + t.radius > half_d {
+                    // A side or back wall: stay put sideways and turn around.
+                    t.yaw = old_yaw;
+                    t.rate[0] = -old_rate;
+                }
                 if before != t.rate {
                     t.last_change = now;
                 }
@@ -1169,6 +1192,48 @@ mod tests {
         assert!((59..=61).contains(&st.shots), "{} ticks in 1 s", st.shots);
         assert_eq!(st.misses, 0);
         assert!((sim.score() - 100.0).abs() < 2.0, "1 s at 100 dps, got {}", sim.score());
+    }
+
+    /// Regression: on Float Track the ball sank through the floor. Its spawn area
+    /// reaches 10° below eye level at 10 m, which puts a 0.5 m ball's bottom under
+    /// the floor, and movement only bounced off the spawn area, not the room.
+    #[test]
+    fn no_target_ever_leaves_the_room() {
+        for e in crate::library::builtins() {
+            let mut s = e.scenario.unwrap();
+            s.timing.countdown_s = 0.0;
+            let a = s.arena.clone();
+            let (half_w, half_d) = (a.size[0] / 2.0, a.size[2] / 2.0);
+            let (floor, ceiling) = (-a.eye_height, a.size[1] - a.eye_height);
+            for adaptive in [false, true] {
+                let mut sim = if adaptive {
+                    Sim::adaptive(s.clone(), 5, None, crate::adaptive::Mix::Balanced)
+                } else {
+                    Sim::new(s.clone(), 5)
+                };
+                while sim.phase() != Phase::Finished {
+                    sim.step(FRAME, idle());
+                    for t in sim.targets() {
+                        let half_h = match s.targets.shape {
+                            Shape::Sphere => t.radius,
+                            Shape::Capsule => (t.height * t.radius / t.base_radius.max(1e-6) / 2.0).max(t.radius),
+                        };
+                        let p = t.pos;
+                        let ok = p.y - half_h >= floor - 1e-3
+                            && p.y + half_h <= ceiling + 1e-3
+                            && p.x.abs() + t.radius <= half_w + 1e-3
+                            && p.z.abs() + t.radius <= half_d + 1e-3;
+                        assert!(
+                            ok,
+                            "{}: target at {p:?} (r {}) left the room at {:.2} s",
+                            e.id,
+                            t.radius,
+                            sim.elapsed()
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]
