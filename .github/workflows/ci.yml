@@ -22,9 +22,9 @@ jobs:
       - name: Tests
         run: cargo test --workspace
       - name: Release executable
-        run: cargo build --release -p rustyaim-app --features custom-protocol
+        run: cargo build --release -p aimadapt-app --features custom-protocol
       - uses: actions/upload-artifact@v4
         with:
-          name: RustyAim-exe
-          path: target/release/rustyaim-app.exe
+          name: AimAdapt-exe
+          path: target/release/aimadapt-app.exe
           if-no-files-found: error

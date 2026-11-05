@@ -1,6 +1,6 @@
 name: Release
 
-# Builds the portable RustyAim.exe (one file, nothing to install) plus the Windows
+# Builds the portable AimAdapt.exe (one file, nothing to install) plus the Windows
 # installers. Pushing a tag like v0.1.0 also publishes a GitHub release with them
 # attached; running it by hand only uploads them as artifacts.
 on:
@@ -22,17 +22,17 @@ jobs:
       - name: Install tauri-cli
         run: cargo install tauri-cli --version "^2" --locked
       - name: Build installers
-        working-directory: crates/rustyaim-app
+        working-directory: crates/aimadapt-app
         run: cargo tauri build
       # The release exe has the UI built in, so it runs on its own as a portable app.
       - name: Portable exe
         shell: bash
         run: |
           mkdir -p portable
-          cp target/release/rustyaim-app.exe "portable/RustyAim_${GITHUB_REF_NAME#v}_x64-portable.exe"
+          cp target/release/aimadapt-app.exe "portable/AimAdapt_${GITHUB_REF_NAME#v}_x64-portable.exe"
       - uses: actions/upload-artifact@v4
         with:
-          name: RustyAim-windows
+          name: AimAdapt-windows
           path: |
             portable/*.exe
             target/release/bundle/msi/*.msi

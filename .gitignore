@@ -1,9 +1,9 @@
 /target
-/crates/rustyaim-app/gen
+/crates/aimadapt-app/gen
 *.db
 *.db-journal
 *.db-wal
 *.db-shm
-/crates/rustyaim-app/ui/dev-snapshot.json
+/crates/aimadapt-app/ui/dev-snapshot.json
 /.cargo/config.toml
 /dist

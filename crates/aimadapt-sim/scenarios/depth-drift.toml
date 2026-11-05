@@ -1,0 +1,45 @@
+name = "Depth Drift"
+description = "A small ball drifting slowly while it comes closer and backs away, so its size and speed across your view keep changing. Keep the crosshair centered. Trains precise tracking."
+author = "AimAdapt"
+category = "tracking"
+skill = "precise_tracking"
+tags = ["tracking", "precise", "depth"]
+
+[timing]
+duration_s = 60.0
+
+[weapon]
+kind = "beam"
+trigger = "always"
+damage_per_s = 100.0
+
+[targets]
+count = 1
+radius = 0.2
+health = 1000000.0
+color = "#4ec3ff"
+
+[targets.spawn]
+distance = [8.0, 16.0]
+yaw = [-30.0, 30.0]
+pitch = [-5.0, 15.0]
+
+[targets.movement]
+kind = "random"
+speed = [1.2, 2.0]
+change_every_s = [1.2, 2.5]
+vertical = 0.6
+accel = 4.0
+approach_speed = [1.0, 2.0]
+approach_every_s = [1.5, 3.0]
+
+[scoring]
+per_kill = 0.0
+per_damage = 1.0
+
+[adaptive]
+goal = 0.85
+knob = "target_speed"
+easy = 3.0
+hard = 80.0
+start = 8.0

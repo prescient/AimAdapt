@@ -1,0 +1,40 @@
+name = "Angled Glides"
+description = "Targets gliding in long straight lines at any angle, each on a timer. Lead them and click. Trains linear clicking off the horizontal."
+author = "AimAdapt"
+category = "clicking"
+skill = "linear_clicking"
+tags = ["clicking", "linear"]
+
+[timing]
+duration_s = 60.0
+
+[targets]
+count = 1
+radius = 0.3
+color = "#ffb547"
+lifetime_s = 1.8
+respawn_delay_s = 0.1
+
+[targets.spawn]
+distance = [12.0, 12.0]
+yaw = [-45.0, 45.0]
+pitch = [-6.0, 18.0]
+min_separation = 10.0
+
+[targets.movement]
+kind = "random"
+speed = [4.0, 6.0]
+change_every_s = [5.0, 8.0]
+vertical = 0.7
+
+[scoring]
+per_kill = 100.0
+per_miss = -20.0
+per_timeout = -40.0
+
+[adaptive]
+goal = 0.85
+knob = "lifetime"
+easy = 3.5
+hard = 0.5
+start = 1.6

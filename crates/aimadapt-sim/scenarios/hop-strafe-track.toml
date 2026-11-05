@@ -1,0 +1,47 @@
+name = "Hop Strafe Track"
+description = "A body strafing with realistic turns (it slows, stops and speeds back up) and jumping now and then. Stay on it through turns and jumps. Trains reactive tracking."
+author = "AimAdapt"
+category = "tracking"
+skill = "reactive_tracking"
+tags = ["tracking", "reactive", "jump"]
+
+[timing]
+duration_s = 60.0
+
+[weapon]
+kind = "beam"
+trigger = "always"
+damage_per_s = 100.0
+
+[targets]
+count = 1
+shape = "capsule"
+radius = 0.35
+height = 1.7
+health = 1000000.0
+color = "#4ec3ff"
+
+[targets.spawn]
+distance = [10.0, 12.0]
+yaw = [-35.0, 35.0]
+pitch = [-4.0, 0.0]
+
+[targets.movement]
+kind = "strafe"
+speed = [4.0, 6.0]
+change_every_s = [0.35, 1.0]
+accel = 25.0
+jump_every_s = [0.8, 2.0]
+jump_height = 1.1
+jump_air_s = 0.65
+
+[scoring]
+per_kill = 0.0
+per_damage = 1.0
+
+[adaptive]
+goal = 0.85
+knob = "target_speed"
+easy = 6.0
+hard = 150.0
+start = 22.0

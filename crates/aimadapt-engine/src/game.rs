@@ -1,0 +1,1252 @@
+//! The Bevy side: window, mouse look, drawing the room and targets, the HUD and
+//! the results screen. Game rules live in `aimadapt_sim`; this module only feeds it
+//! input and draws what it reports.
+//!
+//! A session plays one or more steps: a single scenario, or each run of a workout
+//! in turn. The room is rebuilt whenever the scenario changes.
+
+use std::collections::HashMap;
+use std::path::PathBuf;
+
+use aimadapt_sim::adaptive::Knob;
+use aimadapt_sim::scenario::{Shape, parse_color};
+use aimadapt_sim::settings::DisplayMode;
+use aimadapt_sim::sim::from_angles;
+use aimadapt_sim::{Event, Input, Phase, PlayerSettings, Scenario, Sim};
+use bevy::asset::RenderAssetUsages;
+use bevy::camera::{ClearColorConfig, Viewport};
+use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
+use bevy::input::mouse::AccumulatedMouseMotion;
+use bevy::math::Affine2;
+use bevy::prelude::*;
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+use bevy::text::FontSize;
+use bevy::window::{
+    CursorGrabMode, CursorOptions, Monitor, MonitorSelection, PresentMode, PrimaryMonitor, VideoMode,
+    VideoModeSelection, WindowMode, WindowPosition,
+};
+use chrono::{Local, NaiveDateTime};
+
+use crate::record::{self, RunInfo};
+
+/// One run to play.
+#[derive(Clone)]
+pub struct PlayStep {
+    pub scenario: Scenario,
+    pub adaptive: bool,
+    /// Shown with the run, e.g. "2 of 3".
+    pub label: Option<String>,
+    /// Rep number within its workout item, the item's rep count, and its block.
+    pub rep: u32,
+    pub reps: u32,
+    pub block: aimadapt_sim::workout::Block,
+}
+
+pub struct PlayOptions {
+    pub steps: Vec<PlayStep>,
+    /// Set when the steps come from a workout; saved with each run.
+    pub workout: Option<String>,
+    /// Program name and weekday id (`mon`…) when playing a program day.
+    pub program: Option<(String, String)>,
+    pub settings: PlayerSettings,
+    /// Where finished runs are saved. `None` plays without saving.
+    pub db_path: Option<PathBuf>,
+    pub seed: u64,
+    /// Smoke test: a bot plays, screenshots go in this folder, then the app exits.
+    pub smoke: Option<PathBuf>,
+    /// The app window's outer position and width (physical pixels), to open over.
+    pub anchor: Option<[i32; 3]>,
+}
+
+/// Where the trainer window opens over the app window: centered across it, with
+/// the tops level. `anchor` is the app window's outer x, y and width.
+pub fn window_position(anchor: [i32; 3], window_width: u32) -> [i32; 2] {
+    let [x, y, w] = anchor;
+    [x + (w - window_width as i32) / 2, y]
+}
+
+pub fn run(opts: PlayOptions) -> AppExit {
+    let d = &opts.settings.display;
+    let title = match &opts.workout {
+        Some(w) => format!("AimAdapt — {w}"),
+        None => format!("AimAdapt — {}", opts.steps.first().map_or("", |s| s.scenario.name.as_str())),
+    };
+    let size = d.resolution.unwrap_or([1600, 900]);
+    let window = Window {
+        title,
+        present_mode: PresentMode::AutoNoVsync,
+        // Exclusive full screen is switched to once the monitor's video modes are known.
+        mode: match d.mode {
+            DisplayMode::Windowed => WindowMode::Windowed,
+            _ => WindowMode::BorderlessFullscreen(MonitorSelection::Current),
+        },
+        resolution: (size[0], size[1]).into(),
+        // Over the app window, so it opens where you keep it (and full screen goes
+        // on that monitor).
+        position: match opts.anchor {
+            Some(a) => {
+                let [x, y] = window_position(a, size[0]);
+                WindowPosition::At(IVec2::new(x, y))
+            }
+            None => WindowPosition::Automatic,
+        },
+        ..default()
+    };
+    let mut game = Game {
+        steps: opts.steps,
+        index: 0,
+        sim: Sim::new(Scenario::default(), opts.seed),
+        seed: opts.seed,
+        workout: opts.workout,
+        program: opts.program,
+        settings: opts.settings,
+        db_path: opts.db_path,
+        look: Look::default(),
+        started_at: None,
+        frames: 0,
+        run_time: 0.0,
+        fps: 0.0,
+        best: None,
+        saved: None,
+        flashes: HashMap::new(),
+        banner: None,
+        done: Vec::new(),
+        world_dirty: true,
+        display_note: None,
+        video_mode_set: false,
+        smoke: opts.smoke.map(|dir| Smoke { dir, taken: 0, after_finish: 0.0 }),
+        bot: crate::bot::Bot::new(opts.seed),
+    };
+    game.begin_step(0);
+    App::new()
+        .add_plugins(DefaultPlugins.set(WindowPlugin { primary_window: Some(window), ..default() }))
+        .insert_resource(ClearColor(Color::srgb(0.05, 0.06, 0.08)))
+        .insert_resource(GlobalAmbientLight { color: Color::WHITE, brightness: 600.0, ..default() })
+        .insert_resource(game)
+        .add_systems(Startup, (setup_cameras, setup_hud))
+        .add_systems(
+            Update,
+            (
+                (exclusive_video_mode, play_area, rebuild_world),
+                (keys, cursor, look, step, sync_targets, sync_bars, update_hud, update_overlay, smoke_capture),
+            )
+                .chain(),
+        )
+        .run()
+}
+
+#[derive(Default, Clone, Copy)]
+struct Look {
+    /// Degrees right of straight ahead. Kept in f64 so tiny movements add up exactly.
+    yaw: f64,
+    /// Degrees above level.
+    pitch: f64,
+}
+
+impl Look {
+    fn aim(&self) -> Vec3 {
+        from_angles(self.yaw as f32, self.pitch as f32)
+    }
+}
+
+/// What a finished step reported, for the workout summary.
+struct Done {
+    name: String,
+    line: String,
+}
+
+#[derive(Resource)]
+struct Game {
+    steps: Vec<PlayStep>,
+    index: usize,
+    sim: Sim,
+    seed: u64,
+    workout: Option<String>,
+    program: Option<(String, String)>,
+    settings: PlayerSettings,
+    db_path: Option<PathBuf>,
+    look: Look,
+    /// Wall-clock start of the timed part of the run.
+    started_at: Option<NaiveDateTime>,
+    frames: u64,
+    run_time: f32,
+    /// Smoothed frames per second.
+    fps: f32,
+    /// Best earlier score (standard) or level (adaptive) for this scenario.
+    best: Option<f64>,
+    /// What happened when the finished run was saved.
+    saved: Option<Result<(), String>>,
+    /// Seconds of hit flash left, by target id.
+    flashes: HashMap<u64, f32>,
+    /// A message shown mid-screen for a moment (breakthroughs), and seconds left.
+    banner: Option<(String, f32)>,
+    done: Vec<Done>,
+    world_dirty: bool,
+    display_note: Option<String>,
+    video_mode_set: bool,
+    smoke: Option<Smoke>,
+    bot: crate::bot::Bot,
+}
+
+struct Smoke {
+    dir: PathBuf,
+    /// Screenshots taken in the current step.
+    taken: u8,
+    /// Seconds since the run finished.
+    after_finish: f32,
+}
+
+impl Game {
+    fn step_info(&self) -> &PlayStep {
+        &self.steps[self.index]
+    }
+
+    fn is_last(&self) -> bool {
+        self.index + 1 >= self.steps.len()
+    }
+
+    /// Starts step `i` (or restarts the current one), reading the last adaptive
+    /// level and the best so far from the database.
+    fn begin_step(&mut self, i: usize) {
+        let changed = *self.sim.scenario() != self.steps[i].scenario;
+        self.index = i;
+        self.seed = self.seed.wrapping_add(1);
+        let step = self.steps[i].clone();
+        let db = self.db_path.as_deref().and_then(|p| aimadapt_core::Db::open(p).ok());
+        let s = step.scenario.clone();
+        self.sim = if step.adaptive {
+            let now = Local::now().naive_local();
+            let prior = db.as_ref().and_then(|db| record::prior(db, &s, now));
+            self.best = db.as_ref().and_then(|db| record::best_rating(db, &s));
+            Sim::adaptive(s, self.seed, prior, self.settings.challenge)
+        } else {
+            self.best = db.as_ref().and_then(|db| record::best_score(db, &s));
+            Sim::new(s, self.seed)
+        };
+        self.look = Look::default();
+        self.started_at = None;
+        self.frames = 0;
+        self.run_time = 0.0;
+        self.saved = None;
+        self.flashes.clear();
+        self.banner = None;
+        if changed {
+            self.world_dirty = true;
+        }
+        if let Some(s) = &mut self.smoke {
+            s.taken = 0;
+            s.after_finish = 0.0;
+        }
+    }
+
+    fn record_done(&mut self) {
+        let r = self.sim.result();
+        let line = match &r.adaptive {
+            Some(a) => {
+                let hit = a.success_rate.unwrap_or(0.0) * 100.0;
+                match a.run_value {
+                    None => {
+                        format!("Calibration: {:.0}% at {}, hit {hit:.0}%", a.goal * 100.0, fmt_value(a.knob, a.value))
+                    }
+                    Some(v) => format!(
+                        "{} at {}: hit {hit:.0}%, rating {} (was {})",
+                        a.pick.run_label(),
+                        fmt_value(a.knob, v),
+                        fmt_value(a.knob, a.value),
+                        fmt_value(a.knob, a.start_value)
+                    ),
+                }
+            }
+            None => format!(
+                "Score {:.0}, accuracy {}",
+                r.score,
+                r.stats.accuracy().map_or("-".into(), |a| format!("{:.0}%", a * 100.0))
+            ),
+        };
+        self.done.push(Done { name: self.sim.scenario().name.clone(), line });
+    }
+}
+
+#[derive(Component)]
+struct PlayerCamera;
+
+/// Everything that belongs to the current scenario's room.
+#[derive(Component)]
+struct WorldItem;
+
+#[derive(Component)]
+struct TargetView {
+    id: u64,
+    material: Handle<StandardMaterial>,
+}
+
+#[derive(Resource)]
+struct TargetAssets {
+    mesh: Handle<Mesh>,
+    base: Color,
+    /// The second color for timed targets, when colors alternate.
+    alt: Option<Color>,
+    /// Targets per wave: the scenario's target count.
+    wave: u32,
+    radius: f32,
+    /// A 1 m square facing +Z, and the bar materials: background, health, time left.
+    bar: Handle<Mesh>,
+    bar_back: Handle<StandardMaterial>,
+    bar_health: Handle<StandardMaterial>,
+    bar_time: Handle<StandardMaterial>,
+}
+
+/// One part of a bar above a target: its background or its fill.
+#[derive(Component)]
+struct BarView {
+    id: u64,
+    kind: Bar,
+    fill: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Bar {
+    Health,
+    TimeLeft,
+}
+
+#[derive(Component)]
+struct TimerText;
+
+#[derive(Component)]
+struct ScoreText;
+
+#[derive(Component)]
+struct StatsText;
+
+#[derive(Component)]
+struct CenterText;
+
+#[derive(Component)]
+struct FpsText;
+
+#[derive(Component)]
+struct StepText;
+
+#[derive(Component)]
+struct Overlay;
+
+#[derive(Component)]
+struct OverlayText;
+
+fn color(hex: &str) -> Color {
+    let [r, g, b] = parse_color(hex).unwrap_or([1.0, 0.3, 0.3]);
+    Color::srgb(r, g, b)
+}
+
+/// A light grid on a transparent background, tiled over the walls so movement is
+/// easy to judge.
+fn grid_texture() -> Image {
+    const N: u32 = 128;
+    let mut data = Vec::with_capacity((N * N * 4) as usize);
+    for y in 0..N {
+        for x in 0..N {
+            let line = x < 2 || y < 2;
+            let v = if line { 255 } else { 0 };
+            data.extend_from_slice(&[255, 255, 255, v]);
+        }
+    }
+    let mut image = Image::new(
+        Extent3d { width: N, height: N, depth_or_array_layers: 1 },
+        TextureDimension::D2,
+        data,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        address_mode_u: ImageAddressMode::Repeat,
+        address_mode_v: ImageAddressMode::Repeat,
+        ..ImageSamplerDescriptor::linear()
+    });
+    image
+}
+
+fn setup_cameras(mut commands: Commands, game: Res<Game>) {
+    // Clears the whole window to black, so a smaller play area has a black border.
+    commands.spawn((Camera2d, Camera { order: -1, clear_color: ClearColorConfig::Custom(Color::BLACK), ..default() }));
+    commands.spawn((
+        PlayerCamera,
+        Camera3d::default(),
+        Camera { order: 0, ..default() },
+        IsDefaultUiCamera,
+        Projection::from(PerspectiveProjection { fov: game.settings.vertical_fov(), near: 0.05, ..default() }),
+        Transform::IDENTITY,
+    ));
+}
+
+/// Entities that belong to the current scenario and go when it changes.
+type RoomEntities<'w, 's> = Query<'w, 's, Entity, Or<(With<WorldItem>, With<TargetView>, With<BarView>)>>;
+
+/// Builds the room and target mesh for the current scenario when it changes.
+fn rebuild_world(
+    mut commands: Commands,
+    mut game: ResMut<Game>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+    old: RoomEntities,
+) {
+    if !game.world_dirty {
+        return;
+    }
+    game.world_dirty = false;
+    for e in &old {
+        commands.entity(e).despawn();
+    }
+    let s = game.sim.scenario();
+    let [w, h, d] = s.arena.size;
+    let eye = s.arena.eye_height;
+    let grid = images.add(grid_texture());
+    let wall = color(&s.arena.wall_color);
+    let floor = color(&s.arena.floor_color);
+    let t = 0.1;
+
+    // Each panel: size, center, color, and how many 2 m grid cells it spans.
+    let floor_y = -eye - t / 2.0;
+    let panels = [
+        (Vec3::new(w, t, d), Vec3::new(0.0, floor_y, 0.0), floor, Vec2::new(w, d)),
+        (Vec3::new(w, t, d), Vec3::new(0.0, h - eye + t / 2.0, 0.0), wall, Vec2::new(w, d)),
+        (Vec3::new(w, h, t), Vec3::new(0.0, h / 2.0 - eye, -d / 2.0 - t / 2.0), wall, Vec2::new(w, h)),
+        (Vec3::new(w, h, t), Vec3::new(0.0, h / 2.0 - eye, d / 2.0 + t / 2.0), wall, Vec2::new(w, h)),
+        (Vec3::new(t, h, d), Vec3::new(-w / 2.0 - t / 2.0, h / 2.0 - eye, 0.0), wall, Vec2::new(d, h)),
+        (Vec3::new(t, h, d), Vec3::new(w / 2.0 + t / 2.0, h / 2.0 - eye, 0.0), wall, Vec2::new(d, h)),
+    ];
+    for (size, center, base, cells) in panels {
+        let mat = materials.add(StandardMaterial {
+            base_color: base,
+            perceptual_roughness: 1.0,
+            reflectance: 0.0,
+            ..default()
+        });
+        commands.spawn((
+            WorldItem,
+            Mesh3d(meshes.add(Cuboid::from_size(size))),
+            MeshMaterial3d(mat),
+            Transform::from_translation(center),
+        ));
+        // Grid lines on a slightly inset copy, so the panel color shows through.
+        let lines = materials.add(StandardMaterial {
+            base_color: base.lighter(0.08),
+            base_color_texture: Some(grid.clone()),
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            uv_transform: Affine2::from_scale(cells / 2.0),
+            ..default()
+        });
+        let inset = -center.normalize_or_zero() * 0.01;
+        commands.spawn((
+            WorldItem,
+            Mesh3d(meshes.add(Cuboid::from_size(size * 0.999))),
+            MeshMaterial3d(lines),
+            Transform::from_translation(center + inset),
+        ));
+    }
+    commands.spawn((
+        WorldItem,
+        DirectionalLight { illuminance: 6000.0, shadow_maps_enabled: false, ..default() },
+        Transform::from_xyz(4.0, 10.0, 6.0).looking_at(Vec3::ZERO, Vec3::Y),
+    ));
+
+    let tc = &s.targets;
+    let mesh = match tc.shape {
+        Shape::Sphere => meshes.add(Sphere::new(tc.radius).mesh().uv(48, 24)),
+        Shape::Capsule => meshes.add(Capsule3d::new(tc.radius, (tc.height - 2.0 * tc.radius).max(0.0))),
+    };
+    let flat = |c: Color| StandardMaterial { base_color: c, unlit: true, ..default() };
+    commands.insert_resource(TargetAssets {
+        mesh,
+        base: color(&tc.color),
+        alt: tc.alternate_colors.then(|| color(&tc.alt_color)),
+        wave: tc.count.max(1),
+        radius: tc.radius,
+        bar: meshes.add(Rectangle::new(1.0, 1.0)),
+        bar_back: materials.add(flat(Color::srgba(0.0, 0.0, 0.0, 1.0))),
+        bar_health: materials.add(flat(Color::srgb(0.35, 0.85, 0.45))),
+        bar_time: materials.add(flat(Color::srgb(0.95, 0.95, 0.95))),
+    });
+}
+
+/// Switches to exclusive full screen at the chosen resolution and refresh rate once
+/// the monitor's video modes are known.
+fn exclusive_video_mode(
+    mut game: ResMut<Game>,
+    mut window: Single<&mut Window>,
+    monitors: Query<&Monitor, With<PrimaryMonitor>>,
+) {
+    if game.video_mode_set || game.settings.display.mode != DisplayMode::Exclusive {
+        return;
+    }
+    let Some(monitor) = monitors.iter().next() else { return };
+    game.video_mode_set = true;
+    let d = &game.settings.display;
+    let want = d.resolution.unwrap_or([monitor.physical_width, monitor.physical_height]);
+    let fits: Vec<&VideoMode> =
+        monitor.video_modes.iter().filter(|m| m.physical_size.x == want[0] && m.physical_size.y == want[1]).collect();
+    let pick = match d.refresh_hz {
+        Some(hz) => fits.iter().min_by_key(|m| (i64::from(m.refresh_rate_millihertz) - i64::from(hz) * 1000).abs()),
+        None => fits.iter().max_by_key(|m| (m.refresh_rate_millihertz, m.bit_depth)),
+    };
+    match pick {
+        Some(m) => {
+            window.mode = WindowMode::Fullscreen(MonitorSelection::Current, VideoModeSelection::Specific(**m));
+        }
+        None => {
+            game.display_note =
+                Some(format!("Your monitor doesn't offer {}x{}; using borderless full screen.", want[0], want[1]));
+        }
+    }
+}
+
+/// Keeps the 3D view (and the HUD with it) in the centered play area, if one is set.
+fn play_area(game: Res<Game>, window: Single<&Window>, mut camera: Single<&mut Camera, With<PlayerCamera>>) {
+    let size = [window.physical_width(), window.physical_height()];
+    let viewport = game.settings.display.play_area_in(size).map(|(pos, area)| Viewport {
+        physical_position: UVec2::new(pos[0], pos[1]),
+        physical_size: UVec2::new(area[0], area[1]),
+        ..default()
+    });
+    let key = |v: &Option<Viewport>| v.as_ref().map(|v| (v.physical_position, v.physical_size));
+    if key(&camera.viewport) != key(&viewport) {
+        camera.viewport = viewport;
+    }
+}
+
+fn setup_hud(mut commands: Commands, game: Res<Game>) {
+    let text = |size: f32| TextFont { font_size: FontSize::Px(size), ..default() };
+    let shadow = TextShadow { offset: Vec2::splat(1.5), color: Color::srgba(0.0, 0.0, 0.0, 0.8) };
+
+    // Timer, top center.
+    commands
+        .spawn(Node {
+            position_type: PositionType::Absolute,
+            top: px(16),
+            width: percent(100),
+            justify_content: JustifyContent::Center,
+            ..default()
+        })
+        .with_child((TimerText, Text::new(""), text(34.0), shadow));
+    // Score or level, top left.
+    commands.spawn((
+        ScoreText,
+        Text::new(""),
+        text(26.0),
+        shadow,
+        Node { position_type: PositionType::Absolute, top: px(18), left: px(24), ..default() },
+    ));
+    // Accuracy and kills, top right.
+    commands.spawn((
+        StatsText,
+        Text::new(""),
+        text(20.0),
+        TextLayout::justify(Justify::Right),
+        shadow,
+        Node { position_type: PositionType::Absolute, top: px(18), right: px(24), ..default() },
+    ));
+    // Workout progress, bottom left.
+    commands.spawn((
+        StepText,
+        Text::new(""),
+        text(15.0),
+        TextColor(Color::srgba(1.0, 1.0, 1.0, 0.75)),
+        shadow,
+        Node { position_type: PositionType::Absolute, bottom: px(10), left: px(14), ..default() },
+    ));
+    commands.spawn((
+        FpsText,
+        Text::new(""),
+        text(14.0),
+        TextColor(Color::srgba(1.0, 1.0, 1.0, 0.6)),
+        Node { position_type: PositionType::Absolute, bottom: px(10), right: px(14), ..default() },
+    ));
+    // Countdown and prompts, middle of the screen.
+    commands
+        .spawn(Node {
+            position_type: PositionType::Absolute,
+            top: percent(30),
+            width: percent(100),
+            justify_content: JustifyContent::Center,
+            ..default()
+        })
+        .with_child((CenterText, Text::new(""), text(64.0), TextLayout::justify(Justify::Center), shadow));
+
+    spawn_crosshair(&mut commands, &game.settings);
+
+    // Results, hidden until the run ends.
+    commands
+        .spawn((
+            Overlay,
+            Visibility::Hidden,
+            Node {
+                position_type: PositionType::Absolute,
+                width: percent(100),
+                height: percent(100),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.02, 0.03, 0.05, 0.72)),
+        ))
+        .with_child((
+            Node {
+                padding: UiRect::all(px(32)),
+                min_width: px(460),
+                border_radius: BorderRadius::all(px(14)),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.09, 0.1, 0.13)),
+            children![(OverlayText, Text::new(""), text(21.0), TextLayout::justify(Justify::Center))],
+        ));
+}
+
+fn spawn_crosshair(commands: &mut Commands, settings: &PlayerSettings) {
+    let c = &settings.crosshair;
+    let col = color(&c.color);
+    let (len, th, gap) = (c.size, c.thickness.max(1.0), c.gap);
+    let mut bar = |x: f32, y: f32, w: f32, h: f32| {
+        commands.spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: percent(50),
+                top: percent(50),
+                width: px(w),
+                height: px(h),
+                margin: UiRect { left: px(x - w / 2.0), top: px(y - h / 2.0), ..default() },
+                ..default()
+            },
+            BackgroundColor(col),
+            Outline { width: px(1), offset: px(0), color: Color::srgba(0.0, 0.0, 0.0, 0.6) },
+        ));
+    };
+    if c.dot {
+        bar(0.0, 0.0, th, th);
+    }
+    if len > 0.0 {
+        let off = gap + len / 2.0 + th / 2.0;
+        bar(-off, 0.0, len, th);
+        bar(off, 0.0, len, th);
+        bar(0.0, -off, th, len);
+        bar(0.0, off, th, len);
+    }
+}
+
+fn keys(keys: Res<ButtonInput<KeyCode>>, mut game: ResMut<Game>, mut exit: MessageWriter<AppExit>) {
+    if keys.just_pressed(KeyCode::Escape) {
+        exit.write(AppExit::Success);
+    }
+    let finished = game.sim.phase() == Phase::Finished;
+    let i = game.index;
+    if keys.just_pressed(KeyCode::KeyR) {
+        game.begin_step(i);
+    } else if finished && keys.just_pressed(KeyCode::Space) {
+        if game.is_last() {
+            if game.steps.len() == 1 {
+                game.begin_step(i);
+            } else {
+                exit.write(AppExit::Success);
+            }
+        } else {
+            game.begin_step(i + 1);
+        }
+    }
+    if keys.just_pressed(KeyCode::F2) {
+        game.settings.show_fps = !game.settings.show_fps;
+    }
+}
+
+/// Locks the cursor while the window has focus; clicking re-locks it.
+fn cursor(
+    window: Single<&Window>,
+    mut cursor: Single<&mut CursorOptions>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    game: Res<Game>,
+) {
+    if game.smoke.is_some() {
+        return;
+    }
+    let want = window.focused;
+    if want && cursor.grab_mode != CursorGrabMode::Locked && (mouse.just_pressed(MouseButton::Left) || cursor.visible) {
+        cursor.grab_mode = CursorGrabMode::Locked;
+        cursor.visible = false;
+    } else if !want && cursor.grab_mode != CursorGrabMode::None {
+        cursor.grab_mode = CursorGrabMode::None;
+        cursor.visible = true;
+    }
+}
+
+fn look(
+    motion: Res<AccumulatedMouseMotion>,
+    cursor: Single<&CursorOptions>,
+    mut game: ResMut<Game>,
+    mut camera: Single<&mut Transform, With<PlayerCamera>>,
+) {
+    if cursor.grab_mode == CursorGrabMode::Locked && game.sim.phase() != Phase::Finished {
+        let k = f64::from(game.settings.degrees_per_count());
+        let d = motion.delta;
+        game.look.yaw = (game.look.yaw + f64::from(d.x) * k).rem_euclid(360.0);
+        if game.look.yaw > 180.0 {
+            game.look.yaw -= 360.0;
+        }
+        game.look.pitch = (game.look.pitch - f64::from(d.y) * k).clamp(-89.0, 89.0);
+    }
+    let l = game.look;
+    camera.rotation = Quat::from_euler(EulerRot::YXZ, -(l.yaw as f32).to_radians(), (l.pitch as f32).to_radians(), 0.0);
+}
+
+fn step(
+    time: Res<Time>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    cursor: Single<&CursorOptions>,
+    camera: Single<&Camera, With<PlayerCamera>>,
+    window: Single<&Window>,
+    mut game: ResMut<Game>,
+) {
+    let dt = time.delta_secs();
+    if dt > 0.0 {
+        game.fps = if game.fps == 0.0 { 1.0 / dt } else { game.fps * 0.95 + 0.05 / dt };
+    }
+    // No shooting while the cursor is free (window not focused).
+    let locked = cursor.grab_mode == CursorGrabMode::Locked;
+    let mut input = Input {
+        aim: game.look.aim(),
+        fire_pressed: locked && mouse.just_pressed(MouseButton::Left),
+        fire_held: locked && mouse.pressed(MouseButton::Left),
+    };
+    if game.smoke.is_some() {
+        let Game { bot, sim, look, .. } = &mut *game;
+        input = bot.input(sim, &mut look.yaw, &mut look.pitch, dt);
+    }
+    let was = game.sim.phase();
+    let events = game.sim.step(dt, input);
+    let now = game.sim.phase();
+    if was == Phase::Countdown && now != Phase::Countdown {
+        game.started_at = Some(Local::now().naive_local());
+    }
+    if now == Phase::Running {
+        game.frames += 1;
+        game.run_time += dt;
+    }
+    for e in events {
+        match e {
+            Event::Hit { id } => {
+                game.flashes.insert(id, 0.06);
+            }
+            Event::Breakthrough { value } => {
+                if let Some((knob, _, _)) = game.sim.rating() {
+                    game.banner = Some((format!("Breakthrough: held it at {}!", fmt_value(knob, value)), 3.0));
+                }
+            }
+            Event::Finished => {
+                let size = camera
+                    .physical_viewport_size()
+                    .unwrap_or(UVec2::new(window.physical_width(), window.physical_height()));
+                save_run(&mut game, format!("{}x{}", size.x, size.y));
+                game.record_done();
+            }
+            _ => {}
+        }
+    }
+    for f in game.flashes.values_mut() {
+        *f -= dt;
+    }
+    if let Some((_, left)) = &mut game.banner {
+        *left -= dt;
+        if *left <= 0.0 {
+            game.banner = None;
+        }
+    }
+    game.flashes.retain(|_, f| *f > 0.0);
+}
+
+fn save_run(game: &mut Game, resolution: String) {
+    let Some(path) = game.db_path.clone() else {
+        game.saved = Some(Err("not saved (no database)".into()));
+        return;
+    };
+    let finished_at = Local::now().naive_local();
+    let result = game.sim.result();
+    let avg_fps = (game.run_time > 0.0).then(|| game.frames as f32 / game.run_time);
+    let info = RunInfo {
+        scenario: game.sim.scenario(),
+        settings: &game.settings,
+        result: &result,
+        started_at: game.started_at.unwrap_or(finished_at),
+        finished_at,
+        avg_fps,
+        resolution: Some(resolution),
+        workout: game.workout.clone(),
+        program: game.program.clone(),
+        rep: Some(game.step_info().rep),
+        reps: Some(game.step_info().reps),
+        block: Some(game.step_info().block),
+    };
+    game.saved = Some(record::save(&path, &info));
+}
+
+fn sync_targets(
+    mut commands: Commands,
+    game: Res<Game>,
+    assets: Option<Res<TargetAssets>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut views: Query<(Entity, &TargetView, &mut Transform)>,
+) {
+    let Some(assets) = assets else { return };
+    if game.world_dirty {
+        return;
+    }
+    let live: HashMap<u64, &aimadapt_sim::sim::Target> = game.sim.targets().iter().map(|t| (t.id, t)).collect();
+    let mut shown = Vec::new();
+    for (entity, view, mut tf) in &mut views {
+        let Some(t) = live.get(&view.id) else {
+            commands.entity(entity).despawn();
+            continue;
+        };
+        shown.push(view.id);
+        tf.translation = t.pos;
+        tf.scale = Vec3::splat(t.radius / assets.radius);
+        if let Some(mut m) = materials.get_mut(&view.material) {
+            m.base_color = target_color(base_color(&assets, t), t.health_fraction(), game.flashes.contains_key(&t.id));
+        }
+    }
+    for t in game.sim.targets() {
+        if shown.contains(&t.id) {
+            continue;
+        }
+        let material = materials.add(StandardMaterial {
+            base_color: base_color(&assets, t),
+            perceptual_roughness: 0.5,
+            ..default()
+        });
+        commands.spawn((
+            TargetView { id: t.id, material: material.clone() },
+            Mesh3d(assets.mesh.clone()),
+            MeshMaterial3d(material),
+            Transform::from_translation(t.pos).with_scale(Vec3::splat(t.radius / assets.radius)),
+        ));
+    }
+}
+
+/// A target's own color. When the scenario alternates colors, timed targets
+/// change color by wave: with three targets up, the first three are one color, the
+/// next three the other, and so on. A wave's color says how old its targets are.
+fn base_color(assets: &TargetAssets, t: &aimadapt_sim::sim::Target) -> Color {
+    let wave = (t.no().max(1) - 1) / assets.wave;
+    match assets.alt {
+        Some(alt) if t.time_left().is_some() && wave % 2 == 1 => alt,
+        _ => assets.base,
+    }
+}
+
+/// How far above a target's center its bars start: the top of the sphere or capsule.
+fn bar_base(s: &Scenario, t: &aimadapt_sim::sim::Target) -> f32 {
+    match s.targets.shape {
+        Shape::Capsule => (t.height() / 2.0).max(t.radius),
+        Shape::Sphere => t.radius,
+    }
+}
+
+/// The bars a target shows, top to bottom order from the target up, with how
+/// full each is.
+fn bars_for(s: &Scenario, t: &aimadapt_sim::sim::Target) -> Vec<(Bar, f32)> {
+    let mut out = Vec::new();
+    if s.targets.health_bar {
+        out.push((Bar::Health, t.health_fraction()));
+    }
+    if s.targets.timer_bar
+        && let Some(f) = t.time_left_fraction()
+    {
+        out.push((Bar::TimeLeft, f));
+    }
+    out
+}
+
+/// Draws health and time-left bars just above each target, level with the screen
+/// and the same size on screen at any distance.
+fn sync_bars(
+    mut commands: Commands,
+    game: Res<Game>,
+    assets: Option<Res<TargetAssets>>,
+    camera: Single<&Transform, With<PlayerCamera>>,
+    mut views: Query<(Entity, &BarView, &mut Transform), Without<PlayerCamera>>,
+) {
+    let Some(assets) = assets else { return };
+    if game.world_dirty {
+        return;
+    }
+    let s = game.sim.scenario();
+    let mut want: HashMap<(u64, u8, bool), Transform> = HashMap::new();
+    // Parallel to the screen, so bars read level wherever the target is.
+    let rotation = camera.rotation;
+    let (right, up, back_dir) = (rotation * Vec3::X, rotation * Vec3::Y, rotation * Vec3::Z);
+    for t in game.sim.targets() {
+        // Depth along the view, so the bar's size on screen doesn't change with distance.
+        let d = (t.pos - camera.translation).dot(-back_dir).max(1.0);
+        let (w, h) = (d * 0.06, d * 0.06 * 0.16);
+        for (k, (bar, frac)) in bars_for(s, t).into_iter().enumerate() {
+            let center = t.pos + up * (bar_base(s, t) + h * (1.0 + 1.5 * k as f32));
+            let back = Transform { translation: center, rotation, scale: Vec3::new(w, h, 1.0) };
+            let inner = w - h * 0.4;
+            let fill_w = inner * frac;
+            let fill = Transform {
+                translation: center - right * (inner - fill_w) / 2.0 + back_dir * 0.02,
+                rotation,
+                scale: Vec3::new(fill_w.max(1e-4), h * 0.6, 1.0),
+            };
+            want.insert((t.id, bar as u8, false), back);
+            want.insert((t.id, bar as u8, true), fill);
+        }
+    }
+    for (entity, view, mut tf) in &mut views {
+        match want.remove(&(view.id, view.kind as u8, view.fill)) {
+            Some(next) => *tf = next,
+            None => commands.entity(entity).despawn(),
+        }
+    }
+    for ((id, kind, fill), tf) in want {
+        let kind = if kind == Bar::Health as u8 { Bar::Health } else { Bar::TimeLeft };
+        let material = match (fill, kind) {
+            (false, _) => assets.bar_back.clone(),
+            (true, Bar::Health) => assets.bar_health.clone(),
+            (true, Bar::TimeLeft) => assets.bar_time.clone(),
+        };
+        commands.spawn((BarView { id, kind, fill }, Mesh3d(assets.bar.clone()), MeshMaterial3d(material), tf));
+    }
+}
+
+/// Targets fade toward white as they lose health and brighten while being hit
+/// (for a beam that's every tick on target, so it doubles as on-target feedback).
+fn target_color(base: Color, health: f32, flash: bool) -> Color {
+    let faded = base.mix(&Color::WHITE, (1.0 - health) * 0.6);
+    if flash { faded.mix(&Color::WHITE, 0.55) } else { faded }
+}
+
+fn mode_name(adaptive: bool) -> &'static str {
+    if adaptive { "adaptive" } else { "standard" }
+}
+
+#[allow(clippy::type_complexity)]
+fn update_hud(
+    game: Res<Game>,
+    mut texts: ParamSet<(
+        Single<&mut Text, With<TimerText>>,
+        Single<&mut Text, With<ScoreText>>,
+        Single<&mut Text, With<StatsText>>,
+        Single<&mut Text, With<CenterText>>,
+        Single<&mut Text, With<FpsText>>,
+        Single<&mut Text, With<StepText>>,
+    )>,
+) {
+    let sim = &game.sim;
+    let st = sim.stats();
+    texts.p0().0 = format!("{:.1}", sim.time_left().max(0.0));
+    let acc = st.accuracy().map_or("-".into(), |a| format!("{:.1}%", a * 100.0));
+    match sim.rating() {
+        Some((knob, value, rate)) => {
+            let goal = sim.scenario().adaptive.goal * 100.0;
+            texts.p1().0 = match sim.run_pick() {
+                Some((v, pick)) => format!("This run: {}\n{}", fmt_value(knob, v), pick.run_label()),
+                None => format!("Calibration run\n{goal:.0}%: {}", fmt_value(knob, value)),
+            };
+            let rate = rate.map_or("-".into(), |r| format!("{:.0}%", r * 100.0));
+            let mut stats =
+                format!("{} {rate} (goal {goal:.0}%)\n{}", rate_word(knob, sim.rated_per_target()), kills_line(sim));
+            if let Some((_, left)) = sim.pace() {
+                stats += &if left >= 0.0 { format!("\nNext kill within {left:.1} s") } else { "\nOff pace".into() };
+            }
+            texts.p2().0 = stats;
+        }
+        None => {
+            texts.p1().0 = format!("{:.0}", sim.score());
+            texts.p2().0 = format!("Accuracy {acc}\n{}", kills_line(sim));
+        }
+    }
+    texts.p3().0 = match sim.phase() {
+        Phase::Countdown => format!("{}", sim.countdown_left().ceil() as u32),
+        _ => game.banner.as_ref().map(|b| b.0.clone()).unwrap_or_default(),
+    };
+    texts.p4().0 = if game.settings.show_fps { format!("{:.0} fps", game.fps) } else { String::new() };
+    let step = game.step_info();
+    let mut line = format!("{} | {}", sim.scenario().name, mode_name(step.adaptive));
+    if let Some(l) = &step.label {
+        line = format!("{line} | {l}");
+    }
+    if let Some(w) = &game.workout {
+        line = format!("{w} | {} of {} | {line}", game.index + 1, game.steps.len());
+    }
+    texts.p5().0 = line;
+}
+
+fn update_overlay(
+    game: Res<Game>,
+    mut overlay: Single<&mut Visibility, With<Overlay>>,
+    mut text: Single<&mut Text, With<OverlayText>>,
+) {
+    let finished = game.sim.phase() == Phase::Finished;
+    **overlay = if finished { Visibility::Visible } else { Visibility::Hidden };
+    if !finished {
+        return;
+    }
+    let r = game.sim.result();
+    let st = &r.stats;
+    let acc = st.accuracy().map_or("-".into(), |a| format!("{:.1}%", a * 100.0));
+    let ttk = r.avg_ttk_s().map_or("-".into(), |t| format!("{:.0} ms", t * 1000.0));
+    let headline = match &r.adaptive {
+        Some(a) => {
+            let k = a.knob;
+            let better = |x: f32, y: f64| if k.higher_is_harder() { f64::from(x) > y } else { f64::from(x) < y };
+            let best = match game.best {
+                None => "First adaptive run on this scenario".to_string(),
+                Some(b) if better(a.value, b) => format!("Your best yet! (was {})", fmt_value(k, b as f32)),
+                Some(b) => format!("Best {}", fmt_value(k, b as f32)),
+            };
+            let (lo, hi) = (a.range.0.min(a.range.1), a.range.0.max(a.range.1));
+            let goal = a.goal * 100.0;
+            let hit = a.success_rate.unwrap_or(0.0) * 100.0;
+            match a.run_value {
+                None => format!(
+                    "Calibration run: {goal:.0}% at {}   (likely {} to {})\n{} {hit:.0}% | {best}\nFrom here on, each run plays at one difficulty.",
+                    fmt_value(k, a.value),
+                    fmt_value(k, lo),
+                    fmt_value(k, hi),
+                    rate_word(k, game.sim.rated_per_target()),
+                ),
+                Some(v) => {
+                    let verdict = if a.breakthrough {
+                        format!("Breakthrough: you held {goal:.0}% faster than ever before")
+                    } else if a.fastest.is_some() {
+                        format!("You held the {goal:.0}% goal")
+                    } else {
+                        format!("Below the {goal:.0}% goal this time")
+                    };
+                    format!(
+                        "{}: {}   {} {hit:.0}%\n{verdict}\nRating {} (was {}) | {best}",
+                        a.pick.run_label(),
+                        fmt_value(k, v),
+                        rate_word(k, game.sim.rated_per_target()),
+                        fmt_value(k, a.value),
+                        fmt_value(k, a.start_value),
+                    )
+                }
+            }
+        }
+        None => {
+            let score = f64::from(r.score);
+            let best = match game.best {
+                None => "First run of this scenario".to_string(),
+                Some(b) if score > b => format!("New best! (was {b:.0})"),
+                Some(b) => format!("Best {b:.0}"),
+            };
+            format!("Score {:.0}\n{best}", r.score)
+        }
+    };
+    let saved = match &game.saved {
+        Some(Ok(())) => "Saved to your history".to_string(),
+        Some(Err(e)) => format!("Couldn't save: {e}"),
+        None => String::new(),
+    };
+    let note = game.display_note.as_deref().map(|n| format!("\n{n}")).unwrap_or_default();
+    let keys = if game.steps.len() == 1 {
+        "Space: play again    R: restart    Esc: quit".to_string()
+    } else if game.is_last() {
+        let summary: Vec<String> = game.done.iter().map(|d| format!("{}: {}", d.name, d.line)).collect();
+        format!("Workout complete\n{}\n\nSpace or Esc: finish    R: replay this one", summary.join("\n"))
+    } else {
+        let next = &game.steps[game.index + 1];
+        format!(
+            "Next ({} of {}): {} | {}\n\nSpace: continue    R: replay this one    Esc: end workout",
+            game.index + 2,
+            game.steps.len(),
+            next.scenario.name,
+            mode_name(next.adaptive)
+        )
+    };
+    text.0 = format!(
+        "{}\n\n{headline}\n\nAccuracy {acc}   {}   Timeouts {}   Avg TTK {ttk}\n\n{saved}{note}\n\n{keys}",
+        game.sim.scenario().name,
+        kills_line(&game.sim),
+        st.timeouts,
+    );
+}
+
+/// Smoke test: screenshot mid-run and on the results screen, move to the next
+/// step, and quit after the last.
+fn smoke_capture(mut commands: Commands, time: Res<Time>, mut game: ResMut<Game>, mut exit: MessageWriter<AppExit>) {
+    use bevy::render::view::screenshot::{Screenshot, save_to_disk};
+    let elapsed = game.sim.elapsed();
+    let finished = game.sim.phase() == Phase::Finished;
+    let (i, last) = (game.index, game.is_last());
+    let Some(smoke) = game.smoke.as_mut() else { return };
+    let suffix = if i == 0 { String::new() } else { format!("-{}", i + 1) };
+    let mut shot = |name: &str, smoke: &mut Smoke| {
+        commands
+            .spawn(Screenshot::primary_window())
+            .observe(save_to_disk(smoke.dir.join(format!("{name}{suffix}.png"))));
+        smoke.taken += 1;
+    };
+    if smoke.taken == 0 && elapsed >= 1.5 {
+        shot("play", smoke);
+    }
+    if finished {
+        smoke.after_finish += time.delta_secs();
+        if smoke.taken == 1 && smoke.after_finish >= 0.5 {
+            shot("results", smoke);
+        }
+        if smoke.after_finish >= 1.5 {
+            if last {
+                exit.write(AppExit::Success);
+            } else {
+                game.begin_step(i + 1);
+            }
+        }
+    }
+}
+
+/// A rating in the knob's units. The game font has no degree sign, so speeds read
+/// "deg/s" in game.
+fn fmt_value(knob: Knob, v: f32) -> String {
+    knob.format(v).replace("°/s", "deg/s")
+}
+
+fn kills_line(sim: &Sim) -> String {
+    let kills = sim.stats().kills;
+    match sim.kills_per_min() {
+        Some(k) => format!("Kills {kills} ({k:.0}/min)"),
+        None => format!("Kills {kills}"),
+    }
+}
+
+fn rate_word(knob: Knob, per_target: bool) -> &'static str {
+    match knob {
+        Knob::TargetSpeed if per_target => "Finished in time",
+        Knob::TargetSpeed => "On target",
+        // Precise Track: size rated per tracking segment.
+        Knob::Radius if !per_target => "On target",
+        Knob::KillPace => "On pace",
+        _ => "Hit rate",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn builtin(id: &str) -> Scenario {
+        let e = aimadapt_sim::library::builtins().into_iter().find(|e| e.id == id).unwrap();
+        let mut s = e.scenario.unwrap();
+        s.timing.countdown_s = 0.0;
+        s
+    }
+
+    fn assets(s: &Scenario) -> TargetAssets {
+        TargetAssets {
+            mesh: Handle::default(),
+            base: color(&s.targets.color),
+            alt: s.targets.alternate_colors.then(|| color(&s.targets.alt_color)),
+            wave: s.targets.count.max(1),
+            radius: s.targets.radius,
+            bar: Handle::default(),
+            bar_back: Handle::default(),
+            bar_health: Handle::default(),
+            bar_time: Handle::default(),
+        }
+    }
+
+    /// Playtest: with several timed targets up at once nothing showed which one
+    /// was about to expire. Timed targets now show a time-left bar that empties.
+    #[test]
+    fn timed_targets_show_time_left() {
+        let s = builtin("builtin:timed-grid");
+        let mut sim = Sim::new(s.clone(), 1);
+        let t0 = bars_for(&s, &sim.targets()[0]);
+        assert_eq!(t0.len(), 1);
+        assert_eq!(t0[0].0, Bar::TimeLeft);
+        assert!(t0[0].1 > 0.99);
+        for _ in 0..120 {
+            sim.step(1.0 / 240.0, Input { aim: Vec3::Y, fire_pressed: false, fire_held: false });
+        }
+        let id = sim.targets()[0].id;
+        let later = bars_for(&s, sim.targets().iter().find(|t| t.id == id).unwrap());
+        assert!(later[0].1 < 0.8, "half a second of a 2 s timer gone: {}", later[0].1);
+        // Untimed targets have no timer bar.
+        let track = builtin("builtin:strafe-track");
+        let sim = Sim::new(track.clone(), 1);
+        assert!(bars_for(&track, &sim.targets()[0]).is_empty());
+    }
+
+    /// Playtest: alternating every target made Timed Grid open with mixed colors
+    /// (red, blue, red), as confusing as one color. Colors go by wave instead: the
+    /// first three are one color, the next three the other, and so on.
+    #[test]
+    fn timed_targets_change_color_by_wave() {
+        let s = builtin("builtin:timed-grid");
+        assert_eq!(s.targets.count, 3);
+        let a = assets(&s);
+        let mut sim = Sim::new(s.clone(), 1);
+        let mut seen: std::collections::BTreeMap<u32, Color> = Default::default();
+        for _ in 0..(240 * 20) {
+            for t in sim.targets() {
+                seen.insert(t.no(), base_color(&a, t));
+            }
+            let aim = sim.targets()[0].pos.normalize();
+            sim.step(1.0 / 240.0, Input { aim, fire_pressed: true, fire_held: true });
+            sim.step(1.0 / 240.0, Input { aim: Vec3::Y, fire_pressed: false, fire_held: false });
+        }
+        assert!(seen.len() >= 9, "{} targets", seen.len());
+        for (&no, &c) in &seen {
+            let wave_color = if ((no - 1) / 3) % 2 == 0 { a.base } else { a.alt.unwrap() };
+            assert_eq!(c, wave_color, "target {no}");
+        }
+        // One target at a time: every new target switches color.
+        let one = builtin("builtin:timed-flicks");
+        let a = assets(&one);
+        let sim = Sim::new(one, 1);
+        assert_eq!(base_color(&a, &sim.targets()[0]), a.base);
+        // Untimed targets keep one color.
+        let track = builtin("builtin:switch-track");
+        let a = assets(&track);
+        let sim = Sim::new(track, 1);
+        assert!(sim.targets().iter().all(|t| base_color(&a, t) == a.base));
+    }
+
+    /// Bot check: on capsules (bodies) the health bar sat one radius above the
+    /// center, inside the body, so Unbroken Strafes showed no bar. Bars go above the
+    /// top of the target.
+    #[test]
+    fn bars_sit_above_the_top_of_the_target() {
+        for id in ["builtin:unbroken-strafes", "builtin:stability-switch"] {
+            let s = builtin(id);
+            let sim = Sim::new(s.clone(), 1);
+            let t = &sim.targets()[0];
+            let top = match s.targets.shape {
+                Shape::Capsule => s.targets.height / 2.0,
+                Shape::Sphere => s.targets.radius,
+            };
+            assert!(
+                bar_base(&s, t) >= top - 1e-4,
+                "{id}: bars start {} above the center, top is {top}",
+                bar_base(&s, t)
+            );
+        }
+    }
+
+    #[test]
+    fn switching_targets_show_health() {
+        let s = builtin("builtin:stability-switch");
+        let sim = Sim::new(s.clone(), 1);
+        let bars = bars_for(&s, &sim.targets()[0]);
+        assert_eq!(bars, vec![(Bar::Health, 1.0)]);
+    }
+
+    /// Precise Track is rated on size per tracking segment: the HUD shows time on
+    /// target, not a hit rate. Micro Flicks (size, clicking) still shows hit rate.
+    #[test]
+    fn size_ratings_name_what_they_count() {
+        assert_eq!(rate_word(Knob::Radius, false), "On target");
+        assert_eq!(rate_word(Knob::Radius, true), "Hit rate");
+        assert_eq!(rate_word(Knob::KillPace, false), "On pace");
+    }
+}

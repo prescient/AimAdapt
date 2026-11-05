@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/rustyaim-core", "crates/rustyaim-sim", "crates/rustyaim-engine", "crates/rustyaim-cli", "crates/rustyaim-app"]
+members = ["crates/aimadapt-core", "crates/aimadapt-sim", "crates/aimadapt-engine", "crates/aimadapt-cli", "crates/aimadapt-app"]
 
 [workspace.package]
 edition = "2024"

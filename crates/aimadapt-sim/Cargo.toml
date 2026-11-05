@@ -1,0 +1,15 @@
+[package]
+name = "aimadapt-sim"
+description = "Aim trainer scenario format and simulation"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+# Same major version as Bevy uses, so the engine shares one Vec3 type.
+glam = "0.33"
+serde = { version = "1.0.229", features = ["derive"] }
+thiserror = "2.0.21"
+toml = "1.2.0"
+
+[dev-dependencies]
+tempfile = "3.27.0"

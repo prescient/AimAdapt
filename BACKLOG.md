@@ -1,6 +1,6 @@
-# RustyAim Backlog
+# AimAdapt Backlog
 
-RustyAim is an aim trainer for Windows. It rates you in real units, keeps each drill at the difficulty you hit about 85% of the time, runs a weekly training program, and records every target and shot for analytics. Importing KovaaK's stats files is a secondary feature.
+AimAdapt is an aim trainer for Windows. It rates you in real units, keeps each drill at the difficulty you hit about 85% of the time, runs a weekly training program, and records every target and shot for analytics. Importing KovaaK's stats files is a secondary feature.
 
 **Priority:** P1 = next up · P2 = planned · P3 = later or optional
 
@@ -12,7 +12,7 @@ Last reviewed: Nov 4, 2026 (after the first playtest session).
 
 ## 1. Trainer engine
 
-`crates/rustyaim-engine` (Bevy window) on top of `crates/rustyaim-sim` (rules, no graphics).
+`crates/aimadapt-engine` (Bevy window) on top of `crates/aimadapt-sim` (rules, no graphics).
 
 ### Done
 - [x] Full-screen window with raw mouse input and no frame cap. Sensitivity in cm/360 and DPI; FOV horizontal at 16:9.
@@ -157,7 +157,7 @@ Last reviewed: Nov 4, 2026 (after the first playtest session).
 
 ## 8. KovaaK's import (secondary)
 
-`crates/rustyaim-core` and `rustyaim-cli`.
+`crates/aimadapt-core` and `aimadapt-cli`.
 
 ### Done
 - [x] Finds the install across Steam libraries and parses stats files (kills, weapons, summary, settings). Parsing is tolerant, duplicates are skipped, and imports are incremental. The app imports on startup and watches the folder.
@@ -174,7 +174,7 @@ Last reviewed: Nov 4, 2026 (after the first playtest session).
 
 ### Superseded by the built-in trainer
 These were the original plan for adaptive training through KovaaK's. The trainer's adaptive rating and Core Week now cover them, so they're parked:
-- Writing generated plans into KovaaK's as `RustyAim -` playlists, and the spike on whether KovaaK's reloads playlist files.
+- Writing generated plans into KovaaK's as `AimAdapt -` playlists, and the spike on whether KovaaK's reloads playlist files.
 - Difficulty ladders of existing KovaaK's scenarios, with step-up and step-down rules.
 - Generated `.sce` difficulty variants.
 - Detecting the KovaaK's playlist in progress.
@@ -193,7 +193,7 @@ KovaaK's file locations, checked against a real install:
 The plan is in [TESTING.md](TESTING.md).
 
 ### Done
-- [x] Pre-commit hook: formatting, clippy with warnings as errors, tests, and a release build to `dist/RustyAim.exe`.
+- [x] Pre-commit hook: formatting, clippy with warnings as errors, tests, and a release build to `dist/AimAdapt.exe`.
 - [x] CI on every push, with the exe as an artifact.
 - [x] Release workflow on version tags: portable exe plus installers. v0.1.0 is published; it predates the trainer.
 - [x] App options `--db <file>` and `--no-import` for test and demo databases.

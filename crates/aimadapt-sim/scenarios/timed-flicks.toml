@@ -1,0 +1,33 @@
+name = "Timed Flicks"
+description = "One target at a time that disappears if you're too slow. Hit it before it times out. In adaptive mode the time limit shrinks as you improve, so speed is the difficulty."
+author = "AimAdapt"
+category = "clicking"
+skill = "static_clicking"
+tags = ["flick", "timed", "speed"]
+
+[timing]
+duration_s = 60.0
+
+[targets]
+count = 1
+radius = 0.3
+lifetime_s = 1.1
+respawn_delay_s = 0.1
+
+[targets.spawn]
+distance = [10.0, 12.0]
+yaw = [-40.0, 40.0]
+pitch = [-8.0, 18.0]
+min_separation = 12.0
+
+[scoring]
+per_kill = 100.0
+per_miss = -25.0
+per_timeout = -50.0
+
+[adaptive]
+goal = 0.85
+knob = "lifetime"
+easy = 3.0
+hard = 0.3
+start = 1.1

@@ -1,0 +1,32 @@
+[package]
+name = "aimadapt-engine"
+description = "AimAdapt's built-in aim trainer"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }
+aimadapt-core = { version = "0.1.0", path = "../aimadapt-core" }
+aimadapt-sim = { version = "0.1.0", path = "../aimadapt-sim" }
+
+[dev-dependencies]
+tempfile = "3.27.0"
+
+[dependencies.bevy]
+version = "0.20.1"
+default-features = false
+# Only what a 3D trainer with a text HUD needs: no audio, glTF, scenes, picking or gamepads.
+features = [
+    "std",
+    "multi_threaded",
+    "bevy_winit",
+    "default_font",
+    "keyboard",
+    "mouse",
+    "3d_api",
+    "bevy_render",
+    "bevy_core_pipeline",
+    "bevy_pbr",
+    "ui_api",
+    "ui_bevy_render",
+]

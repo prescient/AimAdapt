@@ -1,4 +1,4 @@
-# RustyAim
+# AimAdapt
 
 An aim trainer for Windows. It rates you in real units (target lifetime in seconds, tracking speed in degrees per second), keeps each drill at the difficulty you hit about 85% of the time, runs a weekly training program, and records every target and shot for analytics. It can also import KovaaK's stats files.
 
@@ -6,11 +6,11 @@ Screenshots use demo data played by the built-in test bot.
 
 ![Timed Flicks in the trainer](docs/screenshots/game-clicking.jpg)
 
-The app's Help page has the full [user guide](crates/rustyaim-app/ui/guide.md): every page, the trainer's keys, how ratings work, and what each built-in scenario trains.
+The app's Help page has the full [user guide](crates/aimadapt-app/ui/guide.md): every page, the trainer's keys, how ratings work, and what each built-in scenario trains.
 
 ## Download
 
-Download `RustyAim_<version>_x64-portable.exe` from [releases](../../releases) and run it. There's nothing to install. A setup .exe and an .msi are attached too, if you want a Start menu entry and an uninstaller.
+Download `AimAdapt_<version>_x64-portable.exe` from [releases](../../releases) and run it. There's nothing to install. A setup .exe and an .msi are attached too, if you want a Start menu entry and an uninstaller.
 
 Requirements: Windows 10 or 11 with the WebView2 runtime (included with Windows 11 and current Windows 10), and a GPU that supports Vulkan or DirectX 12.
 
@@ -126,22 +126,24 @@ Every run stores each target, each shot, tracking samples 30 times a second, and
 
 ## KovaaK's import
 
-If KovaaK's is installed, RustyAim imports its per-run stats files from your Steam libraries, and keeps importing new ones while it's open. The Dashboard, Progress, Training time and Benchmarks screens cover those runs together with standard-mode trainer runs:
+If KovaaK's is installed, AimAdapt imports its per-run stats files from your Steam libraries, and keeps importing new ones while it's open. The Dashboard, Progress, Training time and Benchmarks screens cover those runs together with standard-mode trainer runs:
 - Personal bests, trends and plateaus.
 - Sessions and active time.
 - Streaks and a daily goal.
 - Sensitivity history.
 
-The `rustyaim-cli` command line tool shows the same reports.
+The `aimadapt-cli` command line tool shows the same reports.
 
 ## Data
 
-Everything is stored locally in `%APPDATA%\RustyAim`:
-- `rustyaim.db`: SQLite.
+Everything is stored locally in `%APPDATA%\AimAdapt`:
+- `aimadapt.db`: SQLite.
 - `engine.toml`: settings profiles.
 - `scenarios\` and `workouts\`: your own files.
 
 Nothing is sent anywhere.
+
+AimAdapt used to be called RustyAim. On its first run it moves `%APPDATA%\RustyAim` to `%APPDATA%\AimAdapt` and renames the database, so your history, ratings, profiles and files carry over. Runs keep `source = 'rustyaim'` inside the database.
 
 ## Development
 
@@ -149,20 +151,20 @@ Needs Rust (stable, MSVC toolchain) and the Visual Studio C++ build tools.
 
 | Crate | Contents |
 |---|---|
-| `rustyaim-core` | KovaaK's parsing, SQLite storage, reports, Insights and program progress |
-| `rustyaim-sim` | Scenario format, field list, simulation, adaptive rating, workouts and programs. No graphics. |
-| `rustyaim-engine` | The Bevy trainer window and saving runs |
-| `rustyaim-app` | The Tauri desktop app. The UI is plain HTML/CSS/JS in `ui/`. |
-| `rustyaim-cli` | Command line reports |
+| `aimadapt-core` | KovaaK's parsing, SQLite storage, reports, Insights and program progress |
+| `aimadapt-sim` | Scenario format, field list, simulation, adaptive rating, workouts and programs. No graphics. |
+| `aimadapt-engine` | The Bevy trainer window and saving runs |
+| `aimadapt-app` | The Tauri desktop app. The UI is plain HTML/CSS/JS in `ui/`. |
+| `aimadapt-cli` | Command line reports |
 
 Running the app with `--play`, `--workout` or `--program` starts the trainer instead, so the release is a single exe.
 
 ```bash
-cargo run -p rustyaim-app
+cargo run -p aimadapt-app
 ```
 
 ```bash
-cargo run -p rustyaim-engine -- builtin:timed-flicks --adaptive --windowed
+cargo run -p aimadapt-engine -- builtin:timed-flicks --adaptive --windowed
 ```
 
 Run the tests:
@@ -171,7 +173,7 @@ Run the tests:
 cargo test --workspace
 ```
 
-Enable the pre-commit hook once per clone. It checks formatting, runs clippy and the tests, and builds `dist/RustyAim.exe`:
+Enable the pre-commit hook once per clone. It checks formatting, runs clippy and the tests, and builds `dist/AimAdapt.exe`:
 
 ```bash
 git config core.hooksPath .githooks
@@ -180,10 +182,10 @@ git config core.hooksPath .githooks
 Testing tools:
 - **Bot test:** `--smoke <folder>` has a bot play short runs and save screenshots. `--smoke-seconds` sets the run length.
 - **Separate database:** `--db <file>` keeps test runs out of your own data. The app also takes `--no-import` to skip KovaaK's.
-- **Browser preview:** `cargo run -p rustyaim-app -- --dump-snapshot crates/rustyaim-app/ui/dev-snapshot.json`, then `python -m http.server 8765 --directory crates/rustyaim-app/ui`.
+- **Browser preview:** `cargo run -p aimadapt-app -- --dump-snapshot crates/aimadapt-app/ui/dev-snapshot.json`, then `python -m http.server 8765 --directory crates/aimadapt-app/ui`.
 
 [TESTING.md](TESTING.md) has the test plan and [BACKLOG.md](BACKLOG.md) has the roadmap.
 
-Before a release, bump the version line in the [user guide](crates/rustyaim-app/ui/guide.md) and check its What's new section; a test fails until the guide's version matches. Pushing a version tag (`git tag v0.2.0` then `git push origin v0.2.0`) runs `.github/workflows/release.yml`. It builds the portable exe and both installers and attaches them to a GitHub release.
+Before a release, bump the version line in the [user guide](crates/aimadapt-app/ui/guide.md) and check its What's new section; a test fails until the guide's version matches. Pushing a version tag (`git tag v0.2.0` then `git push origin v0.2.0`) runs `.github/workflows/release.yml`. It builds the portable exe and both installers and attaches them to a GitHub release.
 
 If the repo is in a synced folder like OneDrive, move build output out of it with a local, gitignored `.cargo/config.toml` containing `[build]` and `target-dir = "C:/some/other/folder"`.

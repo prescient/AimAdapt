@@ -93,6 +93,65 @@ dependencies = [
 ]
 
 [[package]]
+name = "aimadapt-app"
+version = "0.1.0"
+dependencies = [
+ "aimadapt-core",
+ "aimadapt-engine",
+ "aimadapt-sim",
+ "chrono",
+ "notify",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+]
+
+[[package]]
+name = "aimadapt-cli"
+version = "0.1.0"
+dependencies = [
+ "aimadapt-core",
+ "anyhow",
+ "chrono",
+ "clap",
+ "notify",
+]
+
+[[package]]
+name = "aimadapt-core"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "rusqlite",
+ "serde",
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "aimadapt-engine"
+version = "0.1.0"
+dependencies = [
+ "aimadapt-core",
+ "aimadapt-sim",
+ "bevy",
+ "chrono",
+ "tempfile",
+]
+
+[[package]]
+name = "aimadapt-sim"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "serde",
+ "tempfile",
+ "thiserror 2.0.21",
+ "toml 1.2.0+spec-1.1.0",
+]
+
+[[package]]
 name = "alloc-no-stdlib"
 version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5682,65 +5741,6 @@ name = "rustversion"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
-
-[[package]]
-name = "rustyaim-app"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "notify",
- "rustyaim-core",
- "rustyaim-engine",
- "rustyaim-sim",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
-]
-
-[[package]]
-name = "rustyaim-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "clap",
- "notify",
- "rustyaim-core",
-]
-
-[[package]]
-name = "rustyaim-core"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "rusqlite",
- "serde",
- "tempfile",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "rustyaim-engine"
-version = "0.1.0"
-dependencies = [
- "bevy",
- "chrono",
- "rustyaim-core",
- "rustyaim-sim",
- "tempfile",
-]
-
-[[package]]
-name = "rustyaim-sim"
-version = "0.1.0"
-dependencies = [
- "glam",
- "serde",
- "tempfile",
- "thiserror 2.0.21",
- "toml 1.2.0+spec-1.1.0",
-]
 
 [[package]]
 name = "ruzstd"

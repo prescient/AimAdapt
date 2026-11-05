@@ -1,8 +1,8 @@
 # Scenario files
 
-RustyAim's built-in trainer plays scenarios written as TOML files. The built-in scenarios live in [`crates/rustyaim-sim/scenarios`](crates/rustyaim-sim/scenarios). Your own scenarios go in `%APPDATA%\RustyAim\scenarios`. The Play screen's editor writes them there, and you can also edit the files by hand.
+AimAdapt's built-in trainer plays scenarios written as TOML files. The built-in scenarios live in [`crates/aimadapt-sim/scenarios`](crates/aimadapt-sim/scenarios). Your own scenarios go in `%APPDATA%\AimAdapt\scenarios`. The Play screen's editor writes them there, and you can also edit the files by hand.
 
-Every field is optional. A missing field takes the default shown below, so a file only needs the values it changes. Unknown fields are rejected, which catches typos like `radiuss`. The app's editor is built from the same field list ([`crates/rustyaim-sim/src/spec.rs`](crates/rustyaim-sim/src/spec.rs)), and a test checks that this page covers every field.
+Every field is optional. A missing field takes the default shown below, so a file only needs the values it changes. Unknown fields are rejected, which catches typos like `radiuss`. The app's editor is built from the same field list ([`crates/aimadapt-sim/src/spec.rs`](crates/aimadapt-sim/src/spec.rs)), and a test checks that this page covers every field.
 
 ## Example
 
@@ -37,7 +37,7 @@ per_miss = -30.0
 - Targets are placed by angle and distance. `yaw` is degrees left (−) or right (+) of straight ahead, and `pitch` is degrees below (−) or above (+) eye level.
 - Moving targets travel in angle space and bounce off the edges of the spawn area and the room. They keep one distance (and on-screen size) unless they move forward and back, and they can jump straight up from where they are.
 - A sphere of radius `r` at distance `d` is `2 × atan(r / d)` degrees wide. For example, a 0.3 m target at 10 m is about 3.4° wide.
-- Your sensitivity (cm/360 and DPI), FOV and crosshair are player settings, not part of the scenario. They're stored in `%APPDATA%\RustyAim\engine.toml`.
+- Your sensitivity (cm/360 and DPI), FOV and crosshair are player settings, not part of the scenario. They're stored in `%APPDATA%\AimAdapt\engine.toml`.
 
 ## Fields
 
@@ -190,7 +190,7 @@ Each finished run is saved to the same database as KovaaK's runs, with `source =
 
 ## Workouts
 
-A workout is a TOML file listing scenarios to play back to back. Built-ins live in [`crates/rustyaim-sim/workouts`](crates/rustyaim-sim/workouts). Yours go in `%APPDATA%\RustyAim\workouts`, and the app's workout editor writes them there.
+A workout is a TOML file listing scenarios to play back to back. Built-ins live in [`crates/aimadapt-sim/workouts`](crates/aimadapt-sim/workouts). Yours go in `%APPDATA%\AimAdapt\workouts`, and the app's workout editor writes them there.
 
 ```toml
 name = "Morning"
@@ -212,7 +212,7 @@ Each run is saved on its own, with the workout's name attached.
 
 ## Programs
 
-A program maps weekdays to workouts. Built-ins live in [`crates/rustyaim-sim/programs`](crates/rustyaim-sim/programs). Days that aren't listed are rest days. A day can be `weak_spots = true` instead of naming a workout. That day is then built from your skill profile: a standard warm-up, your two weakest skills ×5, the next two ×4, and your strongest ×3. Untrained skills count as weakest.
+A program maps weekdays to workouts. Built-ins live in [`crates/aimadapt-sim/programs`](crates/aimadapt-sim/programs). Days that aren't listed are rest days. A day can be `weak_spots = true` instead of naming a workout. That day is then built from your skill profile: a standard warm-up, your two weakest skills ×5, the next two ×4, and your strongest ×3. Untrained skills count as weakest.
 
 ```toml
 name = "Core Week"
@@ -233,7 +233,7 @@ Workout items can carry a `block` (`warmup`, `main`, `secondary` or `maintenance
 ## Playing from the command line
 
 ```bash
-cargo run -p rustyaim-engine -- builtin:static-grid --windowed
+cargo run -p aimadapt-engine -- builtin:static-grid --windowed
 ```
 
 The argument can be `builtin:<name>`, `user:<file name without .toml>`, or a path to any `.toml` file. Options: `--adaptive`, `--workout <id>` or `--program <id> [--day mon…sun]` (instead of a scenario), `--windowed`, `--no-save`, `--db <file>` and `--seed <n>`. The same seed with the same mouse input replays the same run.

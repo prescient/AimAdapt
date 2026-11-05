@@ -1,0 +1,22 @@
+[package]
+name = "aimadapt-app"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+chrono = { version = "0.4.45", default-features = false, features = ["std", "clock", "serde"] }
+notify = "8.2.1"
+aimadapt-core = { version = "0.1.0", path = "../aimadapt-core", features = ["serde"] }
+aimadapt-engine = { version = "0.1.0", path = "../aimadapt-engine" }
+aimadapt-sim = { version = "0.1.0", path = "../aimadapt-sim" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tauri = "2"
+
+[build-dependencies]
+tauri-build = "2"
+
+[features]
+# Serve the bundled UI as a production build. `cargo tauri build` turns this on;
+# scripts/release-exe.sh passes it for a plain `cargo build --release`.
+custom-protocol = ["tauri/custom-protocol"]

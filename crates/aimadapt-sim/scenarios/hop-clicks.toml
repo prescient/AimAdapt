@@ -1,0 +1,45 @@
+name = "Hop Clicks"
+description = "A body strafing side to side that eases into each turn and jumps now and then. Click it before it times out. Trains dynamic clicking on targets that move like players."
+author = "AimAdapt"
+category = "clicking"
+skill = "dynamic_clicking"
+tags = ["clicking", "strafe", "jump"]
+
+[timing]
+duration_s = 60.0
+
+[targets]
+count = 1
+shape = "capsule"
+radius = 0.3
+height = 1.6
+color = "#ffb547"
+lifetime_s = 1.8
+respawn_delay_s = 0.1
+
+[targets.spawn]
+distance = [12.0, 16.0]
+yaw = [-30.0, 30.0]
+pitch = [-5.0, 0.0]
+min_separation = 10.0
+
+[targets.movement]
+kind = "strafe"
+speed = [4.0, 6.0]
+change_every_s = [0.4, 1.0]
+accel = 30.0
+jump_every_s = [0.6, 1.6]
+jump_height = 1.0
+jump_air_s = 0.6
+
+[scoring]
+per_kill = 100.0
+per_miss = -20.0
+per_timeout = -40.0
+
+[adaptive]
+goal = 0.85
+knob = "lifetime"
+easy = 3.5
+hard = 0.5
+start = 1.8

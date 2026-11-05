@@ -1,0 +1,50 @@
+name = "Unbroken Strafes"
+description = "A strafing body that needs 1.5 s of beam and heals fast whenever you slip off. Finish each one within 4 s. Adaptive mode rates the strafe speed at which you finish 85% of them, so only steady, unbroken tracking counts. Trains reactive tracking and smoothness."
+author = "AimAdapt"
+category = "tracking"
+skill = "reactive_tracking"
+tags = ["tracking", "reactive", "regen", "smoothness"]
+
+[timing]
+duration_s = 60.0
+
+[weapon]
+kind = "beam"
+trigger = "hold"
+damage_per_s = 100.0
+
+[targets]
+count = 1
+shape = "capsule"
+radius = 0.35
+height = 1.7
+health = 150.0
+regen_per_s = 300.0
+regen_delay_s = 0.15
+health_bar = true
+color = "#4ec3ff"
+lifetime_s = 4.0
+respawn_delay_s = 0.2
+
+[targets.spawn]
+distance = [11.0, 13.0]
+yaw = [-35.0, 35.0]
+pitch = [-4.0, 0.0]
+min_separation = 8.0
+
+[targets.movement]
+kind = "strafe"
+speed = [3.5, 5.0]
+change_every_s = [0.4, 1.2]
+accel = 25.0
+
+[scoring]
+per_kill = 100.0
+per_timeout = -50.0
+
+[adaptive]
+goal = 0.85
+knob = "target_speed"
+easy = 6.0
+hard = 120.0
+start = 18.0

@@ -1,21 +1,21 @@
 # Testing strategy
 
-RustyAim turns files it doesn't control (KovaaK's stats CSVs) into numbers people use to judge their own progress. Two kinds of failure matter most:
+AimAdapt turns files it doesn't control (KovaaK's stats CSVs) into numbers people use to judge their own progress. Two kinds of failure matter most:
 
 1. **Wrong numbers that look right.** A miscounted session or a mis-parsed score silently misleads you. This is the biggest risk.
 2. **Breaking on new input.** A game update changes the file format, or a file is caught half-written.
 
 UI glitches matter less: they're visible, and easy to spot and fix.
 
-So most testing effort goes into `rustyaim-core`, where all parsing and maths lives, and the UI is kept thin.
+So most testing effort goes into `aimadapt-core`, where all parsing and maths lives, and the UI is kept thin.
 
-The built-in trainer follows the same pattern. All game rules live in `rustyaim-sim`, which has no graphics and is tested directly. `rustyaim-engine` only feeds it mouse input and draws what it reports.
+The built-in trainer follows the same pattern. All game rules live in `aimadapt-sim`, which has no graphics and is tested directly. `aimadapt-engine` only feeds it mouse input and draws what it reports.
 
 ## What runs when
 
 | When | What | How |
 |---|---|---|
-| Every commit (pre-commit hook) | Formatting, clippy (warnings are errors), all tests, release build to `dist/RustyAim.exe` | `.githooks/pre-commit`. Enable once per clone with `git config core.hooksPath .githooks` |
+| Every commit (pre-commit hook) | Formatting, clippy (warnings are errors), all tests, release build to `dist/AimAdapt.exe` | `.githooks/pre-commit`. Enable once per clone with `git config core.hooksPath .githooks` |
 | Every push / PR | The same checks on a clean Windows machine, plus the exe uploaded as a build artifact | `.github/workflows/ci.yml` |
 | Version tag (`v0.1.0`) | Windows installers (MSI + NSIS) attached to a GitHub release | `.github/workflows/release.yml` |
 | Before a release | Real-data check and manual smoke test (below) | By hand |
@@ -33,7 +33,7 @@ These cover pure logic with small, hand-built inputs, one behaviour per test. To
 
 **Rule:** every bug fix starts with a failing unit test.
 
-### 1b. Trainer rules (`rustyaim-sim`)
+### 1b. Trainer rules (`aimadapt-sim`)
 
 These are 78 tests over the scenario format, simulation, adaptive ratings, telemetry, workouts, programs, settings and profiles. Each one steps the simulation at 240 Hz with scripted aim, so no window is needed:
 
@@ -53,22 +53,22 @@ These are 78 tests over the scenario format, simulation, adaptive ratings, telem
 - **Telemetry:** reaction, time to reach, overshoot and corrections for a scripted flick. Shots past the target read as positive "along", and aiming behind a strafing target reads as negative lead.
 - **Workouts and settings:** built-in workouts only use real scenarios, steps expand in order, display settings round-trip, and the play area is centered and clamped. A 24" area on a 42" 4K screen comes out at 2194x1234.
 - **Profiles:** game sensitivities convert to the known cm/360 (Overwatch 5.3 at 400 DPI is 65.35, Valorant 0.35 at 800 is 46.65, CS2 1.0 at 800 is 51.95). Profiles round-trip, bad ones are explained, and old single-settings files become a Default profile. The engine tests saving profiles and loading the active one or one by name.
-- **Programs:** every Core Week day is 25–33 minutes, with at most 6 drills of 3+ reps (warm-ups aside). Sunday is rest, weak-spots days put the weakest skills first, and every sub-skill has a drill tagged with it. The engine resolves each day and builds Saturday from an empty profile. In `rustyaim-core`, the skill profile counts faster lifetimes and higher speeds as gains. The week grid marks days done, today, upcoming and rest, and compares with last week; rep and carry-over gains, the streak, and training days starting at 4 AM are checked on hand-built data.
-- **Insights** (`rustyaim-core`): synthetic runs with a known weak direction, overshooting, low shots, tracking lag and a 200 ms recovery after direction changes produce those exact figures and coaching notes. Centering is the median distance from center over on-target samples only. On a lifetime rating that went from 0.80 to 0.62 s with a 0.22 s median reaction, the reaction note says the part you control is 0.40 s, down 31% against the rating's 23%.
+- **Programs:** every Core Week day is 25–33 minutes, with at most 6 drills of 3+ reps (warm-ups aside). Sunday is rest, weak-spots days put the weakest skills first, and every sub-skill has a drill tagged with it. The engine resolves each day and builds Saturday from an empty profile. In `aimadapt-core`, the skill profile counts faster lifetimes and higher speeds as gains. The week grid marks days done, today, upcoming and rest, and compares with last week; rep and carry-over gains, the streak, and training days starting at 4 AM are checked on hand-built data.
+- **Insights** (`aimadapt-core`): synthetic runs with a known weak direction, overshooting, low shots, tracking lag and a 200 ms recovery after direction changes produce those exact figures and coaching notes. Centering is the median distance from center over on-target samples only. On a lifetime rating that went from 0.80 to 0.62 s with a 0.22 s median reaction, the reaction note says the part you control is 0.40 s, down 31% against the rating's 23%.
 - **Insights for switching:** acquisition (kill to reaching the next target), on-target share while engaged and kills a minute come out exactly on a synthetic run, and old single-target "fastest hit" values aren't used as the best held.
-- **HUD wording** (`rustyaim-engine`): size ratings on tracking show time on target, on clicking a hit rate.
-- **Bars and colors** (`rustyaim-engine`): bars start above the top of a capsule, not inside it; timed targets get a time-left bar that empties, untimed ones none; timed targets change color by wave (Timed Grid's first three share a color, the next three take the other) and untimed ones keep one; switching targets show health.
-- **User guide** (`rustyaim-app`): the guide names this version, has a What's new section and a section for every page and sidebar entry, every internal link goes to a section, and it has a row for every built-in scenario, every rating and every trainer key, and an entry for every built-in workout.
-- **UI start-up** (`rustyaim-app`): app.js waits for DOMContentLoaded before its first render, so views from later scripts are defined (opening on #help used to stay on "Loading").
-- **Test databases only** (`rustyaim-app`, `rustyaim-engine`): `--dump-snapshot` and `--smoke` refuse to run without `--db`.
-- **Ratings per scenario version** (`rustyaim-engine`): a rating carries over to the same scenario and to one with a new description, but not to one with different settings.
-- **Engine record** (`rustyaim-engine`): an engine run saved through `insert_runs` gets the right score, accuracy, length and `source`, keeps separate bests for variants, and is ignored when matching KovaaK's settings.
+- **HUD wording** (`aimadapt-engine`): size ratings on tracking show time on target, on clicking a hit rate.
+- **Bars and colors** (`aimadapt-engine`): bars start above the top of a capsule, not inside it; timed targets get a time-left bar that empties, untimed ones none; timed targets change color by wave (Timed Grid's first three share a color, the next three take the other) and untimed ones keep one; switching targets show health.
+- **User guide** (`aimadapt-app`): the guide names this version, has a What's new section and a section for every page and sidebar entry, every internal link goes to a section, and it has a row for every built-in scenario, every rating and every trainer key, and an entry for every built-in workout.
+- **UI start-up** (`aimadapt-app`): app.js waits for DOMContentLoaded before its first render, so views from later scripts are defined (opening on #help used to stay on "Loading").
+- **Test databases only** (`aimadapt-app`, `aimadapt-engine`): `--dump-snapshot` and `--smoke` refuse to run without `--db`.
+- **Ratings per scenario version** (`aimadapt-engine`): a rating carries over to the same scenario and to one with a new description, but not to one with different settings.
+- **Engine record** (`aimadapt-engine`): an engine run saved through `insert_runs` gets the right score, accuracy, length and `source`, keeps separate bests for variants, and is ignored when matching KovaaK's settings.
 
 **Engine record** also has an end-to-end test: two adaptive runs and a standard one are saved through `record::save`. The first adaptive run must be a calibration run that sets no best. The second, a day later, must start from the first's rating with the day counted, play at one value, and store its value and pick for the next run's guard rails, the names must keep both modes apart, telemetry and traces must be stored, and Insights must read all three back.
 
-**Engine smoke test:** `rustyaim-engine <scenario> --smoke <folder> --db <file>` (or `--workout <id>`) has a bot that plays like a person go through short runs, then saves screenshots mid-run and on each results screen. It needs a GPU, so it's run by hand, not on CI. Check the screenshots and that the runs, with telemetry, are in the test database. Opening the app with `--db <that file>` previews Insights on bot data.
+**Engine smoke test:** `aimadapt-engine <scenario> --smoke <folder> --db <file>` (or `--workout <id>`) has a bot that plays like a person go through short runs, then saves screenshots mid-run and on each results screen. It needs a GPU, so it's run by hand, not on CI. Check the screenshots and that the runs, with telemetry, are in the test database. Opening the app with `--db <that file>` previews Insights on bot data.
 
-### 2. Fixture tests (`crates/rustyaim-core/tests/`)
+### 2. Fixture tests (`crates/aimadapt-core/tests/`)
 
 These run the real pipeline (file → parse → SQLite → reports) on real KovaaK's files in `tests/fixtures/`. Today there are 7 tests, using 3 fixtures: a clicking run, a tracking run and a 1-second run.
 
@@ -134,4 +134,4 @@ The Tauri commands (`snapshot`, `scenario`, `rescan`) build their payloads from 
 
 ## Coverage
 
-Use `cargo llvm-cov --workspace` from time to time to find untested branches in `rustyaim-core`. There's no hard percentage target; the aim is that every metric shown in the UI is covered by a unit or golden test.
+Use `cargo llvm-cov --workspace` from time to time to find untested branches in `aimadapt-core`. There's no hard percentage target; the aim is that every metric shown in the UI is covered by a unit or golden test.

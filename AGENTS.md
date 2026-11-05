@@ -1,4 +1,4 @@
-# Working on RustyAim
+# Working on AimAdapt
 
 Rules for anyone (people or coding agents) changing this repo.
 
@@ -15,7 +15,7 @@ When a bug is found, whether it's reported by a user, noticed in testing, or hit
 
 ## Keep the README current
 
-The README is how people learn what RustyAim does, so it should always describe the app as it is now. Update it in the same change as every feature, fix or behavior change that affects what it says:
+The README is how people learn what AimAdapt does, so it should always describe the app as it is now. Update it in the same change as every feature, fix or behavior change that affects what it says:
 
 - New or changed features, scenarios, settings, ratings and commands.
 - Removed features: take them out of the README too.
@@ -25,26 +25,26 @@ Before committing, reread the README sections your change touches and check noth
 
 ## Keep the user guide current
 
-The app's Help page shows [the user guide](crates/rustyaim-app/ui/guide.md). It's written for players, in more detail than the README. Update it in the same change as anything a player would notice:
+The app's Help page shows [the user guide](crates/aimadapt-app/ui/guide.md). It's written for players, in more detail than the README. Update it in the same change as anything a player would notice:
 
 - A new or changed page, button, setting, scenario, workout, rating or key in the trainer: describe it where a player would look for it.
 - A change that resets ratings or changes how something is scored: say so, in the section that explains it.
 - Every user-visible change also gets a line in **What's new**, under the current month.
-- On each release, bump the version line at the top ("This guide is for RustyAim …") and check What's new covers the release.
+- On each release, bump the version line at the top ("This guide is for AimAdapt …") and check What's new covers the release.
 
-`crates/rustyaim-app/tests/guide.rs` fails when the guide is missing a page, a built-in scenario or workout, a rating, a trainer key, a section a link points to, or the current version. Passing it isn't enough on its own: also reread the sections your change touches.
+`crates/aimadapt-app/tests/guide.rs` fails when the guide is missing a page, a built-in scenario or workout, a rating, a trainer key, a section a link points to, or the current version. Passing it isn't enough on its own: also reread the sections your change touches.
 
 ## Before committing
 
-- Commit through the pre-commit hook (`git config core.hooksPath .githooks`). It runs formatting, clippy with warnings as errors, all tests, and a release build to `dist/RustyAim.exe`. Don't skip it with `--no-verify`.
-- Close RustyAim first, or the hook can't replace `dist/RustyAim.exe`.
-- Keep [README.md](README.md) and the [user guide](crates/rustyaim-app/ui/guide.md) (see above), [SCENARIOS.md](SCENARIOS.md), [TESTING.md](TESTING.md) and [BACKLOG.md](BACKLOG.md) in step with what changed.
+- Commit through the pre-commit hook (`git config core.hooksPath .githooks`). It runs formatting, clippy with warnings as errors, all tests, and a release build to `dist/AimAdapt.exe`. Don't skip it with `--no-verify`.
+- Close AimAdapt first, or the hook can't replace `dist/AimAdapt.exe`.
+- Keep [README.md](README.md) and the [user guide](crates/aimadapt-app/ui/guide.md) (see above), [SCENARIOS.md](SCENARIOS.md), [TESTING.md](TESTING.md) and [BACKLOG.md](BACKLOG.md) in step with what changed.
 
 ## Data and privacy
 
 - The repo is public. Don't commit personal data: real databases, `dev-snapshot.json` exports, or screenshots of a real history.
 - Use the bot (`--smoke`), a separate database (`--db`) and `--no-import` for test and demo data.
-- Never edit a user's own KovaaK's files. Only create new files, with a `RustyAim -` prefix.
+- Never edit a user's own KovaaK's files. Only create new files, with an `AimAdapt -` prefix.
 
 ## Content
 

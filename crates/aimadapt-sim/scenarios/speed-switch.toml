@@ -1,0 +1,42 @@
+name = "Speed Switch"
+description = "Four targets that barely move and melt in a short burst of beam. Kill one, snap to the next. Adaptive mode rates the pace between kills. Trains speed switching."
+author = "AimAdapt"
+category = "switching"
+skill = "speed_switching"
+tags = ["switching", "speed"]
+
+[timing]
+duration_s = 60.0
+
+[weapon]
+kind = "beam"
+trigger = "hold"
+damage_per_s = 200.0
+
+[targets]
+count = 4
+radius = 0.4
+health = 30.0
+color = "#c38bff"
+
+[targets.spawn]
+distance = [11.0, 13.0]
+yaw = [-45.0, 45.0]
+pitch = [-6.0, 18.0]
+min_separation = 15.0
+
+[targets.movement]
+kind = "random"
+speed = [0.5, 1.0]
+change_every_s = [1.0, 2.0]
+vertical = 0.5
+
+[scoring]
+per_kill = 100.0
+
+[adaptive]
+goal = 0.85
+knob = "kill_pace"
+easy = 3.0
+hard = 0.4
+start = 1.5
