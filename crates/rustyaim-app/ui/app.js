@@ -119,7 +119,7 @@ function render() {
     return;
   }
   if (!ui.snap) return;
-  const views = { dashboard, play, edit, workout, program, insights, progress, training, benchmarks, library, settings };
+  const views = { dashboard, play, edit, workout, program, insights, progress, training, benchmarks, library, settings, help: helpPage };
   main.innerHTML = (views[view] || dashboard)(arg);
   if (view === "progress") afterProgress(arg);
 }
@@ -141,7 +141,8 @@ const kpi = (label, value, note = "") =>
   `<div class="kpi"><div class="kpi-label">${label}</div><div class="kpi-value">${value}</div>${note ? `<div class="kpi-note">${note}</div>` : ""}</div>`;
 
 function head(eyebrow, title, actions = "") {
-  return `<header class="page-head"><div><div class="eyebrow">${eyebrow}</div><h1>${title}</h1></div>${actions}</header>`;
+  const link = typeof helpLink === "function" ? helpLink() : "";
+  return `<header class="page-head"><div><div class="eyebrow">${eyebrow}</div><h1>${title}</h1></div><div class="head-actions">${actions}${link}</div></header>`;
 }
 
 const rescanButton = () =>
@@ -731,7 +732,10 @@ document.addEventListener("change", (e) => {
 window.addEventListener("hashchange", () => {
   render();
   window.scrollTo(0, 0);
+  if (route().view === "help") scrollToHelp();
 });
 
 if (tauri) tauri.event.listen("runs-imported", () => load());
-load();
+// Wait for every script: the first render needs views from the files loaded after
+// this one (trainer.js … help.js), and data can arrive before they've run.
+document.addEventListener("DOMContentLoaded", () => load());

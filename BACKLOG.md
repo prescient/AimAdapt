@@ -146,7 +146,8 @@ Last reviewed: Nov 4, 2026 (after the first playtest session).
 ## 7. App screens
 
 ### Done
-- [x] Navigation: Dashboard, Play, Progress, Program, Insights, Training time, Benchmarks, Library & import, Settings.
+- [x] Navigation: Dashboard, Play, Progress, Program, Insights, Training time, Benchmarks, Library & import, Settings, Help.
+- [x] Help: the user guide (`ui/guide.md`) with contents, search and What's new. Every page's header links to its section. A test keeps it in step with the pages, built-ins, ratings, trainer keys and version.
 - [x] Dashboard, Progress, Training time and Benchmarks cover KovaaK's runs and standard trainer runs. Adaptive runs are charted in Insights instead, because their result is a time or speed.
 
 ### To do

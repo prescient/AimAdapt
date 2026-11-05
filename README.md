@@ -6,6 +6,8 @@ Screenshots use demo data played by the built-in test bot.
 
 ![Timed Flicks in the trainer](docs/screenshots/game-clicking.jpg)
 
+The app's Help page has the full [user guide](crates/rustyaim-app/ui/guide.md): every page, the trainer's keys, how ratings work, and what each built-in scenario trains.
+
 ## Download
 
 Download `RustyAim_<version>_x64-portable.exe` from [releases](../../releases) and run it. There's nothing to install. A setup .exe and an .msi are attached too, if you want a Start menu entry and an uninstaller.
@@ -182,6 +184,6 @@ Testing tools:
 
 [TESTING.md](TESTING.md) has the test plan and [BACKLOG.md](BACKLOG.md) has the roadmap.
 
-Pushing a version tag (`git tag v0.2.0` then `git push origin v0.2.0`) runs `.github/workflows/release.yml`. It builds the portable exe and both installers and attaches them to a GitHub release.
+Before a release, bump the version line in the [user guide](crates/rustyaim-app/ui/guide.md) and check its What's new section; a test fails until the guide's version matches. Pushing a version tag (`git tag v0.2.0` then `git push origin v0.2.0`) runs `.github/workflows/release.yml`. It builds the portable exe and both installers and attaches them to a GitHub release.
 
 If the repo is in a synced folder like OneDrive, move build output out of it with a local, gitignored `.cargo/config.toml` containing `[build]` and `target-dir = "C:/some/other/folder"`.

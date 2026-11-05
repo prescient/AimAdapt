@@ -58,6 +58,8 @@ These are 78 tests over the scenario format, simulation, adaptive ratings, telem
 - **Insights for switching:** acquisition (kill to reaching the next target), on-target share while engaged and kills a minute come out exactly on a synthetic run, and old single-target "fastest hit" values aren't used as the best held.
 - **HUD wording** (`rustyaim-engine`): size ratings on tracking show time on target, on clicking a hit rate.
 - **Bars and colors** (`rustyaim-engine`): bars start above the top of a capsule, not inside it; timed targets get a time-left bar that empties, untimed ones none; timed targets change color by wave (Timed Grid's first three share a color, the next three take the other) and untimed ones keep one; switching targets show health.
+- **User guide** (`rustyaim-app`): the guide names this version, has a What's new section and a section for every page and sidebar entry, every internal link goes to a section, and it has a row for every built-in scenario, every rating and every trainer key, and an entry for every built-in workout.
+- **UI start-up** (`rustyaim-app`): app.js waits for DOMContentLoaded before its first render, so views from later scripts are defined (opening on #help used to stay on "Loading").
 - **Test databases only** (`rustyaim-app`, `rustyaim-engine`): `--dump-snapshot` and `--smoke` refuse to run without `--db`.
 - **Ratings per scenario version** (`rustyaim-engine`): a rating carries over to the same scenario and to one with a new description, but not to one with different settings.
 - **Engine record** (`rustyaim-engine`): an engine run saved through `insert_runs` gets the right score, accuracy, length and `source`, keeps separate bests for variants, and is ignored when matching KovaaK's settings.
