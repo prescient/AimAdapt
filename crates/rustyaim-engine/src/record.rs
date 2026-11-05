@@ -269,17 +269,19 @@ fn mix_id(m: Mix) -> &'static str {
     }
 }
 
-/// The rating to start an adaptive run from: the last one for this scenario with
-/// the same knob, aged by the days since, and the best value ever hit.
+/// The rating to start an adaptive run from: the last one from this exact version
+/// of the scenario (same fingerprint), aged by the days since, and the best value
+/// held on it. Any change that affects play starts over with a calibration run.
 pub fn prior(db: &Db, scenario: &Scenario, now: chrono::NaiveDateTime) -> Option<Prior> {
     let knob = knob_id(scenario.adaptive.resolve(scenario).knob);
-    let last = db.last_rating(&scenario.name).ok()??;
+    let hash = scenario.fingerprint();
+    let last = db.last_rating_for(&scenario.name, &hash).ok()??;
     if last.knob != knob {
         return None;
     }
     let then = chrono::NaiveDateTime::parse_from_str(&last.finished_at, "%Y-%m-%dT%H:%M:%S%.3f").ok()?;
     let days = ((now - then).num_minutes() as f32 / 1440.0).max(0.0);
-    let fastest = db.fastest_hit(&scenario.name, knob).ok().flatten().map(|v| v as f32);
+    let fastest = db.fastest_hit(&scenario.name, knob, Some(&hash)).ok().flatten().map(|v| v as f32);
     let last_run = last.run_pick.as_deref().and_then(Pick::parse).zip(last.success_rate.map(|r| r as f32));
     Some(Prior { theta: last.theta as f32, slope: last.slope as f32, sd: last.sd as f32, days, fastest, last_run })
 }
@@ -368,6 +370,30 @@ mod tests {
         let mut harder = scenario.clone();
         harder.targets.radius = 0.2;
         assert_eq!(best_score(&db, &harder), None, "variants keep separate bests");
+    }
+
+    /// Playtest: Stability Switch's rating fell to 4 deg/s under the old scoring
+    /// (travel between targets counted), then carried over to the new scoring, so
+    /// targets crawled for many runs. A rating only carries over from the same
+    /// version of the scenario.
+    #[test]
+    fn ratings_dont_carry_over_to_a_changed_scenario() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("t.db");
+        let scenario = Scenario { name: "Timed Flicks".into(), ..Default::default() };
+        let settings = PlayerSettings::default();
+        let first = play(&scenario, true, None);
+        save(&path, &info(&scenario, &first, &settings, 1)).unwrap();
+        let db = Db::open(&path).unwrap();
+        let later = finished() + chrono::Duration::days(1);
+        assert!(prior(&db, &scenario, later).is_some(), "same scenario: carried over");
+        let mut changed = scenario.clone();
+        changed.targets.radius *= 0.7;
+        assert_eq!(prior(&db, &changed, later), None, "changed scenario: calibrate again");
+        // Changes that don't affect play (the description) keep the rating.
+        let mut reworded = scenario.clone();
+        reworded.description = "Same drill, new words.".into();
+        assert!(prior(&db, &reworded, later).is_some());
     }
 
     #[test]

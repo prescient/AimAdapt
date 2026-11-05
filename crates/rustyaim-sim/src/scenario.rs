@@ -492,6 +492,15 @@ impl Scenario {
         let half_w = self.arena.size[0] / 2.0;
         check(sp.distance.1 + t.radius < half_w.max(self.arena.size[2] / 2.0), "spawn distance reaches past the walls");
         p.extend(self.adaptive.problems());
+        if self.weapon.kind == WeaponKind::Hitscan
+            && self.adaptive.knob == crate::adaptive::Knob::TargetSpeed
+            && self.targets.lifetime_s <= 0.0
+        {
+            p.push(
+                "with a hitscan weapon, adaptive target speed needs a target lifetime: a target counts as a                  success when it's killed before it times out"
+                    .into(),
+            );
+        }
         p
     }
 }
@@ -509,6 +518,18 @@ pub fn parse_color(s: &str) -> Option<[f32; 3]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Hitscan with an adaptive target-speed knob needs a lifetime: without one a
+    /// careful player never fails, so the rating would climb forever.
+    #[test]
+    fn hitscan_target_speed_needs_a_lifetime() {
+        let mut s = Scenario::default();
+        s.targets.movement.kind = MovementKind::Strafe;
+        s.adaptive.knob = crate::adaptive::Knob::TargetSpeed;
+        assert!(s.problems().iter().any(|p| p.contains("lifetime")), "{:?}", s.problems());
+        s.targets.lifetime_s = 1.5;
+        assert!(s.problems().is_empty(), "{:?}", s.problems());
+    }
 
     #[test]
     fn empty_file_is_the_default_scenario() {

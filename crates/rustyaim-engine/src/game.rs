@@ -266,8 +266,10 @@ struct TargetView {
 struct TargetAssets {
     mesh: Handle<Mesh>,
     base: Color,
-    /// Every other timed target's color, when colors alternate.
+    /// The second color for timed targets, when colors alternate.
     alt: Option<Color>,
+    /// Targets per wave: the scenario's target count.
+    wave: u32,
     radius: f32,
     /// A 1 m square facing +Z, and the bar materials: background, health, time left.
     bar: Handle<Mesh>,
@@ -442,6 +444,7 @@ fn rebuild_world(
         mesh,
         base: color(&tc.color),
         alt: tc.alternate_colors.then(|| color(&tc.alt_color)),
+        wave: tc.count.max(1),
         radius: tc.radius,
         bar: meshes.add(Rectangle::new(1.0, 1.0)),
         bar_back: materials.add(flat(Color::srgba(0.0, 0.0, 0.0, 1.0))),
@@ -809,11 +812,13 @@ fn sync_targets(
     }
 }
 
-/// A target's own color: timed targets alternate between two colors when the
-/// scenario says so, so a new target stands out from the one before it.
+/// A target's own color. When the scenario alternates colors, timed targets
+/// change color by wave: with three targets up, the first three are one color, the
+/// next three the other, and so on. A wave's color says how old its targets are.
 fn base_color(assets: &TargetAssets, t: &rustyaim_sim::sim::Target) -> Color {
+    let wave = (t.no().max(1) - 1) / assets.wave;
     match assets.alt {
-        Some(alt) if t.time_left().is_some() && t.no().is_multiple_of(2) => alt,
+        Some(alt) if t.time_left().is_some() && wave % 2 == 1 => alt,
         _ => assets.base,
     }
 }
@@ -1111,6 +1116,7 @@ mod tests {
             mesh: Handle::default(),
             base: color(&s.targets.color),
             alt: s.targets.alternate_colors.then(|| color(&s.targets.alt_color)),
+            wave: s.targets.count.max(1),
             radius: s.targets.radius,
             bar: Handle::default(),
             bar_back: Handle::default(),
@@ -1141,19 +1147,34 @@ mod tests {
         assert!(bars_for(&track, &sim.targets()[0]).is_empty());
     }
 
-    /// Playtest idea: alternate colors so a fresh timed target stands out from the
-    /// one before it.
+    /// Playtest: alternating every target made Timed Grid open with mixed colors
+    /// (red, blue, red), as confusing as one color. Colors go by wave instead: the
+    /// first three are one color, the next three the other, and so on.
     #[test]
-    fn timed_targets_alternate_colors() {
+    fn timed_targets_change_color_by_wave() {
         let s = builtin("builtin:timed-grid");
+        assert_eq!(s.targets.count, 3);
         let a = assets(&s);
-        let sim = Sim::new(s.clone(), 1);
-        let colors: Vec<(u32, Color)> = sim.targets().iter().map(|t| (t.no(), base_color(&a, t))).collect();
-        for w in colors.windows(2) {
-            if w[1].0 == w[0].0 + 1 {
-                assert_ne!(w[0].1, w[1].1, "consecutive targets differ: {colors:?}");
+        let mut sim = Sim::new(s.clone(), 1);
+        let mut seen: std::collections::BTreeMap<u32, Color> = Default::default();
+        for _ in 0..(240 * 20) {
+            for t in sim.targets() {
+                seen.insert(t.no(), base_color(&a, t));
             }
+            let aim = sim.targets()[0].pos.normalize();
+            sim.step(1.0 / 240.0, Input { aim, fire_pressed: true, fire_held: true });
+            sim.step(1.0 / 240.0, Input { aim: Vec3::Y, fire_pressed: false, fire_held: false });
         }
+        assert!(seen.len() >= 9, "{} targets", seen.len());
+        for (&no, &c) in &seen {
+            let wave_color = if ((no - 1) / 3) % 2 == 0 { a.base } else { a.alt.unwrap() };
+            assert_eq!(c, wave_color, "target {no}");
+        }
+        // One target at a time: every new target switches color.
+        let one = builtin("builtin:timed-flicks");
+        let a = assets(&one);
+        let sim = Sim::new(one, 1);
+        assert_eq!(base_color(&a, &sim.targets()[0]), a.base);
         // Untimed targets keep one color.
         let track = builtin("builtin:switch-track");
         let a = assets(&track);

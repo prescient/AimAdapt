@@ -214,6 +214,9 @@ fn is_trainer_launch(args: &[String]) -> bool {
     args.iter().any(|a| matches!(a.as_str(), "--play" | "--workout" | "--program"))
 }
 
+/// Development options that must come with `--db`.
+const DEV_FLAGS: &[&str] = &["--dump-snapshot"];
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     // Trainer mode: no app window, no import, just the game.
@@ -221,6 +224,10 @@ fn main() {
         std::process::exit(rustyaim_engine::run_from_args(&args[1..]));
     }
 
+    if let Err(e) = rustyaim_core::db::require_test_db(&args, DEV_FLAGS) {
+        eprintln!("rustyaim: {e}");
+        std::process::exit(2);
+    }
     let no_import = args.iter().any(|a| a == "--no-import");
     // `--db <file>` uses another database, e.g. a test one.
     let db_path = match args.iter().position(|a| a == "--db").and_then(|i| args.get(i + 1)) {
@@ -291,6 +298,18 @@ mod tests {
 
     fn args(a: &[&str]) -> Vec<String> {
         std::iter::once("RustyAim.exe").chain(a.iter().copied()).map(String::from).collect()
+    }
+
+    /// Regression: a `--dump-snapshot` run from an agent's shell without `--db`
+    /// opened the real database. The write landed in the shell's private copy of
+    /// `%APPDATA%`, which then hid the real database from every later check.
+    #[test]
+    fn dump_snapshot_needs_a_test_database() {
+        let check = |a: &[&str]| rustyaim_core::db::require_test_db(&args(a), DEV_FLAGS);
+        assert!(check(&["--dump-snapshot", "out.json"]).is_err());
+        assert!(check(&["--no-import", "--dump-snapshot", "out.json"]).is_err());
+        assert!(check(&["--db", "test.db", "--dump-snapshot", "out.json"]).is_ok());
+        assert!(check(&[]).is_ok(), "a normal launch uses the real database");
     }
 
     /// Regression: Start on a program day or workout opened a second app window

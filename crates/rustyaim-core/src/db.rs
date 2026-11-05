@@ -112,6 +112,21 @@ pub fn default_path() -> std::io::Result<std::path::PathBuf> {
     Ok(data_dir()?.join("rustyaim.db"))
 }
 
+/// Options that exist for development and testing (`--dump-snapshot`, `--smoke`)
+/// must name their own database with `--db`. Run from a packaged tool such as an
+/// agent's shell, a write under `%APPDATA%` lands in that tool's private copy,
+/// which then hides the real database from it; and bot runs don't belong in a
+/// player's history anyway.
+pub fn require_test_db(args: &[String], dev_flags: &[&str]) -> Result<(), String> {
+    let has = |f: &str| args.iter().any(|a| a == f);
+    match dev_flags.iter().find(|f| has(f)) {
+        Some(flag) if !has("--db") => {
+            Err(format!("{flag} only runs against a test database: add --db <file>. It never uses your real history."))
+        }
+        _ => Ok(()),
+    }
+}
+
 /// `%APPDATA%\RustyAim`, created if needed. Holds the database, engine settings and
 /// the player's own scenarios.
 pub fn data_dir() -> std::io::Result<std::path::PathBuf> {

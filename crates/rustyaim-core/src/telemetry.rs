@@ -339,15 +339,27 @@ impl Db {
         Ok(true)
     }
 
-    /// The latest adaptive rating for a scenario, to start the next run from.
+    /// The latest adaptive rating for a scenario, for showing.
     pub fn last_rating(&self, base_scenario: &str) -> Result<Option<StoredRating>, DbError> {
+        self.last_rating_where(base_scenario, None)
+    }
+
+    /// The latest adaptive rating from this exact version of a scenario (its
+    /// fingerprint), to start the next run from. A rating earned under other
+    /// settings or scoring isn't on the same scale.
+    pub fn last_rating_for(&self, base_scenario: &str, hash: &str) -> Result<Option<StoredRating>, DbError> {
+        self.last_rating_where(base_scenario, Some(hash))
+    }
+
+    fn last_rating_where(&self, base_scenario: &str, hash: Option<&str>) -> Result<Option<StoredRating>, DbError> {
         self.conn()
             .query_row(
                 "SELECT e.knob, e.rating, e.theta, e.slope, e.rating_sd, r.finished_at, e.run_pick, e.success_rate
                  FROM engine_runs e JOIN runs r ON r.id = e.run_id
                  WHERE e.base_scenario = ?1 AND e.adaptive = 1 AND e.rating IS NOT NULL AND e.theta IS NOT NULL
+                   AND (?2 IS NULL OR r.scenario_hash = ?2)
                  ORDER BY r.finished_at DESC LIMIT 1",
-                [base_scenario],
+                rusqlite::params![base_scenario, hash],
                 |r| {
                     Ok(StoredRating {
                         knob: r.get(0)?,
@@ -368,14 +380,16 @@ impl Db {
     /// with this knob: the shortest lifetime or smallest size, or the highest
     /// tracking speed. Runs from before fixed-difficulty runs (schema v6) stored
     /// single-target bests instead, so they're left out.
-    pub fn fastest_hit(&self, base_scenario: &str, knob: &str) -> Result<Option<f64>, DbError> {
+    /// With `hash`, only runs of that exact version of the scenario count.
+    pub fn fastest_hit(&self, base_scenario: &str, knob: &str, hash: Option<&str>) -> Result<Option<f64>, DbError> {
         let agg = if knob == "target_speed" { "MAX" } else { "MIN" };
         self.conn().query_row(
             &format!(
-                "SELECT {agg}(fastest) FROM engine_runs
-                 WHERE base_scenario = ?1 AND knob = ?2 AND run_value IS NOT NULL"
+                "SELECT {agg}(e.fastest) FROM engine_runs e JOIN runs r ON r.id = e.run_id
+                 WHERE e.base_scenario = ?1 AND e.knob = ?2 AND e.run_value IS NOT NULL
+                   AND (?3 IS NULL OR r.scenario_hash = ?3)"
             ),
-            [base_scenario, knob],
+            rusqlite::params![base_scenario, knob, hash],
             |r| r.get(0),
         )
     }

@@ -34,7 +34,14 @@ pub use game::{PlayOptions, PlayStep, run};
 /// `--smoke <folder>`, which has a bot play short versions of the runs
 /// (`--smoke-seconds`, default 4), saves screenshots in the folder and exits; it's
 /// for checking the engine works.
+/// Development options that must come with `--db`.
+pub const DEV_FLAGS: &[&str] = &["--smoke"];
+
 pub fn run_from_args(args: &[String]) -> i32 {
+    if let Err(e) = rustyaim_core::db::require_test_db(args, DEV_FLAGS) {
+        eprintln!("rustyaim: {e}");
+        return 2;
+    }
     match parse_and_run(args) {
         Ok(()) => 0,
         Err(e) => {
@@ -211,5 +218,14 @@ mod tests {
         for item in &sat.items {
             rustyaim_sim::library::resolve(&item.scenario, none).unwrap();
         }
+    }
+
+    /// Bot runs must never land in a player's history, so `--smoke` needs `--db`.
+    #[test]
+    fn smoke_runs_need_a_test_database() {
+        let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(run_from_args(&a(&["--play", "builtin:timed-flicks", "--smoke", "shots"])), 2);
+        assert!(rustyaim_core::db::require_test_db(&a(&["--smoke", "shots", "--db", "t.db"]), DEV_FLAGS).is_ok());
+        assert!(rustyaim_core::db::require_test_db(&a(&["--play", "builtin:timed-flicks"]), DEV_FLAGS).is_ok());
     }
 }

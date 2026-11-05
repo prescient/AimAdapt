@@ -311,7 +311,7 @@ pub fn overview(db: &Db) -> Result<Vec<ScenarioSummary>, DbError> {
                 [&s.scenario, &last.knob],
                 |r| r.get(0),
             )?;
-            s.fastest = db.fastest_hit(&s.scenario, &last.knob)?;
+            s.fastest = db.fastest_hit(&s.scenario, &last.knob, None)?;
             s.latest_rating = Some(last.rating);
             s.knob = Some(last.knob);
         }
@@ -1230,9 +1230,9 @@ mod tests {
         let mut db = Db::open_in_memory().unwrap();
         let old = EngineRun { fastest: Some(0.2), run_value: None, run_pick: None, ..clicking_run(0.8) };
         save(&mut db, 1, &old);
-        assert_eq!(db.fastest_hit("Timed Flicks", "lifetime").unwrap(), None);
+        assert_eq!(db.fastest_hit("Timed Flicks", "lifetime", None).unwrap(), None);
         save(&mut db, 2, &clicking_run(0.62));
-        assert_eq!(db.fastest_hit("Timed Flicks", "lifetime").unwrap(), Some(0.62 * 0.8));
+        assert_eq!(db.fastest_hit("Timed Flicks", "lifetime", None).unwrap(), Some(0.62 * 0.8));
         let i = scenario(&db, "Timed Flicks").unwrap().unwrap();
         assert_eq!(i.runs[0].fastest, None);
         assert_eq!(i.runs[1].fastest, Some(0.62 * 0.8));

@@ -87,7 +87,7 @@ per_miss = -30.0
 | `targets.lifetime_s` | `0.0` | A target disappears as a timeout after this many seconds. 0 means it stays until it's destroyed. |
 | `targets.shrink_to` | `1.0` | Size at the end of its lifetime, as a share of the radius. Needs `lifetime_s`. |
 | `targets.timer_bar` | `true` | Show a bar above each target that times out, emptying as its time runs out. |
-| `targets.alternate_colors` | `true` | Targets that time out switch between `color` and `alt_color`, so each new target looks different from the one before. |
+| `targets.alternate_colors` | `true` | Targets that time out change color by wave: the first `count` targets use `color`, the next `count` use `alt_color`, and so on. With three targets up, the grid turns over from three of one color to three of the other, so a target's color says which wave it's from. |
 | `targets.alt_color` | `"#4da3ff"` | The second color. The default blue against the default orange-red stays distinct for common kinds of color blindness. |
 | `targets.health_bar` | `false` | Show each target's health in a bar above it. Useful with `regen_per_s`, so you can see a target healing. |
 
@@ -131,9 +131,9 @@ Every scenario can be played in **Standard** mode, at the difficulty written in 
 - **Target size** (radius in meters).
 - **Kill pace** (seconds between kills) for speed switching. "1.50 s" means 85% of your kills come within 1.5 s of the one before, which is about 45 kills a minute.
 
-**How the rating works.** The trainer models your chance of success at each value as an S-shaped curve. It keeps a probability estimate of where that curve sits and how steep it is, so it knows how sure it is, much like the Glicko version of Elo. Each outcome updates the estimate by how surprising it was. Succeeding at a value harder than your rating moves it more than succeeding at your level, and failing at a harder value costs less than failing at your level. The next run starts from your last rating. Its uncertainty grows with the days since you played, so after a break the rating moves more again.
+**How the rating works.** The trainer models your chance of success at each value as an S-shaped curve. It keeps a probability estimate of where that curve sits and how steep it is, so it knows how sure it is, much like the Glicko version of Elo. Each outcome updates the estimate by how surprising it was. Succeeding at a value harder than your rating moves it more than succeeding at your level, and failing at a harder value costs less than failing at your level. The next run starts from your last rating on the same version of the scenario. Any change that affects play (its fingerprint) starts over with a calibration run, because a rating earned under other settings isn't on the same scale. The uncertainty grows with the days since you played, so after a break the rating moves more again.
 
-- **Clicking:** a target is a success if you destroy it before it times out with at most one miss on it. Spraying clicks doesn't count. A timeout is a failure.
+- **Clicking:** a target is a success if you destroy it before it times out with at most one miss on it. Spraying clicks doesn't count. A timeout is a failure. With a hitscan weapon, lifetime, size and target speed are all set target by target, and target speed needs `targets.lifetime_s` (without a timer a careful player would never fail).
 - **Tracking:** each `segment_s`-second segment is one outcome: the share of that time the crosshair was on target, whether or not you're firing. With `engaged_only`, only time while a target is damaged and not yet healed counts, so the trip to a fresh target after a kill isn't off target, but leaving a half-killed target is, until it heals.
 - **Kill pace:** a kill within the pace of the one before is a success. Each full stretch of that length with no kill is a failure, and the late kill that ends it doesn't count as a success. Speed Switch, the built-in kill-pace scenario, has no target timers.
 

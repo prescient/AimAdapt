@@ -25,7 +25,7 @@ Requirements: Windows 10 or 11 with the WebView2 runtime (included with Windows 
   - **Switching:** speed, evasive, stability.
 - Hitscan and beam weapons; click, hold or always-on triggers.
 - Sphere and capsule targets, with optional lifetime, shrink and health regeneration.
-- Timed targets show a time-left bar and alternate between two colors, so a new target stands out from the one before. Optional health bars.
+- Timed targets show a time-left bar and change color by wave (three red, then three blue, then three red on Timed Grid), so newer targets stand out from older ones. Optional health bars.
 - Movement: still, strafing or random.
 
 ![Results screen](docs/screenshots/game-results.jpg)
@@ -34,7 +34,7 @@ Requirements: Windows 10 or 11 with the WebView2 runtime (included with Windows 
 
 Each scenario has one difficulty setting: target lifetime for timed clicking, target speed for tracking, kill pace for speed switching. Adaptive mode estimates the value you succeed at 85% of the time, along with how certain that estimate is.
 
-- **How it updates:** a Bayesian estimate similar to Glicko. A surprising result moves the rating more than an expected one. The next run starts from your last rating, and the uncertainty grows with the days since you last played.
+- **How it updates:** a Bayesian estimate similar to Glicko. A surprising result moves the rating more than an expected one. The next run starts from your last rating on the same version of the scenario, and the uncertainty grows with the days since you last played. Changing a scenario's settings starts it over.
 - **Calibration run:** your first adaptive run on a scenario changes difficulty as you play, to find your level within the run.
 - **One difficulty per run after that:** every later run plays at a single value for the whole run, shown at the start ("This run: 0.62 s"). The value is picked by chance of success:
 

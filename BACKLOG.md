@@ -25,7 +25,8 @@ Last reviewed: Nov 4, 2026 (after the first playtest session).
 - [x] The app's exe runs the trainer with `--play`, `--workout` or `--program`, so the release is a single file.
 - [x] `--smoke` bot that plays like a person, for end-to-end checks and demo data.
 - [x] Moving targets bounce off the room's floor, ceiling and walls, not just their spawn area (Float Track sank through the floor). From [playtesting](PLAYTEST.md).
-- [x] Time-left bars on timed targets, and timed targets alternate between two colors (orange-red and blue by default), so the next to expire and the newest are easy to tell apart. Health bars for switching targets that heal. All scenario options. From [playtesting](PLAYTEST.md).
+- [x] Time-left bars on timed targets, and timed targets change color by wave (orange-red, then blue, by default), so older and newer targets are easy to tell apart. Health bars for switching targets that heal. All scenario options. From [playtesting](PLAYTEST.md).
+- [x] `--dump-snapshot` and `--smoke` only run against a test database (`--db`).
 
 ### To do
 - [ ] `todo` P1 Pause menu and pausing on focus loss (Esc quits straight away today).
@@ -60,7 +61,7 @@ Last reviewed: Nov 4, 2026 (after the first playtest session).
 ### Done
 - [x] Each scenario rates one knob in real units: target lifetime (s), tracking speed (°/s), size (m) or kill pace (s between kills).
 - [x] A Bayesian, Glicko-like estimate of the 85% point and how steeply success falls off.
-  - It carries over between runs, and its uncertainty widens with days away.
+  - It carries over between runs of the same version of a scenario, and its uncertainty widens with days away. Changing a scenario's settings starts it over with a calibration run.
 - [x] Adapt between runs, not during them (from [playtesting](PLAYTEST.md): changing difficulty target by target felt chaotic).
   - The first adaptive run on a scenario is a calibration run that adapts as you play.
   - Every later run plays at one value, shown up front ("This run: 0.62 s"), picked from the mix: at your level (80–90% chance), stretch (55–72%) and easy (93–97%).

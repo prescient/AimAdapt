@@ -61,6 +61,9 @@ pub struct Target {
     spawned_at: f32,
     /// Lifetime and size it was given at spawn (adaptive mode changes them over time).
     lifetime: f32,
+    /// Adaptive hitscan target speed: this target's own speed range (m/s), kept
+    /// through direction changes.
+    speed: Option<Range>,
     base_radius: f32,
     height: f32,
     shots: u32,
@@ -627,12 +630,17 @@ impl Sim {
         events
     }
 
-    /// Whether the adaptive knob is set per target (lifetime, or size when clicking)
-    /// rather than per tracking segment.
+    /// Whether the adaptive knob is set per target (lifetime, or size or speed when
+    /// clicking) rather than per tracking segment. Tracking segments come from beam
+    /// ticks, so a hitscan scenario has to be rated target by target.
     fn per_target(&self) -> bool {
         self.adaptive.as_ref().is_some_and(|a| {
-            a.rating.cfg.knob == Knob::Lifetime
-                || (a.rating.cfg.knob == Knob::Radius && self.scenario.weapon.kind == WeaponKind::Hitscan)
+            let hitscan = self.scenario.weapon.kind == WeaponKind::Hitscan;
+            match a.rating.cfg.knob {
+                Knob::Lifetime => true,
+                Knob::Radius | Knob::TargetSpeed => hitscan,
+                Knob::KillPace | Knob::Auto => false,
+            }
         })
     }
 
@@ -993,7 +1001,8 @@ impl Sim {
                 t.next_change -= dt;
                 if t.next_change <= 0.0 {
                     t.next_change = self.rng.range(mv.change_every_s);
-                    t.rate = new_rate(&mut self.rng, &mv, t.distance, t.pitch, t.rate);
+                    let own = Movement { speed: t.speed.unwrap_or(mv.speed), ..mv.clone() };
+                    t.rate = new_rate(&mut self.rng, &own, t.distance, t.pitch, t.rate);
                     t.last_change = now;
                 }
                 // Bounce off the edges of the spawn area, and off the floor, ceiling
@@ -1064,11 +1073,10 @@ impl Sim {
         let tc = self.current.targets.clone();
         let (yaw, pitch) = angles(pos);
         let distance = pos.length();
-        let rate = new_rate(&mut self.rng, &tc.movement, distance, pitch, [0.0, 0.0]);
-        let next_change = self.rng.range(tc.movement.change_every_s);
         let now = self.elapsed();
         let mut lifetime = tc.lifetime_s;
         let mut radius = tc.radius;
+        let mut speed = None;
         let mut value = None;
         if self.per_target()
             && let Some(a) = &mut self.adaptive
@@ -1076,12 +1084,16 @@ impl Sim {
             let (v, chance, pick) = a.next(&mut self.rng);
             match a.rating.cfg.knob {
                 Knob::Lifetime => lifetime = v,
+                Knob::TargetSpeed => speed = Some(speed_for(&self.scenario, v)),
                 _ => radius = v,
             }
             value = Some((v, chance, pick));
         } else if let Some(seg) = self.adaptive.as_ref().and_then(|a| a.segment) {
             value = Some(seg);
         }
+        let own = Movement { speed: speed.unwrap_or(tc.movement.speed), ..tc.movement.clone() };
+        let rate = new_rate(&mut self.rng, &own, distance, pitch, [0.0, 0.0]);
+        let next_change = self.rng.range(tc.movement.change_every_s);
         let height = tc.height * radius / self.scenario.targets.radius.max(1e-6);
         self.targets.push(Target {
             id,
@@ -1098,6 +1110,7 @@ impl Sim {
             age: 0.0,
             spawned_at: now,
             lifetime,
+            speed,
             base_radius: radius,
             height,
             shots: 0,
@@ -1248,6 +1261,7 @@ impl Rng {
 mod tests {
     use super::*;
     use crate::scenario::Scenario;
+    use std::collections::HashMap;
 
     const FRAME: f32 = 1.0 / 240.0;
 
@@ -1516,6 +1530,83 @@ mod tests {
         }
         let a = sim.result().adaptive.unwrap();
         assert!(a.value > start && a.success_rate == Some(0.0), "{a:?}");
+    }
+
+    fn hitscan_strafer() -> Scenario {
+        let mut s = no_countdown(Scenario::default());
+        s.targets.lifetime_s = 1.5;
+        s.targets.spawn.yaw = Range(-30.0, 30.0);
+        s.targets.movement = Movement { kind: MovementKind::Strafe, ..Default::default() };
+        s.adaptive.knob = Knob::TargetSpeed;
+        s.timing.duration_s = 20.0;
+        s
+    }
+
+    /// Found in the scoring review: an adaptive hitscan scenario set to target
+    /// speed recorded no outcomes (only beam ticks fed tracking segments), so its
+    /// rating never moved. Each target now gets its own speed, and a kill before
+    /// it times out is a success.
+    #[test]
+    fn hitscan_target_speed_is_rated_per_target() {
+        let s = hitscan_strafer();
+        assert!(s.problems().is_empty(), "{:?}", s.problems());
+        let mut sim = Sim::adaptive(s.clone(), 1, None, Mix::Balanced);
+        let start = sim.rating().unwrap().1;
+        while sim.phase() != Phase::Finished {
+            let at = sim.targets()[0].pos;
+            sim.step(FRAME, shoot(at));
+            sim.step(FRAME, idle());
+        }
+        let r = sim.result();
+        let a = r.adaptive.unwrap();
+        assert!(a.outcomes > 20, "one outcome per target: {}", a.outcomes);
+        assert!(a.value > start, "perfect play rates faster: {start} -> {}", a.value);
+        // Targets move at the speed they were given, and keep it.
+        let t = r.telemetry.targets.iter().rev().find(|t| t.value.is_some()).unwrap();
+        assert!(t.value.unwrap() > start);
+
+        // Never shooting: every target times out and the rating slows.
+        let mut sim = Sim::adaptive(s, 1, None, Mix::Balanced);
+        while sim.phase() != Phase::Finished {
+            sim.step(FRAME, Input { aim: Vec3::Y, fire_pressed: false, fire_held: false });
+        }
+        let a = sim.result().adaptive.unwrap();
+        assert!(a.outcomes > 5 && a.value < start, "{a:?}");
+    }
+
+    #[test]
+    fn hitscan_target_speed_keeps_each_targets_speed() {
+        let s = hitscan_strafer();
+        let mut sim = Sim::adaptive(s, 2, None, Mix::Balanced);
+        // Each target's position every quarter second, by spawn number.
+        let mut path: HashMap<u32, Vec<Vec3>> = HashMap::new();
+        let mut frame = 0;
+        while sim.phase() != Phase::Finished {
+            sim.step(FRAME, Input { aim: Vec3::Y, fire_pressed: false, fire_held: false });
+            frame += 1;
+            if frame % 60 == 0 {
+                for t in sim.targets() {
+                    path.entry(t.no()).or_default().push(t.pos.normalize());
+                }
+            }
+        }
+        let r = sim.result();
+        let mut checked = 0;
+        for rec in &r.telemetry.targets {
+            let (Some(value), Some(p)) = (rec.value, path.get(&rec.no)) else { continue };
+            if p.len() < 4 {
+                continue;
+            }
+            // Fastest quarter second: a window without a reversal moves at full speed.
+            let peak = p.windows(2).map(|w| (w[1] - w[0]).length().to_degrees() * 4.0).fold(0.0f32, f32::max);
+            assert!(
+                peak > value * 0.75 && peak < value * 1.1,
+                "target {} given {value:.1}, moved {peak:.1} deg/s",
+                rec.no
+            );
+            checked += 1;
+        }
+        assert!(checked >= 5, "{checked} targets checked");
     }
 
     #[test]
@@ -1789,6 +1880,44 @@ mod tests {
         old.adaptive.engaged_only = false;
         let slow_old = play(&old, 0.6);
         assert!(slow_old < 0.85, "travel used to count: {slow_old}");
+    }
+
+    /// Playtest: Stability Switch targets didn't move enough and were too big to
+    /// make staying on them hard. Each sweep (one direction, between reversals)
+    /// should average at least 15 degrees, on targets at most 3.5 degrees across.
+    #[test]
+    fn stability_switch_sweeps_wide_on_small_targets() {
+        let mut s = builtin("builtin:stability-switch");
+        s.targets.health = 1e9;
+        s.timing.duration_s = 30.0;
+        let d = (s.targets.spawn.distance.0 + s.targets.spawn.distance.1) / 2.0;
+        let size = 2.0 * (s.targets.radius / d).atan().to_degrees();
+        assert!(size <= 3.5, "targets are {size:.1} deg across");
+        let mut sim = Sim::new(s, 3);
+        let yaw = |t: &Target| t.pos.x.atan2(-t.pos.z).to_degrees();
+        let mut last: HashMap<u64, (f32, f32)> = HashMap::new(); // yaw, direction
+        let mut sweeps = Vec::new();
+        let mut current: HashMap<u64, f32> = HashMap::new();
+        while sim.phase() != Phase::Finished {
+            sim.step(FRAME, Input { aim: Vec3::Y, fire_pressed: false, fire_held: false });
+            for t in sim.targets() {
+                let y = yaw(t);
+                if let Some(&(prev, dir)) = last.get(&t.id) {
+                    let dy = y - prev;
+                    let now_dir = dy.signum();
+                    if dy.abs() > 1e-4 && dir != 0.0 && now_dir != dir {
+                        sweeps.push(current.insert(t.id, 0.0).unwrap_or(0.0));
+                    }
+                    *current.entry(t.id).or_default() += dy.abs();
+                    last.insert(t.id, (y, if dy.abs() > 1e-4 { now_dir } else { dir }));
+                } else {
+                    last.insert(t.id, (y, 0.0));
+                }
+            }
+        }
+        let mean = sweeps.iter().sum::<f32>() / sweeps.len().max(1) as f32;
+        assert!(sweeps.len() >= 20, "{} sweeps", sweeps.len());
+        assert!(mean >= 15.0, "average sweep {mean:.1} deg");
     }
 
     #[test]
