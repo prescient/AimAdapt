@@ -48,6 +48,22 @@ pub struct Item {
     /// Which part of the session this is, for display and progress.
     #[serde(default, skip_serializing_if = "Block::is_none")]
     pub block: Block,
+    /// Other scenarios that train the same thing. Week by week the item plays
+    /// `scenario`, then each variant in turn, so reps build skill without fitting
+    /// one exact setup.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub variants: Vec<String>,
+}
+
+impl Item {
+    /// The scenario this item plays in a given week (ISO week number).
+    pub fn for_week(&self, week: u32) -> &str {
+        let n = self.variants.len() + 1;
+        match week as usize % n {
+            0 => &self.scenario,
+            i => &self.variants[i - 1],
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -126,8 +142,22 @@ impl Workout {
             if !(1..=20).contains(&item.runs) {
                 p.push(format!("item {}: runs must be 1–20", i + 1));
             }
+            if item.variants.iter().any(|v| v.trim().is_empty()) || item.variants.len() > 5 {
+                p.push(format!("item {}: up to 5 variants, each a scenario", i + 1));
+            }
         }
         p
+    }
+
+    /// This workout as played in a given week: each item with variants plays the
+    /// one for that week.
+    pub fn for_week(&self, week: u32) -> Workout {
+        let mut w = self.clone();
+        for it in &mut w.items {
+            it.scenario = it.for_week(week).to_string();
+            it.variants.clear();
+        }
+        w
     }
 
     /// Every run in order.
@@ -281,6 +311,7 @@ mod tests {
                 runs: 3,
                 mode: Mode::Adaptive,
                 block: Block::None,
+                variants: vec!["builtin:timed-wide-flicks".into()],
             }],
             ..Default::default()
         };

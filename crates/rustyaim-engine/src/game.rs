@@ -823,6 +823,14 @@ fn base_color(assets: &TargetAssets, t: &rustyaim_sim::sim::Target) -> Color {
     }
 }
 
+/// How far above a target's center its bars start: the top of the sphere or capsule.
+fn bar_base(s: &Scenario, t: &rustyaim_sim::sim::Target) -> f32 {
+    match s.targets.shape {
+        Shape::Capsule => (t.height() / 2.0).max(t.radius),
+        Shape::Sphere => t.radius,
+    }
+}
+
 /// The bars a target shows, top to bottom order from the target up, with how
 /// full each is.
 fn bars_for(s: &Scenario, t: &rustyaim_sim::sim::Target) -> Vec<(Bar, f32)> {
@@ -861,7 +869,7 @@ fn sync_bars(
         let d = (t.pos - camera.translation).dot(-back_dir).max(1.0);
         let (w, h) = (d * 0.06, d * 0.06 * 0.16);
         for (k, (bar, frac)) in bars_for(s, t).into_iter().enumerate() {
-            let center = t.pos + up * (t.radius + h * (1.0 + 1.5 * k as f32));
+            let center = t.pos + up * (bar_base(s, t) + h * (1.0 + 1.5 * k as f32));
             let back = Transform { translation: center, rotation, scale: Vec3::new(w, h, 1.0) };
             let inner = w - h * 0.4;
             let fill_w = inner * frac;
@@ -926,7 +934,8 @@ fn update_hud(
                 None => format!("Calibration run\n{goal:.0}%: {}", fmt_value(knob, value)),
             };
             let rate = rate.map_or("-".into(), |r| format!("{:.0}%", r * 100.0));
-            let mut stats = format!("{} {rate} (goal {goal:.0}%)\n{}", rate_word(knob), kills_line(sim));
+            let mut stats =
+                format!("{} {rate} (goal {goal:.0}%)\n{}", rate_word(knob, sim.rated_per_target()), kills_line(sim));
             if let Some((_, left)) = sim.pace() {
                 stats += &if left >= 0.0 { format!("\nNext kill within {left:.1} s") } else { "\nOff pace".into() };
             }
@@ -985,7 +994,7 @@ fn update_overlay(
                     fmt_value(k, a.value),
                     fmt_value(k, lo),
                     fmt_value(k, hi),
-                    rate_word(k),
+                    rate_word(k, game.sim.rated_per_target()),
                 ),
                 Some(v) => {
                     let verdict = if a.breakthrough {
@@ -999,7 +1008,7 @@ fn update_overlay(
                         "{}: {}   {} {hit:.0}%\n{verdict}\nRating {} (was {}) | {best}",
                         a.pick.run_label(),
                         fmt_value(k, v),
-                        rate_word(k),
+                        rate_word(k, game.sim.rated_per_target()),
                         fmt_value(k, a.value),
                         fmt_value(k, a.start_value),
                     )
@@ -1092,8 +1101,9 @@ fn kills_line(sim: &Sim) -> String {
     }
 }
 
-fn rate_word(knob: Knob) -> &'static str {
+fn rate_word(knob: Knob, per_target: bool) -> &'static str {
     match knob {
+        Knob::TargetSpeed if per_target => "Finished in time",
         Knob::TargetSpeed => "On target",
         Knob::KillPace => "On pace",
         _ => "Hit rate",
@@ -1180,6 +1190,27 @@ mod tests {
         let a = assets(&track);
         let sim = Sim::new(track, 1);
         assert!(sim.targets().iter().all(|t| base_color(&a, t) == a.base));
+    }
+
+    /// Bot check: on capsules (bodies) the health bar sat one radius above the
+    /// center, inside the body, so Unbroken Strafes showed no bar. Bars go above the
+    /// top of the target.
+    #[test]
+    fn bars_sit_above_the_top_of_the_target() {
+        for id in ["builtin:unbroken-strafes", "builtin:stability-switch"] {
+            let s = builtin(id);
+            let sim = Sim::new(s.clone(), 1);
+            let t = &sim.targets()[0];
+            let top = match s.targets.shape {
+                Shape::Capsule => s.targets.height / 2.0,
+                Shape::Sphere => s.targets.radius,
+            };
+            assert!(
+                bar_base(&s, t) >= top - 1e-4,
+                "{id}: bars start {} above the center, top is {top}",
+                bar_base(&s, t)
+            );
+        }
     }
 
     #[test]

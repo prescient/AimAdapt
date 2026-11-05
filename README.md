@@ -19,14 +19,14 @@ Requirements: Windows 10 or 11 with the WebView2 runtime (included with Windows 
 - FOV is horizontal at 16:9.
 - Display: borderless, exclusive full screen at any resolution and refresh rate the monitor supports (for example stretched 4:3), or windowed.
 - Optional centered play area, so a large monitor can play at the size of a smaller one.
-- 19 built-in scenarios across nine sub-skills:
+- 29 built-in scenarios across nine sub-skills, at least two for each:
   - **Clicking:** static, dynamic, linear.
   - **Tracking:** precise, reactive, control.
   - **Switching:** speed, evasive, stability.
 - Hitscan and beam weapons; click, hold or always-on triggers.
-- Sphere and capsule targets, with optional lifetime, shrink and health regeneration.
+- Sphere and capsule targets, with optional lifetime, shrink, and health regeneration with a delay.
 - Timed targets show a time-left bar and change color by wave (three red, then three blue, then three red on Timed Grid), so newer targets stand out from older ones. Optional health bars.
-- Movement: still, strafing or random.
+- Movement: still, strafing or random, with optional acceleration (targets slow down and speed back up at each turn, and random turns curve), movement toward and away from you, and jumps with gravity.
 
 ![Results screen](docs/screenshots/game-results.jpg)
 
@@ -49,6 +49,7 @@ Each scenario has one difficulty setting: target lifetime for timed clicking, ta
 - **What counts:**
   - **Clicking:** a target is a success if it's destroyed before it times out, with at most one miss on it.
   - **Tracking:** each 2-second segment is scored by the share of time spent on target. Stability Switch and Switch Track only count time while a target is damaged and not yet healed, so moving between targets isn't counted against you. Their targets show health bars and heal when you leave them.
+  - **Finished in time (Unbroken Strafes, Unbroken Float):** each target needs a stretch of beam and heals fast when you slip off. A target finished before it times out is a success, so only unbroken tracking counts. The rating is the target speed at which you finish 85% of them.
   - **Kill pace (Speed Switch):** a kill within the pace of the one before is a success; each full stretch of that length with no kill is a failure.
 
 Standard mode plays a scenario exactly as written and scores points.
@@ -69,7 +70,7 @@ Core Week is a six-day plan. Each day takes about 29 minutes.
 | Saturday | Weak spots |
 | Sunday | Rest |
 
-Every day uses five drills, with reps instead of variety:
+Every day uses five drills, with reps instead of variety. Most drills alternate week by week with a variant that trains the same sub-skill (for example Strafe Track and Hop Strafe Track), so reps build skill without fitting one exact setup:
 
 | Block | Drills | Reps each |
 |---|---|---|
@@ -102,7 +103,7 @@ Every run stores each target, each shot, tracking samples 30 times a second, and
 - **By direction and distance:** hit rate and median time in 8 flick directions and 5 distance bands.
 - **Shot placement** relative to the target, aligned to the flick direction: overshooting vs. stopping short, and any vertical bias.
 - **Reaction time:** a histogram, with the median compared with earlier runs.
-- **Tracking:** time on target by target speed, recovery after direction changes, and how far ahead of or behind the target you are.
+- **Tracking:** time on target by target speed, recovery after direction changes, how far ahead of or behind the target you are, and unbroken stretches on target (half your time on target came in stretches at least this long).
 - **Within a run:** success in 10-second segments.
 - **Notes** generated from the figures above.
 

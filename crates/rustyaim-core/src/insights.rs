@@ -167,6 +167,56 @@ pub struct Tracking {
     pub after_change: Vec<Bucket>,
     /// Seconds after a direction change until on-target share is back to normal.
     pub recovery_s: Option<f64>,
+    /// Unbroken stretches on target: half of all time on target came in stretches
+    /// at least this long (seconds). Share of time on target treats ten short slips
+    /// like one long one; this tells steady tracking from jittery tracking.
+    pub stretch_s: Option<f64>,
+    pub stretch_before_s: Option<f64>,
+}
+
+/// Tracking samples are taken this often (`rustyaim_sim::sim::SAMPLE_HZ`).
+const SAMPLE_S: f64 = 1.0 / 30.0;
+
+/// The stretch length that half of all on-target time comes from, over these
+/// runs (stretches end at a run's end).
+fn unbroken_stretch(db: &Db, ids: &[i64]) -> Result<Option<f64>, DbError> {
+    if ids.is_empty() {
+        return Ok(None);
+    }
+    let sql =
+        format!("SELECT run_id, on_target FROM engine_samples WHERE run_id IN ({}) ORDER BY run_id, t", in_list(ids));
+    let mut stmt = db.conn().prepare(&sql)?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, bool>(1)?)))?;
+    let (mut stretches, mut cur, mut run) = (Vec::new(), 0usize, None);
+    for row in rows {
+        let (id, on) = row?;
+        if run != Some(id) || !on {
+            if cur > 0 {
+                stretches.push(cur);
+            }
+            cur = 0;
+            run = Some(id);
+        }
+        if on {
+            cur += 1;
+        }
+    }
+    if cur > 0 {
+        stretches.push(cur);
+    }
+    let total: usize = stretches.iter().sum();
+    if total < 60 {
+        return Ok(None);
+    }
+    stretches.sort_unstable_by(|a, b| b.cmp(a));
+    let mut acc = 0;
+    for len in stretches {
+        acc += len;
+        if acc * 2 >= total {
+            return Ok(Some(len as f64 * SAMPLE_S));
+        }
+    }
+    Ok(None)
 }
 
 /// Switching, split into its two parts: getting to the next target after a kill,
@@ -780,6 +830,8 @@ fn tracking_stats(db: &Db, recent: &[i64], before: &[i64]) -> Result<Option<Trac
         by_speed,
         after_change: after_change.into_iter().filter(|b| b.samples >= 10).collect(),
         recovery_s,
+        stretch_s: unbroken_stretch(db, recent)?,
+        stretch_before_s: unbroken_stretch(db, before)?,
     }))
 }
 
@@ -1220,6 +1272,32 @@ mod tests {
         // Not shown for other categories.
         save(&mut db, 2, &clicking_run(0.6));
         assert!(scenario(&db, "Timed Flicks").unwrap().unwrap().switching.is_none());
+    }
+
+    #[test]
+    fn unbroken_stretch_is_where_half_the_time_on_target_comes_from() {
+        let mut db = Db::open_in_memory().unwrap();
+        // Four 1 s stretches and two 3 s ones, with short gaps: 10 s on target, of
+        // which the two 3 s stretches hold 6 s, more than half.
+        let mut on = Vec::new();
+        for len in [30, 90, 30, 30, 90, 30] {
+            on.extend(std::iter::repeat_n(true, len));
+            on.extend(std::iter::repeat_n(false, 3));
+        }
+        let samples = on
+            .iter()
+            .enumerate()
+            .map(|(i, &o)| SampleRow { t: i as f64 / 30.0, on_target: o, ..Default::default() })
+            .collect();
+        let e = EngineRun {
+            base_scenario: "Float Track".into(),
+            category: "tracking".into(),
+            samples,
+            ..Default::default()
+        };
+        save(&mut db, 1, &e);
+        let t = scenario(&db, "Float Track").unwrap().unwrap().tracking.unwrap();
+        assert!((t.stretch_s.unwrap() - 3.0).abs() < 1e-9, "{:?}", t.stretch_s);
     }
 
     /// Before fixed-difficulty runs, `fastest` was the hardest single target hit,

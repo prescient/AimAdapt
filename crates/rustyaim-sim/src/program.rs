@@ -134,26 +134,45 @@ impl Program {
 
 /// The scenario that drills each skill on a weak-spots day.
 pub fn drill(skill: Skill) -> &'static str {
+    drills(skill)[0]
+}
+
+/// The drills for each sub-skill, rotated week by week on weak-spots days.
+pub fn drills(skill: Skill) -> &'static [&'static str] {
     match skill {
-        Skill::StaticClicking | Skill::None => "builtin:timed-flicks",
-        Skill::DynamicClicking => "builtin:timed-strafe-clicks",
-        Skill::LinearClicking => "builtin:linear-clicks",
-        Skill::PreciseTracking => "builtin:precise-track",
-        Skill::ReactiveTracking => "builtin:strafe-track",
-        Skill::ControlTracking => "builtin:control-track",
-        Skill::SpeedSwitching => "builtin:speed-switch",
-        Skill::EvasiveSwitching => "builtin:switch-track",
-        Skill::StabilitySwitching => "builtin:stability-switch",
+        Skill::StaticClicking | Skill::None => &["builtin:timed-flicks", "builtin:timed-wide-flicks"],
+        Skill::DynamicClicking => &["builtin:timed-strafe-clicks", "builtin:hop-clicks"],
+        Skill::LinearClicking => &["builtin:linear-clicks", "builtin:angled-glides"],
+        Skill::PreciseTracking => &["builtin:precise-track", "builtin:depth-drift"],
+        Skill::ReactiveTracking => &["builtin:strafe-track", "builtin:hop-strafe-track"],
+        Skill::ControlTracking => &["builtin:control-track", "builtin:arc-track"],
+        Skill::SpeedSwitching => &["builtin:speed-switch", "builtin:wide-speed-switch"],
+        Skill::EvasiveSwitching => &["builtin:switch-track", "builtin:hop-switch"],
+        Skill::StabilitySwitching => &["builtin:stability-switch", "builtin:depth-stability-switch"],
     }
 }
 
 /// A weak-spots workout from skills ordered weakest first: a standard warm-up, the
-/// two weakest ×5, the next two ×4, and the strongest ×3 so it doesn't fade.
+/// two weakest ×5, the next two ×4, and the strongest ×3 so it doesn't fade. Each
+/// skill's drill rotates with the week like the other days' variants.
 pub fn weak_spots(name: &str, ranked: &[Skill]) -> Workout {
-    let item =
-        |s: Skill, runs: u32, block: Block| Item { scenario: drill(s).into(), runs, mode: Mode::Adaptive, block };
-    let mut items =
-        vec![Item { scenario: "builtin:static-grid".into(), runs: 2, mode: Mode::Standard, block: Block::Warmup }];
+    let item = |s: Skill, runs: u32, block: Block| {
+        let d = drills(s);
+        Item {
+            scenario: d[0].into(),
+            runs,
+            mode: Mode::Adaptive,
+            block,
+            variants: d[1..].iter().map(|v| v.to_string()).collect(),
+        }
+    };
+    let mut items = vec![Item {
+        scenario: "builtin:static-grid".into(),
+        runs: 2,
+        mode: Mode::Standard,
+        block: Block::Warmup,
+        variants: Vec::new(),
+    }];
     let n = ranked.len();
     for (i, s) in ranked.iter().take(4).enumerate() {
         items.push(if i < 2 { item(*s, 5, Block::Main) } else { item(*s, 4, Block::Secondary) });
@@ -240,6 +259,51 @@ mod tests {
         assert_eq!((w.items[5].scenario.as_str(), w.items[5].runs), ("builtin:timed-flicks", 3));
         assert_eq!(w.total_runs(), 23);
         assert!(w.problems().is_empty());
+    }
+
+    /// Variants rotate week by week, and each one trains the same sub-skill as the
+    /// scenario it stands in for.
+    #[test]
+    fn variants_alternate_by_week_and_keep_the_skill() {
+        let all = library::builtins();
+        let skill = |id: &str| {
+            let e = all.iter().find(|e| e.id == id).unwrap_or_else(|| panic!("{id} isn't a built-in"));
+            e.scenario.as_ref().unwrap().skill
+        };
+        let mut checked = 0;
+        for w in crate::workout::builtins() {
+            let w = w.workout.unwrap();
+            for it in &w.items {
+                for v in &it.variants {
+                    assert_eq!(skill(v), skill(&it.scenario), "{}: {v} stands in for {}", w.name, it.scenario);
+                    checked += 1;
+                }
+                if !it.variants.is_empty() {
+                    assert_eq!(it.for_week(44), it.scenario, "even weeks play the main drill");
+                    assert_eq!(it.for_week(45), it.variants[0], "odd weeks play the variant");
+                }
+            }
+            assert_eq!(w.for_week(45).total_runs(), w.total_runs(), "same reps either week");
+        }
+        assert!(checked >= 15, "{checked} variants");
+        for s in Skill::ALL {
+            for d in drills(s) {
+                assert_eq!(skill(d), s, "{d} is listed for {s:?}");
+            }
+        }
+        let w = weak_spots("Weak spots", &Skill::ALL);
+        assert_ne!(w.for_week(1).items[1].scenario, w.for_week(2).items[1].scenario, "weak spots rotate too");
+    }
+
+    /// From the FAR comparison: one scenario per sub-skill risks fitting one exact
+    /// setup, so every sub-skill has at least two built-ins to rotate between.
+    #[test]
+    fn every_skill_has_at_least_two_scenarios() {
+        let all = library::builtins();
+        for skill in Skill::ALL {
+            let n = all.iter().filter(|e| e.scenario.as_ref().is_ok_and(|s| s.skill == skill)).count();
+            assert!(n >= 2, "{skill:?} has {n} scenario(s)");
+        }
     }
 
     #[test]

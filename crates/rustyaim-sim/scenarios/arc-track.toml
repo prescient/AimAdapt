@@ -1,0 +1,43 @@
+name = "Arc Track"
+description = "A ball that turns gradually instead of snapping to a new direction, so it travels in curves across a wide area. Follow the curve without overcorrecting. Trains control tracking."
+author = "RustyAim"
+category = "tracking"
+skill = "control_tracking"
+tags = ["tracking", "control", "smooth"]
+
+[timing]
+duration_s = 60.0
+
+[weapon]
+kind = "beam"
+trigger = "always"
+damage_per_s = 100.0
+
+[targets]
+count = 1
+radius = 0.4
+health = 1000000.0
+color = "#4ec3ff"
+
+[targets.spawn]
+distance = [10.0, 10.0]
+yaw = [-50.0, 50.0]
+pitch = [-10.0, 25.0]
+
+[targets.movement]
+kind = "random"
+speed = [2.5, 3.5]
+change_every_s = [1.0, 2.0]
+vertical = 0.9
+accel = 6.0
+
+[scoring]
+per_kill = 0.0
+per_damage = 1.0
+
+[adaptive]
+goal = 0.85
+knob = "target_speed"
+easy = 5.0
+hard = 120.0
+start = 18.0

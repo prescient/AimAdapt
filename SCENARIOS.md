@@ -35,7 +35,7 @@ per_miss = -30.0
 
 - The player stands still in the middle of the room, facing the far wall. Their eye is the origin.
 - Targets are placed by angle and distance. `yaw` is degrees left (−) or right (+) of straight ahead, and `pitch` is degrees below (−) or above (+) eye level.
-- Moving targets travel in angle space at a constant distance, so they keep the same on-screen size and bounce off the edges of the spawn area.
+- Moving targets travel in angle space and bounce off the edges of the spawn area and the room. They keep one distance (and on-screen size) unless they move forward and back, and they can jump straight up from where they are.
 - A sphere of radius `r` at distance `d` is `2 × atan(r / d)` degrees wide. For example, a 0.3 m target at 10 m is about 3.4° wide.
 - Your sensitivity (cm/360 and DPI), FOV and crosshair are player settings, not part of the scenario. They're stored in `%APPDATA%\RustyAim\engine.toml`.
 
@@ -82,6 +82,7 @@ per_miss = -30.0
 | `targets.height` | `1.8` | Capsule height in meters, including the rounded ends. |
 | `targets.health` | `100.0` | Damage needed to destroy a target. Equal to `weapon.damage` means one shot. Use a huge value for pure tracking. |
 | `targets.regen_per_s` | `0.0` | Beam only: health restored per second while the crosshair is off the target. |
+| `targets.regen_delay_s` | `0.0` | Seconds after the last hit before a target starts healing. A short delay forgives a brief slip; regen close to the beam's damage rate means a kill needs an unbroken stretch on target. |
 | `targets.color` | `"#ff5a4e"` | Target color as `#rrggbb`. |
 | `targets.respawn_delay_s` | `0.0` | Seconds before a destroyed target is replaced. |
 | `targets.lifetime_s` | `0.0` | A target disappears as a timeout after this many seconds. 0 means it stays until it's destroyed. |
@@ -109,6 +110,12 @@ per_miss = -30.0
 | `targets.movement.speed` | `[3.0, 5.0]` | Meters per second at the target's distance. |
 | `targets.movement.change_every_s` | `[0.4, 1.2]` | Seconds between direction changes. |
 | `targets.movement.vertical` | `0.5` | `random` only: 0 keeps movement level and 1 allows any direction. |
+| `targets.movement.accel` | `0.0` | How quickly a target changes velocity, in m/s². 0 reverses and turns instantly. With a value, a strafing target slows down, stops and speeds back up at each reversal, and `random` turns become curves. |
+| `targets.movement.approach_speed` | `[0.0, 0.0]` | Speed toward and away from the player, within `spawn.distance` (which then needs min < max). Sideways speed stays the same in meters per second, so a closer target crosses your view faster and looks bigger. |
+| `targets.movement.approach_every_s` | `[0.0, 0.0]` | Seconds between coming closer and backing away. `[0, 0]` uses `change_every_s`. |
+| `targets.movement.jump_every_s` | `[0.0, 0.0]` | Seconds on the ground between jumps. |
+| `targets.movement.jump_height` | `0.0` | Height of each jump in meters. 0 means no jumps. |
+| `targets.movement.jump_air_s` | `0.0` | Seconds in the air per jump. Gravity is 8 × height ÷ airtime², so a 1.2 m jump lasting 0.7 s falls at about 20 m/s². |
 
 ### `[scoring]`
 
@@ -134,6 +141,7 @@ Every scenario can be played in **Standard** mode, at the difficulty written in 
 **How the rating works.** The trainer models your chance of success at each value as an S-shaped curve. It keeps a probability estimate of where that curve sits and how steep it is, so it knows how sure it is, much like the Glicko version of Elo. Each outcome updates the estimate by how surprising it was. Succeeding at a value harder than your rating moves it more than succeeding at your level, and failing at a harder value costs less than failing at your level. The next run starts from your last rating on the same version of the scenario. Any change that affects play (its fingerprint) starts over with a calibration run, because a rating earned under other settings isn't on the same scale. The uncertainty grows with the days since you played, so after a break the rating moves more again.
 
 - **Clicking:** a target is a success if you destroy it before it times out with at most one miss on it. Spraying clicks doesn't count. A timeout is a failure. With a hitscan weapon, lifetime, size and target speed are all set target by target, and target speed needs `targets.lifetime_s` (without a timer a careful player would never fail).
+- **Finished in time:** with a beam, `targets.lifetime_s` and the target-speed knob, each target is one outcome: a success if you finish it before it times out. Each target gets its own speed. With fast regen after a short `regen_delay_s`, that means unbroken tracking (Unbroken Strafes, Unbroken Float).
 - **Tracking:** each `segment_s`-second segment is one outcome: the share of that time the crosshair was on target, whether or not you're firing. With `engaged_only`, only time while a target is damaged and not yet healed counts, so the trip to a fresh target after a kill isn't off target, but leaving a half-killed target is, until it heals.
 - **Kill pace:** a kill within the pace of the one before is a success. Each full stretch of that length with no kill is a failure, and the late kill that ends it doesn't count as a success. Speed Switch, the built-in kill-pace scenario, has no target timers.
 
@@ -191,12 +199,15 @@ description = "Clicking, then tracking."
 scenario = "builtin:timed-flicks"   # or user:<file name>
 runs = 2                            # 1–20, default 1
 mode = "adaptive"                   # or "standard"; default adaptive
+variants = ["builtin:timed-wide-flicks"]  # optional: rotate week by week
 
 [[items]]
 scenario = "builtin:strafe-track"
 ```
 
 Each run is saved on its own, with the workout's name attached.
+
+`variants` lists other scenarios that train the same thing. In weeks where the ISO week number is even the item plays `scenario`; in other weeks it plays the variants in turn. The training day starts at 4 AM, like the rest of the program.
 
 ## Programs
 

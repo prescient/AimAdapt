@@ -27,6 +27,16 @@ const BUILTIN: &[(&str, &str)] = &[
     ("control-track", include_str!("../scenarios/control-track.toml")),
     ("speed-switch", include_str!("../scenarios/speed-switch.toml")),
     ("stability-switch", include_str!("../scenarios/stability-switch.toml")),
+    ("hop-clicks", include_str!("../scenarios/hop-clicks.toml")),
+    ("angled-glides", include_str!("../scenarios/angled-glides.toml")),
+    ("depth-drift", include_str!("../scenarios/depth-drift.toml")),
+    ("hop-strafe-track", include_str!("../scenarios/hop-strafe-track.toml")),
+    ("unbroken-strafes", include_str!("../scenarios/unbroken-strafes.toml")),
+    ("arc-track", include_str!("../scenarios/arc-track.toml")),
+    ("unbroken-float", include_str!("../scenarios/unbroken-float.toml")),
+    ("wide-speed-switch", include_str!("../scenarios/wide-speed-switch.toml")),
+    ("hop-switch", include_str!("../scenarios/hop-switch.toml")),
+    ("depth-stability-switch", include_str!("../scenarios/depth-stability-switch.toml")),
 ];
 
 #[derive(Debug, Clone)]

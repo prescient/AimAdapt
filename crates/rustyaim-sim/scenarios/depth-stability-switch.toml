@@ -1,0 +1,47 @@
+name = "Depth Stability Switch"
+description = "Three strafing targets that also come closer and back away, each needing a long, steady beam and healing when you leave them. Stay on each one as its size and speed change, then move to the next. Trains stability switching."
+author = "RustyAim"
+category = "switching"
+skill = "stability_switching"
+tags = ["switching", "stability", "depth"]
+
+[timing]
+duration_s = 60.0
+
+[weapon]
+kind = "beam"
+trigger = "hold"
+damage_per_s = 100.0
+
+[targets]
+count = 3
+radius = 0.35
+health = 150.0
+regen_per_s = 40.0
+health_bar = true
+color = "#c38bff"
+
+[targets.spawn]
+distance = [8.0, 15.0]
+yaw = [-45.0, 45.0]
+pitch = [-6.0, 16.0]
+min_separation = 15.0
+
+[targets.movement]
+kind = "strafe"
+speed = [3.0, 4.5]
+change_every_s = [0.8, 1.8]
+accel = 15.0
+approach_speed = [1.5, 3.0]
+approach_every_s = [1.0, 2.0]
+
+[scoring]
+per_kill = 100.0
+
+[adaptive]
+goal = 0.85
+knob = "target_speed"
+easy = 6.0
+hard = 100.0
+start = 16.0
+engaged_only = true

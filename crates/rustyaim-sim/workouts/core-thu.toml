@@ -19,12 +19,14 @@ scenario = "builtin:timed-strafe-clicks"
 runs = 5
 mode = "adaptive"
 block = "main"
+variants = ["builtin:hop-clicks"]
 
 [[items]]
 scenario = "builtin:linear-clicks"
 runs = 4
 mode = "adaptive"
 block = "secondary"
+variants = ["builtin:angled-glides"]
 
 [[items]]
 scenario = "builtin:strafe-clicks"
@@ -37,3 +39,4 @@ scenario = "builtin:strafe-track"
 runs = 3
 mode = "adaptive"
 block = "maintenance"
+variants = ["builtin:hop-strafe-track"]

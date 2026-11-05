@@ -27,6 +27,9 @@ Last reviewed: Nov 4, 2026 (after the first playtest session).
 - [x] Moving targets bounce off the room's floor, ceiling and walls, not just their spawn area (Float Track sank through the floor). From [playtesting](PLAYTEST.md).
 - [x] Time-left bars on timed targets, and timed targets change color by wave (orange-red, then blue, by default), so older and newer targets are easy to tell apart. Health bars for switching targets that heal. All scenario options. From [playtesting](PLAYTEST.md).
 - [x] `--dump-snapshot` and `--smoke` only run against a test database (`--db`).
+- [x] Movement like players move, from the FAR comparison: acceleration (slow down and speed back up at turns, curved random turns), movement toward and away from the player, and jumps with gravity.
+- [x] Regen with a delay, and "finished in time" ratings for regen targets, so smoothness drills reward unbroken tracking. Insights shows unbroken stretches on target.
+- [x] At least two scenarios per sub-skill (29 built-ins), with Core Week alternating each drill and its variant week by week.
 
 ### To do
 - [ ] `todo` P1 Pause menu and pausing on focus loss (Esc quits straight away today).
@@ -49,9 +52,7 @@ Last reviewed: Nov 4, 2026 (after the first playtest session).
   - **Switching:** speed, evasive, stability.
 
 ### To do
-- [ ] `todo` P1 At least two scenarios per sub-skill. Linear clicking, precise and control tracking, and speed and stability switching each have one, which limits Core Week's variety within a skill.
-- [ ] `todo` P2 Smoother target paths: curves and noise-based drift for control tracking, plus jumps with gravity.
-- [ ] `todo` P2 Targets that move toward or away from the player.
+- [ ] `todo` P3 Noise-based drift for control tracking (acceleration already makes turns curve).
 - [ ] `todo` P3 Player movement (WASD strafing).
 - [ ] `todo` P3 Projectile weapons with travel time; spread and recoil.
 - [ ] `todo` P3 Visual themes: room colors, target outlines, high contrast.

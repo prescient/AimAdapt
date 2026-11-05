@@ -361,12 +361,13 @@ pub fn build_program(state: &AppData, t: &TrainerState) -> Result<ProgramPage, S
         .into_iter()
         .filter_map(|e| e.scenario.ok().map(|s| (e.id, f64::from(s.timing.duration_s + s.timing.countdown_s))))
         .collect();
+    let week = rustyaim_engine::training_week();
     let days: Vec<ProgramDay> = Weekday::ALL
         .into_iter()
         .map(|d| {
             let pd = prog.day(d);
             let workout =
-                pd.and_then(|_| rustyaim_engine::workout_for_day(&prog, d, Some(&db), &t.workouts_dir()).ok());
+                pd.and_then(|_| rustyaim_engine::workout_for_day(&prog, d, Some(&db), &t.workouts_dir(), week).ok());
             let runs = workout.as_ref().map_or(0, Workout::total_runs);
             // About 12 s per run for the results screen and loading.
             let seconds: f64 = workout.as_ref().map_or(0.0, |w| {

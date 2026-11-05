@@ -115,7 +115,7 @@ fn parse_and_run(args: &[String]) -> Result<(), String> {
                 None => today(),
             };
             let db_handle = rustyaim_core::Db::open(&db_path).ok();
-            let w = workout_for_day(&prog, day, db_handle.as_ref(), &workouts_dir(&data))?;
+            let w = workout_for_day(&prog, day, db_handle.as_ref(), &workouts_dir(&data), training_week())?;
             program_day = Some((prog.name.clone(), day.id().to_string()));
             (to_steps(&w)?, Some(w.name))
         }
@@ -173,9 +173,26 @@ pub fn today() -> Weekday {
     Weekday::from_index(now.weekday().num_days_from_monday() as usize)
 }
 
-/// The workout for a program day: its own workout, or a weak-spots workout built
-/// from the skill profile (untrained skills count as weakest).
+/// The ISO week of the current training day (which starts at 4 AM), for rotating
+/// drill variants.
+pub fn training_week() -> u32 {
+    (chrono::Local::now().naive_local() - chrono::Duration::hours(4)).iso_week().week()
+}
+
+/// The workout for a program day in a given week: its own workout, or a
+/// weak-spots workout built from the skill profile (untrained skills count as
+/// weakest), with each drill's variant for that week.
 pub fn workout_for_day(
+    prog: &Program,
+    day: Weekday,
+    db: Option<&rustyaim_core::Db>,
+    workouts: &std::path::Path,
+    week: u32,
+) -> Result<Workout, String> {
+    workout_for_day_any_week(prog, day, db, workouts).map(|w| w.for_week(week))
+}
+
+fn workout_for_day_any_week(
     prog: &Program,
     day: Weekday,
     db: Option<&rustyaim_core::Db>,
@@ -206,13 +223,17 @@ mod tests {
     fn program_days_resolve_to_workouts() {
         let prog = program::resolve("builtin:core-week").unwrap();
         let none = std::path::Path::new("");
-        let mon = workout_for_day(&prog, Weekday::Mon, None, none).unwrap();
+        let mon = workout_for_day(&prog, Weekday::Mon, None, none, 0).unwrap();
         assert_eq!(mon.name, "Core Week: Monday");
-        assert!(workout_for_day(&prog, Weekday::Sun, None, none).is_err(), "Sunday is rest");
+        assert!(workout_for_day(&prog, Weekday::Sun, None, none, 0).is_err(), "Sunday is rest");
 
         // With nothing trained, Saturday drills the first skills in order.
         let db = rustyaim_core::Db::open_in_memory().unwrap();
-        let sat = workout_for_day(&prog, Weekday::Sat, Some(&db), none).unwrap();
+        let tue = |week| workout_for_day(&prog, Weekday::Tue, None, none, week).unwrap();
+        assert_eq!(tue(44).items[1].scenario, "builtin:strafe-track");
+        assert_eq!(tue(45).items[1].scenario, "builtin:hop-strafe-track", "this week's variant");
+        assert!(tue(45).items.iter().all(|i| i.variants.is_empty()), "a played workout is resolved");
+        let sat = workout_for_day(&prog, Weekday::Sat, Some(&db), none, 0).unwrap();
         assert_eq!(sat.items[1].scenario, program::drill(Skill::StaticClicking));
         assert_eq!(sat.total_runs(), 23);
         for item in &sat.items {

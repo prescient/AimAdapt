@@ -37,3 +37,4 @@ scenario = "builtin:strafe-track"
 runs = 3
 mode = "adaptive"
 block = "maintenance"
+variants = ["builtin:hop-strafe-track"]

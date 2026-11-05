@@ -53,8 +53,21 @@ pub struct Target {
     yaw: f32,
     pitch: f32,
     distance: f32,
-    /// Degrees per second of yaw and pitch.
+    /// Degrees per second of yaw and pitch, and the velocity it's turning toward
+    /// (the same unless the scenario sets an acceleration).
     rate: [f32; 2],
+    goal: [f32; 2],
+    /// Forward/back: meters per second away from the player (negative = closer),
+    /// the speed it's heading for, and seconds until it switches.
+    radial: f32,
+    radial_goal: f32,
+    next_radial: f32,
+    /// Jumps: meters above its base height, upward speed, seconds until the next.
+    lift: f32,
+    lift_v: f32,
+    next_jump: f32,
+    /// Seconds into the run of the last hit, for the regen delay.
+    last_hit_at: f32,
     next_change: f32,
     last_change: f32,
     age: f32,
@@ -144,6 +157,11 @@ impl Target {
     /// Lifetime left as a share of the whole, if it has one.
     pub fn time_left_fraction(&self) -> Option<f32> {
         self.time_left().map(|t| (t / self.lifetime).clamp(0.0, 1.0))
+    }
+
+    /// Capsule height now (it scales with the radius when a target shrinks).
+    pub fn height(&self) -> f32 {
+        self.height * self.radius / self.base_radius.max(1e-6)
     }
 
     /// Spawn order, from 1.
@@ -477,6 +495,12 @@ impl Sim {
         Some((value, value - (self.elapsed() - self.pace.since)))
     }
 
+    /// Adaptive mode: whether each target is one outcome (a kill in time) rather
+    /// than tracking segments or kill pace.
+    pub fn rated_per_target(&self) -> bool {
+        self.per_target()
+    }
+
     /// Kills per minute so far.
     pub fn kills_per_min(&self) -> Option<f32> {
         let t = self.elapsed();
@@ -638,7 +662,10 @@ impl Sim {
             let hitscan = self.scenario.weapon.kind == WeaponKind::Hitscan;
             match a.rating.cfg.knob {
                 Knob::Lifetime => true,
-                Knob::Radius | Knob::TargetSpeed => hitscan,
+                Knob::Radius => hitscan,
+                // With a beam and target lifetimes, each target is a kill to finish in
+                // time (regen makes that a test of unbroken tracking).
+                Knob::TargetSpeed => hitscan || self.scenario.targets.lifetime_s > 0.0,
                 Knob::KillPace | Knob::Auto => false,
             }
         })
@@ -843,10 +870,12 @@ impl Sim {
         let tick = 1.0 / BEAM_TICK_HZ;
         let per_tick = self.scenario.weapon.damage_per_s * tick;
         let regen = self.current.targets.regen_per_s * dt;
+        let delay = self.current.targets.regen_delay_s;
+        let now = self.elapsed();
         let on = self.pick(aim);
         if regen > 0.0 {
             for (i, t) in self.targets.iter_mut().enumerate() {
-                if !firing || Some(i) != on {
+                if (!firing || Some(i) != on) && now - t.last_hit_at >= delay {
                     t.health = (t.health + regen).min(t.max_health);
                 }
             }
@@ -900,6 +929,7 @@ impl Sim {
         let t = &mut self.targets[i];
         let dealt = amount.min(t.health);
         t.health -= dealt;
+        t.last_hit_at = now;
         t.hits += 1;
         t.damage += dealt;
         self.stats.hits += 1;
@@ -997,13 +1027,65 @@ impl Sim {
                 let k = t.age / t.lifetime;
                 t.radius = t.base_radius * (1.0 + (shrink - 1.0) * k);
             }
-            if mv.kind != MovementKind::Static {
-                t.next_change -= dt;
-                if t.next_change <= 0.0 {
-                    t.next_change = self.rng.range(mv.change_every_s);
-                    let own = Movement { speed: t.speed.unwrap_or(mv.speed), ..mv.clone() };
-                    t.rate = new_rate(&mut self.rng, &own, t.distance, t.pitch, t.rate);
-                    t.last_change = now;
+            if mv.kind != MovementKind::Static || mv.approaches() || mv.jumps() {
+                if mv.kind != MovementKind::Static {
+                    t.next_change -= dt;
+                    if t.next_change <= 0.0 {
+                        t.next_change = self.rng.range(mv.change_every_s);
+                        let own = Movement { speed: t.speed.unwrap_or(mv.speed), ..mv.clone() };
+                        t.goal = new_rate(&mut self.rng, &own, t.distance, t.pitch, t.goal);
+                        if mv.accel <= 0.0 {
+                            t.rate = t.goal;
+                        }
+                        t.last_change = now;
+                    }
+                    if mv.accel > 0.0 {
+                        t.rate = steer(t.rate, t.goal, mv.accel, t.distance, t.pitch, dt);
+                    }
+                }
+                if mv.approaches() {
+                    t.next_radial -= dt;
+                    if t.next_radial <= 0.0 {
+                        let every = if mv.approach_every_s.1 > 0.0 { mv.approach_every_s } else { mv.change_every_s };
+                        t.next_radial = self.rng.range(every);
+                        let side = if t.radial_goal > 0.0 { -1.0 } else { 1.0 };
+                        t.radial_goal = side * self.rng.range(mv.approach_speed);
+                    }
+                    t.radial = if mv.accel > 0.0 {
+                        let step = mv.accel * dt;
+                        t.radial + (t.radial_goal - t.radial).clamp(-step, step)
+                    } else {
+                        t.radial_goal
+                    };
+                    let dr = self.scenario.targets.spawn.distance;
+                    let (d, v) = bounce(t.distance + t.radial * dt, t.radial, dr);
+                    if v.signum() != t.radial.signum() {
+                        t.radial_goal = t.radial_goal.abs() * v.signum();
+                    }
+                    // Keep sideways speed in meters per second: closer is faster across the view.
+                    let k = t.distance / d.max(0.1);
+                    t.rate = [t.rate[0] * k, t.rate[1] * k];
+                    t.goal = [t.goal[0] * k, t.goal[1] * k];
+                    (t.distance, t.radial) = (d, v);
+                }
+                if mv.jumps() {
+                    let (h, air) = (mv.jump_height, mv.jump_air_s);
+                    let g = 8.0 * h / (air * air);
+                    if t.lift <= 0.0 && t.lift_v <= 0.0 {
+                        t.next_jump -= dt;
+                        if t.next_jump <= 0.0 {
+                            t.lift_v = 4.0 * h / air;
+                        }
+                    }
+                    if t.lift > 0.0 || t.lift_v > 0.0 {
+                        t.lift += t.lift_v * dt;
+                        t.lift_v -= g * dt;
+                        if t.lift <= 0.0 {
+                            t.lift = 0.0;
+                            t.lift_v = 0.0;
+                            t.next_jump = self.rng.range(mv.jump_every_s);
+                        }
+                    }
                 }
                 // Bounce off the edges of the spawn area, and off the floor, ceiling
                 // and walls: the spawn area can reach further than the room allows.
@@ -1029,10 +1111,19 @@ impl Sim {
                     t.yaw = old_yaw;
                     t.rate[0] = -old_rate;
                 }
+                // A bounce turns the target around, so it should head that way too.
+                for ((goal, rate), was) in t.goal.iter_mut().zip(t.rate).zip(before) {
+                    if rate.signum() != was.signum() && rate != 0.0 {
+                        *goal = goal.abs() * rate.signum();
+                    }
+                }
                 if before != t.rate {
                     t.last_change = now;
                 }
-                t.pos = from_angles(t.yaw, t.pitch) * t.distance;
+                // Jumps go straight up from the target's base, under the ceiling.
+                let base = from_angles(t.yaw, t.pitch) * t.distance;
+                t.lift = t.lift.min((ceiling - half_h - base.y).max(0.0));
+                t.pos = base + Vec3::Y * t.lift;
             }
             i += 1;
         }
@@ -1094,6 +1185,15 @@ impl Sim {
         let own = Movement { speed: speed.unwrap_or(tc.movement.speed), ..tc.movement.clone() };
         let rate = new_rate(&mut self.rng, &own, distance, pitch, [0.0, 0.0]);
         let next_change = self.rng.range(tc.movement.change_every_s);
+        let mv = &tc.movement;
+        let (radial_goal, next_radial) = if mv.approaches() {
+            let side = if self.rng.next_f32() < 0.5 { -1.0 } else { 1.0 };
+            let every = if mv.approach_every_s.1 > 0.0 { mv.approach_every_s } else { mv.change_every_s };
+            (side * self.rng.range(mv.approach_speed), self.rng.range(every))
+        } else {
+            (0.0, 0.0)
+        };
+        let next_jump = if mv.jumps() { self.rng.range(mv.jump_every_s) } else { 0.0 };
         let height = tc.height * radius / self.scenario.targets.radius.max(1e-6);
         self.targets.push(Target {
             id,
@@ -1105,6 +1205,14 @@ impl Sim {
             pitch,
             distance,
             rate,
+            goal: rate,
+            radial: radial_goal,
+            radial_goal,
+            next_radial,
+            lift: 0.0,
+            lift_v: 0.0,
+            next_jump,
+            last_hit_at: f32::NEG_INFINITY,
             next_change,
             last_change: now,
             age: 0.0,
@@ -1164,6 +1272,17 @@ fn new_rate(rng: &mut Rng, mv: &Movement, distance: f32, pitch: f32, old: [f32; 
 }
 
 /// Keeps an angle inside `r`, reversing the rate when it hits an edge.
+/// Turns `rate` toward `goal` at `accel` m/s², measured on screen at `distance`.
+fn steer(rate: [f32; 2], goal: [f32; 2], accel: f32, distance: f32, pitch: f32, dt: f32) -> [f32; 2] {
+    let c = pitch.to_radians().cos().max(0.2);
+    let (r, g) = ([rate[0] * c, rate[1]], [goal[0] * c, goal[1]]);
+    let (dx, dy) = (g[0] - r[0], g[1] - r[1]);
+    let len = (dx * dx + dy * dy).sqrt();
+    let step = (accel / distance.max(0.1)).to_degrees() * dt;
+    let next = if len <= step { g } else { [r[0] + dx / len * step, r[1] + dy / len * step] };
+    [next[0] / c, next[1]]
+}
+
 fn bounce(v: f32, rate: f32, r: Range) -> (f32, f32) {
     if v < r.0 {
         (r.0, rate.abs())
@@ -1607,6 +1726,194 @@ mod tests {
             checked += 1;
         }
         assert!(checked >= 5, "{checked} targets checked");
+    }
+
+    fn mover(mv: Movement) -> Scenario {
+        let mut s = no_countdown(Scenario::default());
+        s.weapon.kind = WeaponKind::Beam;
+        s.weapon.trigger = Trigger::Always;
+        s.targets.health = 1e9;
+        s.targets.spawn.yaw = Range(-40.0, 40.0);
+        s.targets.movement = mv;
+        s.timing.duration_s = 30.0;
+        s
+    }
+
+    fn look_away() -> Input {
+        Input { aim: Vec3::Y, fire_pressed: false, fire_held: false }
+    }
+
+    /// Screen velocity in degrees per second.
+    fn screen(t: &Target) -> (f32, f32) {
+        (t.rate[0] * t.pitch.to_radians().cos(), t.rate[1])
+    }
+
+    #[test]
+    fn acceleration_slows_down_and_speeds_back_up() {
+        let accel = 20.0;
+        let mv = Movement { kind: MovementKind::Strafe, speed: Range(5.0, 5.0), accel, ..Default::default() };
+        let mut sim = Sim::new(mover(mv), 1);
+        let d = sim.targets()[0].distance;
+        let max_step = (accel / d).to_degrees() * FRAME * 1.05;
+        let mut prev = screen(&sim.targets()[0]);
+        let (mut slow, mut reversals) = (false, 0);
+        for _ in 0..(240 * 10) {
+            sim.step(FRAME, look_away());
+            let t = &sim.targets()[0];
+            let now = screen(t);
+            let dv = ((now.0 - prev.0).powi(2) + (now.1 - prev.1).powi(2)).sqrt();
+            // A bounce off the area's edge flips instantly; everything else is gradual.
+            if now.0.signum() == prev.0.signum() || now.0.abs() < 1.0 {
+                assert!(dv <= max_step, "velocity jumped {dv:.3} deg/s in a frame (limit {max_step:.3})");
+            }
+            if now.0.abs() < 0.5 {
+                slow = true;
+            }
+            if now.0.signum() != prev.0.signum() && now.0 != 0.0 {
+                reversals += 1;
+            }
+            prev = now;
+        }
+        assert!(slow && reversals >= 5, "slowed through reversals: {reversals}");
+        // Full speed again between reversals.
+        let full = (5.0 / d).to_degrees();
+        assert!(prev.0.abs() <= full * 1.01);
+    }
+
+    #[test]
+    fn forward_back_movement_stays_in_range_and_keeps_speed() {
+        let mut s = mover(Movement {
+            kind: MovementKind::Strafe,
+            speed: Range(4.0, 4.0),
+            change_every_s: Range(3.0, 3.0),
+            approach_speed: Range(3.0, 3.0),
+            approach_every_s: Range(0.7, 1.2),
+            ..Default::default()
+        });
+        s.targets.spawn.distance = Range(6.0, 14.0);
+        assert!(s.problems().is_empty(), "{:?}", s.problems());
+        let mut sim = Sim::new(s.clone(), 2);
+        let (mut lo, mut hi) = (f32::MAX, 0.0f32);
+        for _ in 0..(240 * 20) {
+            sim.step(FRAME, look_away());
+            let t = &sim.targets()[0];
+            assert!(t.distance >= 6.0 - 1e-3 && t.distance <= 14.0 + 1e-3, "{}", t.distance);
+            lo = lo.min(t.distance);
+            hi = hi.max(t.distance);
+            // Sideways speed in m/s stays put while the distance changes.
+            let (x, _) = screen(t);
+            let mps = x.abs().to_radians() * t.distance;
+            assert!(mps < 4.0 * 1.02, "{mps:.2} m/s at {:.1} m", t.distance);
+        }
+        assert!(hi - lo > 3.0, "it moved forward and back: {lo:.1}..{hi:.1} m");
+        // Without a distance range there's nowhere to move.
+        s.targets.spawn.distance = Range(10.0, 10.0);
+        assert!(s.problems().iter().any(|p| p.contains("distance range")));
+    }
+
+    #[test]
+    fn jumps_go_up_and_come_down_under_gravity() {
+        let mut s = mover(Movement {
+            kind: MovementKind::Strafe,
+            jump_every_s: Range(0.5, 0.5),
+            jump_height: 1.2,
+            jump_air_s: 0.7,
+            ..Default::default()
+        });
+        s.targets.spawn.pitch = Range(-8.0, -8.0);
+        let mut sim = Sim::new(s, 3);
+        let (mut peak, mut airborne, mut landings, mut air_frames) = (0.0f32, false, 0, 0);
+        let mut airtimes = Vec::new();
+        for _ in 0..(240 * 8) {
+            sim.step(FRAME, look_away());
+            let t = &sim.targets()[0];
+            peak = peak.max(t.lift);
+            if t.lift > 0.0 {
+                airborne = true;
+                air_frames += 1;
+            } else if airborne {
+                airborne = false;
+                landings += 1;
+                airtimes.push(air_frames as f32 * FRAME);
+                air_frames = 0;
+            }
+        }
+        assert!((peak - 1.2).abs() < 0.05, "peak {peak:.2} m");
+        assert!(landings >= 5, "{landings} jumps");
+        for a in airtimes {
+            assert!((a - 0.7).abs() < 0.03, "airtime {a:.3} s");
+        }
+    }
+
+    #[test]
+    fn regen_waits_for_its_delay() {
+        let mut s = builtin("builtin:stability-switch");
+        s.targets.count = 1;
+        s.targets.movement.kind = MovementKind::Static;
+        s.targets.regen_per_s = 100.0;
+        s.targets.regen_delay_s = 0.5;
+        let mut sim = Sim::new(s, 1);
+        let at = sim.targets()[0].pos.normalize();
+        let held = |aim| Input { aim, fire_pressed: false, fire_held: true };
+        for _ in 0..120 {
+            sim.step(FRAME, held(at));
+        }
+        let damaged = sim.targets()[0].health;
+        for _ in 0..108 {
+            sim.step(FRAME, held(Vec3::Y));
+        }
+        assert_eq!(sim.targets()[0].health, damaged, "no healing in the first 0.45 s");
+        for _ in 0..60 {
+            sim.step(FRAME, held(Vec3::Y));
+        }
+        assert!(sim.targets()[0].health > damaged, "healing after the delay");
+    }
+
+    /// Regen smoothness: with a beam, target lifetimes and the target-speed knob,
+    /// each target is a kill to finish in time. Fast regen after a short delay means
+    /// slipping off loses the progress, so unbroken tracking is what succeeds.
+    fn unbroken(slip_every: Option<f32>) -> AdaptiveSummary {
+        let mut s = no_countdown(Scenario::default());
+        s.weapon.kind = WeaponKind::Beam;
+        s.weapon.trigger = Trigger::Hold;
+        s.weapon.damage_per_s = 100.0;
+        s.targets.health = 150.0;
+        s.targets.regen_per_s = 400.0;
+        s.targets.regen_delay_s = 0.1;
+        s.targets.lifetime_s = 4.0;
+        s.targets.movement = Movement { kind: MovementKind::Strafe, accel: 20.0, ..Default::default() };
+        s.adaptive.knob = Knob::TargetSpeed;
+        s.timing.duration_s = 30.0;
+        assert!(s.problems().is_empty(), "{:?}", s.problems());
+        let mut sim = Sim::adaptive(s, 5, None, Mix::Balanced);
+        let mut t = 0.0;
+        while sim.phase() != Phase::Finished {
+            t += FRAME;
+            let slipping = slip_every.is_some_and(|e| t % e > e - 0.3);
+            let aim = if slipping { Vec3::Y } else { sim.targets()[0].pos.normalize() };
+            sim.step(FRAME, Input { aim, fire_pressed: false, fire_held: true });
+        }
+        sim.result().adaptive.unwrap()
+    }
+
+    #[test]
+    fn regen_smoothness_rewards_unbroken_tracking() {
+        let steady = unbroken(None);
+        assert!(steady.outcomes >= 10, "one outcome per target: {}", steady.outcomes);
+        assert_eq!(steady.success_rate, Some(1.0));
+        // Slipping off for 0.3 s every 1.2 s: the target heals about as fast as the beam hurts it, so no kills.
+        let slips = unbroken(Some(1.2));
+        assert_eq!(slips.success_rate, Some(0.0), "{slips:?}");
+        assert!(slips.value < steady.value);
+    }
+
+    #[test]
+    fn new_movement_fields_dont_change_old_fingerprints() {
+        let a = Scenario::default();
+        let mut b = a.clone();
+        b.targets.movement.accel = 10.0;
+        assert_ne!(a.fingerprint(), b.fingerprint(), "using a new field changes it");
+        assert!(a.to_toml().contains("accel"), "files still list every field");
     }
 
     #[test]

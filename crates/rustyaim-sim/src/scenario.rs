@@ -13,6 +13,24 @@ pub const SCHEMA_VERSION: u32 = 1;
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Range(pub f32, pub f32);
 
+impl Default for Range {
+    fn default() -> Self {
+        Range(0.0, 0.0)
+    }
+}
+
+thread_local! {
+    static FINGERPRINTING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Fields added after fingerprints were first stored are left out of the
+/// fingerprint while they're at their "off" value, so adding a field doesn't change
+/// the fingerprint of scenarios that don't use it (which would reset their
+/// ratings). Their defaults must stay at `Default::default()`.
+fn off_in_fingerprint<T: PartialEq + Default>(v: &T) -> bool {
+    FINGERPRINTING.with(std::cell::Cell::get) && *v == T::default()
+}
+
 impl Range {
     pub const fn fixed(v: f32) -> Self {
         Range(v, v)
@@ -258,6 +276,9 @@ pub struct Targets {
     pub health: f32,
     /// Restore health when the crosshair leaves the target (beam only).
     pub regen_per_s: f32,
+    /// Seconds after the last hit before regen starts. 0 heals straight away.
+    #[serde(skip_serializing_if = "off_in_fingerprint")]
+    pub regen_delay_s: f32,
     pub color: String,
     /// Seconds before a destroyed target is replaced.
     pub respawn_delay_s: f32,
@@ -286,6 +307,7 @@ impl Default for Targets {
             height: 1.8,
             health: 100.0,
             regen_per_s: 0.0,
+            regen_delay_s: 0.0,
             color: "#ff5a4e".into(),
             respawn_delay_s: 0.0,
             lifetime_s: 0.0,
@@ -347,11 +369,53 @@ pub struct Movement {
     pub change_every_s: Range,
     /// Share of speed that can go up and down for `random` movement (0 = flat, 1 = any direction).
     pub vertical: f32,
+    /// How quickly a target changes velocity, in m/s². 0 turns and reverses
+    /// instantly; a value makes it slow down and speed back up, and turns curve.
+    #[serde(skip_serializing_if = "off_in_fingerprint")]
+    pub accel: f32,
+    /// Speed toward or away from the player, in m/s, within the spawn distance
+    /// range. `[0, 0]` keeps each target at one distance.
+    #[serde(skip_serializing_if = "off_in_fingerprint")]
+    pub approach_speed: Range,
+    /// Seconds between switching from coming closer to backing away. `[0, 0]`
+    /// uses `change_every_s`.
+    #[serde(skip_serializing_if = "off_in_fingerprint")]
+    pub approach_every_s: Range,
+    /// Seconds on the ground between jumps. `[0, 0]` never jumps.
+    #[serde(skip_serializing_if = "off_in_fingerprint")]
+    pub jump_every_s: Range,
+    /// Height of a jump in meters, and seconds in the air. Together they set
+    /// gravity: 8 × height ÷ airtime².
+    #[serde(skip_serializing_if = "off_in_fingerprint")]
+    pub jump_height: f32,
+    #[serde(skip_serializing_if = "off_in_fingerprint")]
+    pub jump_air_s: f32,
 }
 
 impl Default for Movement {
     fn default() -> Self {
-        Movement { kind: MovementKind::Static, speed: Range(3.0, 5.0), change_every_s: Range(0.4, 1.2), vertical: 0.5 }
+        Movement {
+            kind: MovementKind::Static,
+            speed: Range(3.0, 5.0),
+            change_every_s: Range(0.4, 1.2),
+            vertical: 0.5,
+            accel: 0.0,
+            approach_speed: Range(0.0, 0.0),
+            approach_every_s: Range(0.0, 0.0),
+            jump_every_s: Range(0.0, 0.0),
+            jump_height: 0.0,
+            jump_air_s: 0.0,
+        }
+    }
+}
+
+impl Movement {
+    pub fn approaches(&self) -> bool {
+        self.approach_speed.1 > 0.0
+    }
+
+    pub fn jumps(&self) -> bool {
+        self.jump_height > 0.0 && self.jump_air_s > 0.0
     }
 }
 
@@ -411,9 +475,12 @@ impl Scenario {
         s.description.clear();
         s.author.clear();
         s.tags.clear();
+        FINGERPRINTING.with(|f| f.set(true));
+        let text = s.to_toml();
+        FINGERPRINTING.with(|f| f.set(false));
         // FNV-1a: stable across Rust versions, unlike `DefaultHasher`.
         let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-        for b in s.to_toml().bytes() {
+        for b in text.bytes() {
             h ^= u64::from(b);
             h = h.wrapping_mul(0x0100_0000_01b3);
         }
@@ -488,6 +555,20 @@ impl Scenario {
             "direction change must be at least 0.05 s, min ≤ max",
         );
         check((0.0..=1.0).contains(&m.vertical), "vertical share must be 0–1");
+        check(t.regen_delay_s.is_finite() && (0.0..=10.0).contains(&t.regen_delay_s), "regen delay must be 0–10 s");
+        check(m.accel.is_finite() && (0.0..=500.0).contains(&m.accel), "acceleration must be 0–500 m/s²");
+        check(
+            finite_range(m.approach_speed) && m.approach_speed.0 >= 0.0 && m.approach_speed.1 <= 30.0,
+            "forward/back speed must be 0–30 m/s, min ≤ max",
+        );
+        check(
+            !m.approaches() || sp.distance.0 < sp.distance.1,
+            "forward/back movement needs a spawn distance range to move in (min < max)",
+        );
+        check(finite_range(m.approach_every_s) && m.approach_every_s.0 >= 0.0, "forward/back timing can't be negative");
+        check(finite_range(m.jump_every_s) && m.jump_every_s.0 >= 0.0, "time between jumps can't be negative");
+        check(m.jump_height.is_finite() && (0.0..=10.0).contains(&m.jump_height), "jump height must be 0–10 m");
+        check(m.jump_height == 0.0 || (0.1..=5.0).contains(&m.jump_air_s), "a jump needs an airtime of 0.1–5 s");
         // Targets must fit in the room.
         let half_w = self.arena.size[0] / 2.0;
         check(sp.distance.1 + t.radius < half_w.max(self.arena.size[2] / 2.0), "spawn distance reaches past the walls");

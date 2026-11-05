@@ -1,0 +1,50 @@
+name = "Hop Switch"
+description = "Three bodies strafing with realistic turns and jumps, each taking half a second of beam and healing when you leave them. Destroy one, then move to the next. Adaptive mode rates time on target while you're on a kill. Trains evasive switching."
+author = "RustyAim"
+category = "switching"
+skill = "evasive_switching"
+tags = ["switching", "evasive", "jump"]
+
+[timing]
+duration_s = 60.0
+
+[weapon]
+kind = "beam"
+trigger = "hold"
+damage_per_s = 200.0
+
+[targets]
+count = 3
+shape = "capsule"
+radius = 0.35
+height = 1.7
+health = 100.0
+regen_per_s = 60.0
+health_bar = true
+color = "#c38bff"
+
+[targets.spawn]
+distance = [10.0, 14.0]
+yaw = [-45.0, 45.0]
+pitch = [-5.0, 0.0]
+min_separation = 15.0
+
+[targets.movement]
+kind = "strafe"
+speed = [3.0, 5.0]
+change_every_s = [0.4, 1.2]
+accel = 25.0
+jump_every_s = [1.0, 2.5]
+jump_height = 1.0
+jump_air_s = 0.6
+
+[scoring]
+per_kill = 100.0
+
+[adaptive]
+goal = 0.85
+knob = "target_speed"
+easy = 4.0
+hard = 120.0
+start = 14.0
+engaged_only = true

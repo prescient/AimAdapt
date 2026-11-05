@@ -13,18 +13,21 @@ scenario = "builtin:speed-switch"
 runs = 5
 mode = "adaptive"
 block = "main"
+variants = ["builtin:wide-speed-switch"]
 
 [[items]]
 scenario = "builtin:switch-track"
 runs = 5
 mode = "adaptive"
 block = "main"
+variants = ["builtin:hop-switch"]
 
 [[items]]
 scenario = "builtin:stability-switch"
 runs = 4
 mode = "adaptive"
 block = "secondary"
+variants = ["builtin:depth-stability-switch"]
 
 [[items]]
 scenario = "builtin:timed-grid"
@@ -37,3 +40,4 @@ scenario = "builtin:float-track"
 runs = 3
 mode = "adaptive"
 block = "maintenance"
+variants = ["builtin:unbroken-float"]

@@ -13,24 +13,28 @@ scenario = "builtin:strafe-track"
 runs = 5
 mode = "adaptive"
 block = "main"
+variants = ["builtin:hop-strafe-track"]
 
 [[items]]
 scenario = "builtin:close-strafe-track"
 runs = 5
 mode = "adaptive"
 block = "main"
+variants = ["builtin:unbroken-strafes"]
 
 [[items]]
 scenario = "builtin:switch-track"
 runs = 4
 mode = "adaptive"
 block = "secondary"
+variants = ["builtin:hop-switch"]
 
 [[items]]
 scenario = "builtin:precise-track"
 runs = 4
 mode = "adaptive"
 block = "secondary"
+variants = ["builtin:depth-drift"]
 
 [[items]]
 scenario = "builtin:timed-flicks"
