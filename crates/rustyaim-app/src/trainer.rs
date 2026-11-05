@@ -276,12 +276,28 @@ pub(crate) fn program_args(id: &str, day: &str) -> Vec<String> {
     vec!["--program".into(), id.into(), "--day".into(), day.into()]
 }
 
+/// `--anchor x,y,width` for the trainer, from the app window's outer position and width.
+pub(crate) fn anchor_args(x: i32, y: i32, width: u32) -> [String; 2] {
+    ["--anchor".into(), format!("{x},{y},{width}")]
+}
+
 fn launch(app: AppHandle, state: &AppData, t: &TrainerState, args: &[String]) -> Result<(), String> {
     if t.playing.swap(true, Ordering::SeqCst) {
         return Err("The trainer is already open".into());
     }
     let exe = std::env::current_exe().map_err(err)?;
-    let child = std::process::Command::new(exe).args(args).arg("--db").arg(&state.db_path).spawn().map_err(|e| {
+    let mut cmd = std::process::Command::new(exe);
+    cmd.args(args).arg("--db").arg(&state.db_path);
+    // Open the trainer over this window, where the player keeps it.
+    {
+        use tauri::Manager;
+        if let Some(w) = app.get_webview_window("main")
+            && let (Ok(pos), Ok(size)) = (w.outer_position(), w.outer_size())
+        {
+            cmd.args(anchor_args(pos.x, pos.y, size.width));
+        }
+    }
+    let child = cmd.spawn().map_err(|e| {
         t.playing.store(false, Ordering::SeqCst);
         err(e)
     });

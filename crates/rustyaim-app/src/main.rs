@@ -312,6 +312,14 @@ mod tests {
         assert!(check(&[]).is_ok(), "a normal launch uses the real database");
     }
 
+    /// The app tells the trainer where its window is, in a form the trainer reads.
+    #[test]
+    fn the_trainer_reads_the_apps_window_position() {
+        let a = trainer::anchor_args(-1920, 40, 2560);
+        assert_eq!(a[0], "--anchor");
+        assert_eq!(rustyaim_engine::parse_anchor(&a[1]), Some([-1920, 40, 2560]));
+    }
+
     /// Regression: Start on a program day or workout opened a second app window
     /// because only `--play` was recognized. This checks the exact arguments the
     /// Play and Program screens launch with.

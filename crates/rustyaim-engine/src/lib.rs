@@ -64,6 +64,7 @@ fn parse_and_run(args: &[String]) -> Result<(), String> {
     let mut seed = None;
     let mut smoke = None;
     let mut smoke_seconds = 4.0;
+    let mut anchor = None;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -79,6 +80,7 @@ fn parse_and_run(args: &[String]) -> Result<(), String> {
             "--seed" => seed = it.next().and_then(|s| s.parse().ok()),
             "--smoke" => smoke = it.next().map(PathBuf::from),
             "--smoke-seconds" => smoke_seconds = it.next().and_then(|s| s.parse().ok()).unwrap_or(4.0),
+            "--anchor" => anchor = it.next().and_then(|s| parse_anchor(s)),
             other if id.is_none() && !other.starts_with("--") => id = Some(other.to_string()),
             _ => {}
         }
@@ -162,9 +164,20 @@ fn parse_and_run(args: &[String]) -> Result<(), String> {
         settings,
         db_path: save.then_some(db_path),
         seed,
+        anchor: if smoke.is_some() { None } else { anchor },
         smoke,
     });
     Ok(())
+}
+
+/// `--anchor x,y,width`: the app window's outer position and width in physical
+/// pixels, so the trainer opens over it.
+pub fn parse_anchor(s: &str) -> Option<[i32; 3]> {
+    let v: Vec<i32> = s.split(',').map(|p| p.trim().parse().ok()).collect::<Option<_>>()?;
+    match v[..] {
+        [x, y, w] if w > 0 => Some([x, y, w]),
+        _ => None,
+    }
 }
 
 /// Today's weekday, with days starting at 4 AM like the rest of RustyAim.
@@ -239,6 +252,19 @@ mod tests {
         for item in &sat.items {
             rustyaim_sim::library::resolve(&item.scenario, none).unwrap();
         }
+    }
+
+    /// The trainer opens over the app window: centered across it, tops level.
+    #[test]
+    fn trainer_opens_centered_on_the_app_window() {
+        assert_eq!(parse_anchor("100,50,2400"), Some([100, 50, 2400]));
+        assert_eq!(parse_anchor("-1920, 0, 1600"), Some([-1920, 0, 1600]), "a monitor left of the main one");
+        assert_eq!(parse_anchor("1,2"), None);
+        assert_eq!(parse_anchor("1,2,0"), None);
+        assert_eq!(parse_anchor("a,b,c"), None);
+        assert_eq!(game::window_position([100, 50, 2400], 2120), [240, 50]);
+        // A game window wider than the app still centers on it.
+        assert_eq!(game::window_position([500, 80, 1200], 2120), [40, 80]);
     }
 
     /// Bot runs must never land in a player's history, so `--smoke` needs `--db`.

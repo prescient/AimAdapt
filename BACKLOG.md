@@ -27,6 +27,7 @@ Last reviewed: Nov 4, 2026 (after the first playtest session).
 - [x] Moving targets bounce off the room's floor, ceiling and walls, not just their spawn area (Float Track sank through the floor). From [playtesting](PLAYTEST.md).
 - [x] Time-left bars on timed targets, and timed targets change color by wave (orange-red, then blue, by default), so older and newer targets are easy to tell apart. Health bars for switching targets that heal. All scenario options. From [playtesting](PLAYTEST.md).
 - [x] `--dump-snapshot` and `--smoke` only run against a test database (`--db`).
+- [x] The game window opens over the app window (centered across it, tops level), so it lands where you keep the app.
 - [x] Movement like players move, from the FAR comparison: acceleration (slow down and speed back up at turns, curved random turns), movement toward and away from the player, and jumps with gravity.
 - [x] Regen with a delay, and "finished in time" ratings for regen targets, so smoothness drills reward unbroken tracking. Insights shows unbroken stretches on target.
 - [x] At least two scenarios per sub-skill (29 built-ins), with Core Week alternating each drill and its variant week by week.

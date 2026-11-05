@@ -18,7 +18,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::text::FontSize;
 use bevy::window::{
     CursorGrabMode, CursorOptions, Monitor, MonitorSelection, PresentMode, PrimaryMonitor, VideoMode,
-    VideoModeSelection, WindowMode,
+    VideoModeSelection, WindowMode, WindowPosition,
 };
 use chrono::{Local, NaiveDateTime};
 use rustyaim_sim::adaptive::Knob;
@@ -54,6 +54,15 @@ pub struct PlayOptions {
     pub seed: u64,
     /// Smoke test: a bot plays, screenshots go in this folder, then the app exits.
     pub smoke: Option<PathBuf>,
+    /// The app window's outer position and width (physical pixels), to open over.
+    pub anchor: Option<[i32; 3]>,
+}
+
+/// Where the trainer window opens over the app window: centered across it, with
+/// the tops level. `anchor` is the app window's outer x, y and width.
+pub fn window_position(anchor: [i32; 3], window_width: u32) -> [i32; 2] {
+    let [x, y, w] = anchor;
+    [x + (w - window_width as i32) / 2, y]
 }
 
 pub fn run(opts: PlayOptions) -> AppExit {
@@ -72,6 +81,15 @@ pub fn run(opts: PlayOptions) -> AppExit {
             _ => WindowMode::BorderlessFullscreen(MonitorSelection::Current),
         },
         resolution: (size[0], size[1]).into(),
+        // Over the app window, so it opens where you keep it (and full screen goes
+        // on that monitor).
+        position: match opts.anchor {
+            Some(a) => {
+                let [x, y] = window_position(a, size[0]);
+                WindowPosition::At(IVec2::new(x, y))
+            }
+            None => WindowPosition::Automatic,
+        },
         ..default()
     };
     let mut game = Game {
