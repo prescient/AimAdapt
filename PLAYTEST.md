@@ -35,6 +35,16 @@ All of these have regression tests (see [TESTING.md](TESTING.md)).
 - **Insights for switching** shows kills a minute, acquisition time (kill to reaching the next target) and on-target share while killing, as separate numbers.
 - Not done yet: offering another calibration run after a long break, and kill pace for Timed Grid if the bars and colors aren't enough (both in [BACKLOG.md](BACKLOG.md)).
 
+## Session 3: Nov 5, 2026 (Core Week, Thursday)
+
+### Not working
+- **Fixed: Hop Strafe Track barely moves side to side.** It reversed every 0.35–1 s, but its acceleration (25 m/s²) took 0.4 s to turn around, so most of each strafe was spent turning: strafes were 10.7° wide against Strafe Track's 15.4°. Hop Clicks, Hop Switch and Unbroken Strafes had the same problem. Now they strafe for 0.5–1.5 s and turn faster (45–50 m/s²), and are at least as wide as the plain versions. Regression test on strafe width. Their ratings start over with a calibration run.
+- **Fixed: hard to lock the mouse to the game after alt-tabbing back.** On Windows a lock confines the cursor to the window, and Windows drops it when focus moves away. After a quick alt-tab the game could still think the mouse was locked, so it never locked it again, and clicking didn't help. It now locks again when focus comes back, on every click, and every half second while focused. The lock itself only shows in the game window, so the test is on the decision logic.
+
+### Ideas and changes
+- **Done: put the play area where I want it.** It was always centered, but the game window is kept near the top of the screen. The play area now has a position setting: centered, top, bottom or custom, with a preview.
+- **Done: one decimal on target speeds** (48.5 °/s). Whole degrees were too coarse to see a change.
+
 ## Session 2: Nov 4, 2026 (Core Week, Wednesday)
 
 ### Not working

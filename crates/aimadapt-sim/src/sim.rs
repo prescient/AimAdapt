@@ -2356,6 +2356,55 @@ mod tests {
         assert!(turned > 360.0, "it keeps curving: {turned:.0}°");
     }
 
+    /// Median width of a strafe: degrees of yaw between one reversal and the next,
+    /// following the first target (standard mode, nobody shooting).
+    fn strafe_sweep(s: &Scenario, seed: u64) -> f32 {
+        let mut s = s.clone();
+        s.timing.duration_s = 40.0;
+        let mut sim = Sim::new(s, seed);
+        let (mut id, mut last_turn, mut dir) = (0, None::<f32>, 0.0f32);
+        let mut sweeps = Vec::new();
+        while sim.phase() != Phase::Finished {
+            sim.step(FRAME, Input { aim: Vec3::Y, fire_pressed: false, fire_held: false });
+            let Some(t) = sim.targets().first() else { continue };
+            if t.id != id {
+                (id, last_turn, dir) = (t.id, None, 0.0);
+            }
+            let d = t.rate[0].signum();
+            if t.rate[0].abs() > 1e-3 && d != dir {
+                if dir != 0.0 {
+                    if let Some(y) = last_turn {
+                        sweeps.push((t.yaw - y).abs());
+                    }
+                    last_turn = Some(t.yaw);
+                }
+                dir = d;
+            }
+        }
+        sweeps.sort_by(f32::total_cmp);
+        sweeps[sweeps.len() / 2]
+    }
+
+    /// Playtest: Hop Strafe Track barely moved side to side. It reversed every
+    /// 0.35–1 s but took 0.4 s to turn around, so most of each strafe was spent
+    /// turning: its strafes were 10.7° wide against Strafe Track's 15.4°. Drills
+    /// with gradual turns must sweep at least as wide as the plain version.
+    #[test]
+    fn gradual_turns_still_sweep_as_wide_as_plain_strafes() {
+        let sweep =
+            |id: &str| (1..=3).map(|seed| strafe_sweep(&builtin(&format!("builtin:{id}")), seed)).sum::<f32>() / 3.0;
+        let plain_track = sweep("strafe-track");
+        let plain_clicks = sweep("timed-strafe-clicks");
+        for (id, plain) in
+            [("hop-strafe-track", plain_track), ("unbroken-strafes", plain_track), ("hop-clicks", plain_clicks)]
+        {
+            let w = sweep(id);
+            assert!(w >= plain * 0.98, "{id} strafes {w:.1}° wide, the plain version {plain:.1}°");
+        }
+        let w = sweep("hop-switch");
+        assert!(w >= 12.0, "hop-switch strafes {w:.1}° wide");
+    }
+
     fn builtin(id: &str) -> Scenario {
         let e = crate::library::builtins().into_iter().find(|e| e.id == id).unwrap();
         no_countdown(e.scenario.unwrap())

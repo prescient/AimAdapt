@@ -46,9 +46,13 @@ pub struct Display {
     pub resolution: Option<[u32; 2]>,
     /// Exclusive full screen only. Unset: the highest rate at that resolution.
     pub refresh_hz: Option<u32>,
-    /// Draw the game in a centered area of this many pixels with black around it,
-    /// e.g. to play at 24" size on a larger monitor. Unset: the whole screen.
+    /// Draw the game in an area of this many pixels with black around it, e.g. to
+    /// play at 24" size on a larger monitor. Unset: the whole screen.
     pub play_area: Option<[u32; 2]>,
+    /// Where the play area sits: the share of the black space that goes to its
+    /// left and above it, 0–1 each. Unset: centered (`[0.5, 0.5]`). `[0.5, 0.0]`
+    /// puts it at the top of the screen.
+    pub play_area_position: Option<[f32; 2]>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -63,15 +67,18 @@ pub enum DisplayMode {
 }
 
 impl Display {
-    /// The play area actually used inside a screen of `size` pixels: centered, no
-    /// bigger than the screen. `None` means the whole screen.
+    /// The play area actually used inside a screen of `size` pixels: its top-left
+    /// corner and size, at its position and no bigger than the screen. `None` means
+    /// the whole screen.
     pub fn play_area_in(&self, size: [u32; 2]) -> Option<([u32; 2], [u32; 2])> {
         let [w, h] = self.play_area?;
         let (w, h) = (w.min(size[0]), h.min(size[1]));
         if w == size[0] && h == size[1] {
             return None;
         }
-        Some(([(size[0] - w) / 2, (size[1] - h) / 2], [w, h]))
+        let [fx, fy] = self.play_area_position.unwrap_or([0.5, 0.5]).map(|f| f.clamp(0.0, 1.0));
+        let at = |spare: u32, f: f32| (spare as f32 * f).round() as u32;
+        Some(([at(size[0] - w, fx), at(size[1] - h, fy)], [w, h]))
     }
 
     /// The play area for a `diagonal_in`-inch screen inside a monitor of
@@ -134,6 +141,9 @@ impl PlayerSettings {
         if !px_ok(self.display.play_area) {
             p.push("play area must be at least 320x240".into());
         }
+        if self.display.play_area_position.is_some_and(|v| v.iter().any(|f| !(0.0..=1.0).contains(f))) {
+            p.push("play area position must be 0–100% each way".into());
+        }
         if self.display.refresh_hz.is_some_and(|r| !(24..=1000).contains(&r)) {
             p.push("refresh rate must be 24–1000 Hz".into());
         }
@@ -166,6 +176,25 @@ mod tests {
     }
 
     #[test]
+    /// Playtest: the play area was always centered, but the player keeps their
+    /// window near the top of the screen. It can sit anywhere now.
+    fn play_area_can_sit_at_the_top_or_anywhere() {
+        let d = Display { play_area: Some([1920, 1080]), play_area_position: Some([0.5, 0.0]), ..Default::default() };
+        assert_eq!(d.play_area_in([3840, 2160]), Some(([960, 0], [1920, 1080])), "top center");
+        let d = Display { play_area_position: Some([0.0, 1.0]), ..d };
+        assert_eq!(d.play_area_in([3840, 2160]), Some(([0, 1080], [1920, 1080])), "bottom left");
+        let d = Display { play_area_position: Some([0.25, 0.1]), ..d };
+        assert_eq!(d.play_area_in([3840, 2160]), Some(([480, 108], [1920, 1080])));
+        // Out-of-range positions are rejected, and clamped if they get through.
+        let p = PlayerSettings {
+            display: Display { play_area_position: Some([1.5, 0.0]), ..d.clone() },
+            ..Default::default()
+        };
+        assert!(p.problems().iter().any(|x| x.contains("position")), "{:?}", p.problems());
+        assert_eq!(p.display.play_area_in([3840, 2160]), Some(([1920, 0], [1920, 1080])));
+    }
+
+    #[test]
     fn play_area_is_centered_and_clamped() {
         let d = Display { play_area: Some([1920, 1080]), ..Default::default() };
         assert_eq!(d.play_area_in([3840, 2160]), Some(([960, 540], [1920, 1080])));
@@ -183,6 +212,7 @@ mod tests {
                 resolution: Some([1280, 960]),
                 refresh_hz: Some(240),
                 play_area: None,
+                play_area_position: None,
             },
             ..Default::default()
         };

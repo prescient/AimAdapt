@@ -29,8 +29,8 @@ pitch = [-4.0, 0.0]
 [targets.movement]
 kind = "strafe"
 speed = [4.0, 6.0]
-change_every_s = [0.35, 1.0]
-accel = 25.0
+change_every_s = [0.5, 1.4]
+accel = 45.0
 jump_every_s = [0.8, 2.0]
 jump_height = 1.1
 jump_air_s = 0.65

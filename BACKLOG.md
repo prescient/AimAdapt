@@ -16,7 +16,8 @@ Last reviewed: Nov 4, 2026 (after the first playtest session).
 
 ### Done
 - [x] Full-screen window with raw mouse input and no frame cap. Sensitivity in cm/360 and DPI; FOV horizontal at 16:9.
-- [x] Display modes: borderless; exclusive at any resolution and refresh rate the monitor offers (e.g. stretched 4:3); windowed. Optional centered play area, with a helper that sizes it from screen diagonals.
+- [x] Display modes: borderless; exclusive at any resolution and refresh rate the monitor offers (e.g. stretched 4:3); windowed. Optional play area, centered or at any position (top, bottom or custom, from playtesting), with a helper that sizes it from screen diagonals.
+- [x] The mouse locks again after alt-tab: on focus, on every click and every half second while focused (from playtesting).
 - [x] Gridded room, sphere and capsule targets, hit flash, and a HUD showing timer, score or rating, hit rate, kills and FPS.
 - [x] Countdown, results screen, and Esc, R and Space controls.
 - [x] Simulation: angle-space movement with bounces at the spawn edge, ray hits, 60 Hz beam ticks, and a seeded RNG, so a seed replays the same run.

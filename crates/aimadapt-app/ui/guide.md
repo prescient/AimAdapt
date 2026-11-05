@@ -40,7 +40,7 @@ The trainer is a separate game window. It opens over the app window: centered ac
 
 | Key | What it does |
 |---|---|
-| Mouse | Aim. The cursor is locked to the window while it has focus. |
+| Mouse | Aim. The cursor is locked to the window while it has focus, and locks again by itself when you come back from another window. |
 | Left click | Fire. Some scenarios fire while you hold it, or fire all the time. Clicking also locks the cursor again. |
 | R | Restart the current run. |
 | Space | After a run: play it again, or go to the next run in a workout. |
@@ -248,7 +248,8 @@ Settings holds your profiles. Each profile has its own sensitivity, DPI, field o
 - **Mode:** Borderless (full screen at your desktop resolution), Exclusive full screen (any resolution and refresh rate your monitor supports, for example stretched 4:3) or Window.
 - **Resolution:** for a window, its size. For exclusive full screen, the screen mode.
 - **Refresh rate:** exclusive full screen only. Leave it empty for the highest.
-- **Play area:** draws the game in a centered area with black around it, so a big monitor plays like a smaller one. **Set play area** works it out from the screen size you want and your monitor's size; **Use whole screen** turns it off.
+- **Play area:** draws the game in a smaller area with black around it, so a big monitor plays like a smaller one. **Set play area** works it out from the screen size you want and your monitor's size; **Use whole screen** turns it off.
+- **Play area position:** centered, at the top or bottom of the screen, or a custom spot (how far from the left and from the top, as a percentage of the black space). The preview shows where it will be.
 
 Sensitivity is in degrees per mouse count, so it stays the same at any resolution or play-area size.
 
@@ -265,7 +266,7 @@ Nothing is sent anywhere. Deleting one of your scenarios or workouts removes the
 
 ## Troubleshooting {#troubleshooting}
 
-- **The mouse isn't locked to the trainer.** Click inside the trainer window to lock it again, for example after switching windows.
+- **The mouse isn't locked to the trainer.** It locks again by itself within half a second of the trainer getting focus back. If it doesn't, click inside the trainer window.
 - **A rating started over.** The scenario's settings changed, so it calibrates again. This happens when you edit a scenario, and when an update changes a built-in.
 - **No KovaaK's runs.** Library & import shows where AimAdapt looked. It searches every Steam library for FPSAimTrainer\stats. Use **Rescan folder** after installing KovaaK's.
 - **The trainer opens in the wrong place.** It opens over the app window, so move the app window where you want the trainer, or use full screen.
@@ -273,6 +274,9 @@ Nothing is sent anywhere. Deleting one of your scenarios or workouts removes the
 ## What's new {#whats-new}
 
 **November 2026**
+- The play area can sit anywhere on the screen, for example near the top, instead of always centered.
+- The mouse locks to the trainer again by itself after alt-tabbing.
+- Hop Strafe Track, Unbroken Strafes, Hop Switch and Hop Clicks strafe further side to side. Their ratings start with a new calibration run.
 - Target speeds show one decimal (48.5 °/s), so small changes are visible.
 - RustyAim is now AimAdapt. Your data moves to the new folder on the first run.
 - A user guide in the app (this page).

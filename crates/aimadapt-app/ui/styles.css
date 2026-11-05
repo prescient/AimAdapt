@@ -273,3 +273,8 @@ svg text { font-family: var(--font); }
   .help-layout { flex-direction: column; }
   .help-toc { position: static; flex: none; width: 100%; display: flex; flex-wrap: wrap; }
 }
+
+/* Play area position */
+.area-custom { display: flex; flex-wrap: wrap; gap: 8px; }
+.area-preview { display: flex; align-items: center; gap: 12px; grid-column: 1 / -1; }
+.area-preview svg { flex: none; }

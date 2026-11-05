@@ -123,6 +123,7 @@ pub fn run(opts: PlayOptions) -> AppExit {
         .insert_resource(ClearColor(Color::srgb(0.05, 0.06, 0.08)))
         .insert_resource(GlobalAmbientLight { color: Color::WHITE, brightness: 600.0, ..default() })
         .insert_resource(game)
+        .init_resource::<CursorLock>()
         .add_systems(Startup, (setup_cameras, setup_hud))
         .add_systems(
             Update,
@@ -658,23 +659,68 @@ fn keys(keys: Res<ButtonInput<KeyCode>>, mut game: ResMut<Game>, mut exit: Messa
     }
 }
 
-/// Locks the cursor while the window has focus; clicking re-locks it.
+/// How often the lock is applied again while the window has focus.
+const RELOCK_S: f32 = 0.5;
+
+/// What the cursor system knows between frames.
+#[derive(Resource, Default)]
+struct CursorLock {
+    focused: bool,
+    since_lock: f32,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Grab {
+    Lock,
+    Release,
+    Keep,
+}
+
+/// Whether to lock the cursor this frame. On Windows a lock confines the cursor to
+/// the window, and Windows drops that when focus moves away. After a quick alt-tab
+/// the game may never see the window lose focus, so its own state still says
+/// "locked" while the cursor is free. So the lock is applied again whenever focus
+/// comes back, on every click, and every `RELOCK_S` while focused, whatever the
+/// state says.
+fn grab_action(lock: &mut CursorLock, focused: bool, clicked: bool, locked: bool, dt: f32) -> Grab {
+    let regained = focused && !lock.focused;
+    lock.focused = focused;
+    if !focused {
+        return if locked { Grab::Release } else { Grab::Keep };
+    }
+    lock.since_lock += dt;
+    if regained || clicked || !locked || lock.since_lock >= RELOCK_S {
+        lock.since_lock = 0.0;
+        return Grab::Lock;
+    }
+    Grab::Keep
+}
+
+/// Locks the cursor while the window has focus (see `grab_action`).
 fn cursor(
     window: Single<&Window>,
     mut cursor: Single<&mut CursorOptions>,
     mouse: Res<ButtonInput<MouseButton>>,
+    time: Res<Time>,
+    mut lock: ResMut<CursorLock>,
     game: Res<Game>,
 ) {
     if game.smoke.is_some() {
         return;
     }
-    let want = window.focused;
-    if want && cursor.grab_mode != CursorGrabMode::Locked && (mouse.just_pressed(MouseButton::Left) || cursor.visible) {
-        cursor.grab_mode = CursorGrabMode::Locked;
-        cursor.visible = false;
-    } else if !want && cursor.grab_mode != CursorGrabMode::None {
-        cursor.grab_mode = CursorGrabMode::None;
-        cursor.visible = true;
+    let locked = cursor.grab_mode == CursorGrabMode::Locked;
+    match grab_action(&mut lock, window.focused, mouse.just_pressed(MouseButton::Left), locked, time.delta_secs()) {
+        // Assigning marks the options changed, so Bevy applies the lock again even
+        // when the value is the same.
+        Grab::Lock => {
+            cursor.grab_mode = CursorGrabMode::Locked;
+            cursor.visible = false;
+        }
+        Grab::Release => {
+            cursor.grab_mode = CursorGrabMode::None;
+            cursor.visible = true;
+        }
+        Grab::Keep => {}
     }
 }
 
@@ -1248,5 +1294,34 @@ mod tests {
         assert_eq!(rate_word(Knob::Radius, false), "On target");
         assert_eq!(rate_word(Knob::Radius, true), "Hit rate");
         assert_eq!(rate_word(Knob::KillPace, false), "On pace");
+    }
+
+    /// Playtest: after alt-tabbing out and back, the mouse was hard to lock to the
+    /// game again. Windows drops the lock when focus moves away; after a quick
+    /// alt-tab the game still thought it was locked, so it never locked it again,
+    /// and clicking didn't help. Now it locks again on focus, on clicks and every
+    /// half second, even when it thinks it's already locked.
+    #[test]
+    fn the_cursor_locks_again_after_alt_tab() {
+        let mut l = CursorLock::default();
+        let dt = 1.0 / 240.0;
+        assert_eq!(grab_action(&mut l, true, false, false, dt), Grab::Lock, "locks on start");
+        assert_eq!(grab_action(&mut l, true, false, true, dt), Grab::Keep);
+        // Focus moves away: release it.
+        assert_eq!(grab_action(&mut l, false, false, true, dt), Grab::Release);
+        assert_eq!(grab_action(&mut l, false, false, false, dt), Grab::Keep);
+        // Focus comes back: lock again.
+        assert_eq!(grab_action(&mut l, true, false, false, dt), Grab::Lock);
+        // The stale case: the game still thinks it's locked, but Windows dropped it.
+        // A click locks it again, and so does the next periodic lock.
+        assert_eq!(grab_action(&mut l, true, true, true, dt), Grab::Lock, "a click always locks");
+        let mut relocked = false;
+        for _ in 0..(RELOCK_S / dt) as usize + 2 {
+            relocked |= grab_action(&mut l, true, false, true, dt) == Grab::Lock;
+        }
+        assert!(relocked, "locks again within {RELOCK_S} s without a click");
+        // And a focus change the game sees as regaining focus locks straight away.
+        l.focused = false;
+        assert_eq!(grab_action(&mut l, true, false, true, dt), Grab::Lock);
     }
 }

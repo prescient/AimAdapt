@@ -20,7 +20,8 @@ Requirements: Windows 10 or 11 with the WebView2 runtime (included with Windows 
 - Sensitivity in cm/360 and DPI, or in a game's own units (Overwatch 2, Valorant, Counter-Strike 2, Apex Legends, Call of Duty).
 - FOV is horizontal at 16:9.
 - Display: borderless, exclusive full screen at any resolution and refresh rate the monitor supports (for example stretched 4:3), or windowed.
-- Optional centered play area, so a large monitor can play at the size of a smaller one.
+- Optional play area, so a large monitor can play at the size of a smaller one. It's centered, or placed where you like (for example near the top of the screen).
+- The mouse locks to the game again as soon as you're back from another window.
 - The game window opens over the app window: centered across it, with the tops level, and full screen goes on the app's monitor.
 - 29 built-in scenarios across nine sub-skills, at least two for each:
   - **Clicking:** static, dynamic, linear.

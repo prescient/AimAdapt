@@ -32,8 +32,8 @@ min_separation = 15.0
 [targets.movement]
 kind = "strafe"
 speed = [3.0, 5.0]
-change_every_s = [0.4, 1.2]
-accel = 25.0
+change_every_s = [0.5, 1.4]
+accel = 45.0
 jump_every_s = [1.0, 2.5]
 jump_height = 1.0
 jump_air_s = 0.6

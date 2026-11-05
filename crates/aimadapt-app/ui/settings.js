@@ -205,7 +205,8 @@ function profileEditor(p) {
           <span class="help">${disp.mode === "borderless" ? "Borderless always uses the desktop resolution." : "Type any size, like 1440x1080."}</span></label>
         ${disp.mode === "exclusive" ? num_("Refresh rate", "settings.display.refresh_hz", 'min="24" max="1000" step="1" placeholder="Highest"', "Hz") : ""}
         <label class="form-row"><span>Play area</span><span class="field"><input type="text" list="resolutions" data-pfield="settings.display.play_area" data-kind="size" placeholder="Whole screen" value="${esc(sizeText(disp.play_area))}"></span>
-          <span class="help">Draws the game in a centered area with black around it, so a big monitor plays like a smaller one.</span></label>
+          <span class="help">Draws the game in a smaller area with black around it, so a big monitor plays like a smaller one.</span></label>
+        ${disp.play_area ? playAreaPosition(disp, screen) : ""}
       </div>
       <div class="size-helper">
         <span>Fit the play area to a</span>
@@ -219,6 +220,38 @@ function profileEditor(p) {
       <datalist id="resolutions">${RESOLUTIONS.map((r) => `<option value="${r}">`).join("")}</datalist>
       <div class="small muted">Sensitivity is in degrees per mouse count, so it stays the same at any resolution or play-area size. FOV is horizontal on a 16:9 screen; 4:3 areas see a little less at the sides, as in most shooters.</div>
     </section>`;
+}
+
+// Where the play area sits on the screen: a share of the black space to its left
+// and above it, 0–1 each (unset = centered). Matches Display::play_area_in in Rust.
+const AREA_SPOTS = { center: [0.5, 0.5], top: [0.5, 0], bottom: [0.5, 1] };
+function areaSpot(pos) {
+  const [x, y] = pos ?? [0.5, 0.5];
+  return Object.entries(AREA_SPOTS).find(([, v]) => v[0] === x && v[1] === y)?.[0] ?? "custom";
+}
+
+function playAreaPosition(disp, screen) {
+  const pos = disp.play_area_position ?? [0.5, 0.5];
+  const spot = ui.settings.areaCustom ? "custom" : areaSpot(disp.play_area_position);
+  const pct = (f) => Math.round(f * 1000) / 10;
+  return `<label class="form-row"><span>Play area position</span><select class="select" data-action-change="area-spot">
+      ${[["center", "Centered"], ["top", "Top of the screen"], ["bottom", "Bottom of the screen"], ["custom", "Custom"]].map(([v, l]) => `<option value="${v}" ${spot === v ? "selected" : ""}>${l}</option>`).join("")}
+    </select><span class="help">Where the play area sits on your screen, for example near the top if that's where you keep your game window.</span></label>
+    ${spot === "custom" ? `<div class="form-row"><span>Custom position</span><span class="area-custom">
+      <span class="field small-field"><input type="number" min="0" max="100" step="1" data-area="0" value="${pct(pos[0])}" aria-label="From the left"><span class="muted small">% from left</span></span>
+      <span class="field small-field"><input type="number" min="0" max="100" step="1" data-area="1" value="${pct(pos[1])}" aria-label="From the top"><span class="muted small">% from top</span></span></span>
+      <span class="help">0% puts it against the left or top edge, 50% centers it, 100% puts it against the right or bottom.</span></div>` : ""}
+    ${areaPreview(disp, screen)}`;
+}
+
+// A small picture of the screen with the play area drawn where it will be.
+function areaPreview(disp, screen) {
+  const pos = disp.play_area_position ?? [0.5, 0.5];
+  const W = 160, H = Math.round((W * screen[1]) / screen[0]);
+  const [aw, ah] = [Math.min(1, disp.play_area[0] / screen[0]) * W, Math.min(1, disp.play_area[1] / screen[1]) * H];
+  const [ax, ay] = [(W - aw) * pos[0], (H - ah) * pos[1]];
+  return `<div class="area-preview" aria-label="Play area preview"><svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" rx="3" fill="#000" stroke="var(--control)"/><rect x="${ax.toFixed(1)}" y="${ay.toFixed(1)}" width="${aw.toFixed(1)}" height="${ah.toFixed(1)}" fill="#3a3f4b" stroke="var(--rust)"/></svg>
+      <span class="small muted">Your screen (${screen[0]}x${screen[1]}) with the play area</span></div>`;
 }
 
 function crosshairPreview(c) {
@@ -350,11 +383,28 @@ document.addEventListener("input", (e) => {
     refreshSettingsBits();
     recheckProfiles();
   } else if (el.dataset.helper) ui.settings.sizeHelper[el.dataset.helper] = Number(el.value);
+  else if (el.dataset.area !== undefined && el.value !== "") {
+    const d = selectedProfile().settings.display;
+    const pos = [...(d.play_area_position ?? [0.5, 0.5])];
+    pos[Number(el.dataset.area)] = Math.min(1, Math.max(0, Number(el.value) / 100));
+    d.play_area_position = pos;
+    const prev = document.querySelector(".area-preview");
+    if (prev) prev.outerHTML = areaPreview(d, screenPx());
+    refreshSettingsBits();
+    recheckProfiles();
+  }
 });
 
 document.addEventListener("change", (e) => {
   const el = e.target;
   if (el.dataset.actionChange === "switch-profile") switchProfile(el.value);
+  else if (el.dataset.actionChange === "area-spot") {
+    const d = selectedProfile().settings.display;
+    ui.settings.areaCustom = el.value === "custom";
+    if (el.value !== "custom") d.play_area_position = el.value === "center" ? null : AREA_SPOTS[el.value];
+    render();
+    recheckProfiles();
+  }
   else if (el.dataset.pfield && (el.tagName === "SELECT" || el.type === "checkbox" || el.type === "color")) {
     setProfileField(el);
     render();
