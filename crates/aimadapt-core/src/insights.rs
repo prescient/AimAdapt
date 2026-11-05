@@ -50,7 +50,7 @@ pub fn higher_is_harder(knob: &str) -> bool {
 pub fn format_value(knob: &str, v: f64) -> String {
     match knob {
         "lifetime" | "kill_pace" => format!("{v:.2} s"),
-        "target_speed" => format!("{v:.0} °/s"),
+        "target_speed" => format!("{v:.1} °/s"),
         _ => format!("{v:.3} m"),
     }
 }
@@ -1142,6 +1142,13 @@ fn notes(i: &Insights) -> Vec<Note> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Playtest: whole degrees per second were too coarse for changes.
+    #[test]
+    fn target_speed_and_its_changes_show_one_decimal() {
+        assert_eq!(format_value("target_speed", 48.46), "48.5 °/s");
+        assert_eq!(format_value("target_speed", (48.9f64 - 48.4).abs()), "0.5 °/s");
+    }
     use crate::parse::RunFile;
     use crate::telemetry::{EngineRun, SampleRow, ShotRow, TargetRow};
     use chrono::NaiveDate;

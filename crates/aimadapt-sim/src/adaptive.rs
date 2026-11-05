@@ -129,7 +129,7 @@ impl Knob {
     pub fn format(self, v: f32) -> String {
         match self {
             Knob::Lifetime | Knob::KillPace => format!("{v:.2} s"),
-            Knob::TargetSpeed => format!("{v:.0} °/s"),
+            Knob::TargetSpeed => format!("{v:.1} °/s"),
             Knob::Radius | Knob::Auto => format!("{v:.3} m"),
         }
     }
@@ -515,6 +515,15 @@ impl Rating {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Playtest: whole degrees per second were too coarse to see a change (a rating
+    /// moving from 48.4 to 48.9 °/s showed as 48 → 49, or not at all).
+    #[test]
+    fn target_speed_shows_one_decimal() {
+        assert_eq!(Knob::TargetSpeed.format(48.46), "48.5 °/s");
+        assert_eq!(Knob::TargetSpeed.format(12.0), "12.0 °/s");
+        assert_eq!(Knob::Lifetime.format(0.624), "0.62 s");
+    }
 
     fn cfg() -> Resolved {
         Resolved { knob: Knob::Lifetime, easy: 3.0, hard: 0.25, start: 1.2, goal: 0.85, segment_s: 2.0 }

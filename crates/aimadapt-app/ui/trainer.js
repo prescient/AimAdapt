@@ -69,7 +69,7 @@ const higherIsHarder = (knob) => knob === "target_speed";
 function fmtKnob(knob, v) {
   if (v === null || v === undefined) return "–";
   if (knob === "lifetime" || knob === "kill_pace") return `${v.toFixed(2)} s`;
-  if (knob === "target_speed") return `${Math.round(v)} °/s`;
+  if (knob === "target_speed") return `${v.toFixed(1)} °/s`;
   return `${v.toFixed(3)} m`;
 }
 const knobWord = (knob) => ({ target_speed: "tracking speed", lifetime: "speed", kill_pace: "kill pace" })[knob] ?? "size";

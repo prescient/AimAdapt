@@ -66,7 +66,7 @@ Adaptive mode rates you on one setting per scenario, in real units, and keeps ea
 | Target lifetime | seconds | Timed clicking | "0.62 s": you hit 85% of targets that last 0.62 s. Lower is better. |
 | Kill pace | seconds between kills | Grids, untimed flicks, speed switching | "0.80 s": 85% of your kills come within 0.8 s of the one before. Lower is better. |
 | Target size | radius in meters | Precision drills | "0.085 m": the smallest target you hit (or stay on) 85% of the time. Lower is better. |
-| Target speed | degrees per second across your view | Tracking, strafe clicking, switching | "48 °/s": you stay on target 85% of the time at that speed. Higher is better. |
+| Target speed | degrees per second across your view | Tracking, strafe clicking, switching | "48.5 °/s": you stay on target 85% of the time at that speed. Higher is better. |
 
 Target speed is in degrees per second because that's how fast your hand has to turn. A target moving at a fixed speed in meters per second crosses your view faster when it's close and slower when it's far, so on scenarios with a range of distances the figure is the speed at the average distance.
 
@@ -273,6 +273,7 @@ Nothing is sent anywhere. Deleting one of your scenarios or workouts removes the
 ## What's new {#whats-new}
 
 **November 2026**
+- Target speeds show one decimal (48.5 °/s), so small changes are visible.
 - RustyAim is now AimAdapt. Your data moves to the new folder on the first run.
 - A user guide in the app (this page).
 - Each drill is rated on what it trains: kill pace for Static Grid, Timed Grid and Wide Flicks; target size for Micro Flicks and Precise Track; target speed for Strafe Clicks. These scenarios start with a new calibration run.

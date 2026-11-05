@@ -135,7 +135,7 @@ Score = kills × `per_kill` + hits × `per_hit` + misses × `per_miss` + damage 
 Every scenario can be played in **Standard** mode, at the difficulty written in the file, or **Adaptive** mode. Adaptive mode rates you on one setting, the `knob`, in real units:
 
 - **Target lifetime** (seconds) for timed clicking. Your rating might be "0.62 s": you hit 85% of targets that last 0.62 s.
-- **Target speed** (degrees per second across your view) for tracking. "48 °/s" means you stay on target 85% of the time at that speed.
+- **Target speed** (degrees per second across your view) for tracking. "48.5 °/s" means you stay on target 85% of the time at that speed.
 - **Target size** (radius in meters) where precision is the aim. Micro Flicks rates the smallest target you hit 85% of the time within a fixed 1.5 s, and Precise Track the smallest ball you stay on 85% of the time at a fixed slow speed.
 - **Kill pace** (seconds between kills) for speed switching and for clicking with no timer or several targets up (Static Grid, Timed Grid, Wide Flicks). "1.50 s" means 85% of your kills come within 1.5 s of the one before, which is about 45 kills a minute. A lifetime rating with several targets up would measure the queue: each timer keeps running while you shoot the others.
 

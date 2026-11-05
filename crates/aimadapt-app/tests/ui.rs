@@ -3,6 +3,14 @@
 const APP_JS: &str = include_str!("../ui/app.js");
 const INDEX: &str = include_str!("../ui/index.html");
 
+/// Playtest: whole degrees per second were too coarse; the app shows one decimal,
+/// like the trainer and Insights notes.
+#[test]
+fn target_speed_shows_one_decimal() {
+    let trainer = include_str!("../ui/trainer.js");
+    assert!(trainer.contains("if (knob === \"target_speed\") return `${v.toFixed(1)} °/s`;"), "fmtKnob in trainer.js");
+}
+
 /// Bug: the first render could run before the scripts after app.js had run, so
 /// opening the app on #help failed with "helpPage is not defined" and the page
 /// stayed on "Loading". app.js must wait for DOMContentLoaded before loading.
