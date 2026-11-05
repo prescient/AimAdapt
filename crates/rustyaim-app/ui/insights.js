@@ -272,6 +272,7 @@ function trackingCard(t) {
     <h3>On target by target speed</h3>${bars(t.by_speed.map((b) => [b.label, b.on_target, `${b.samples}`]), share)}
     <h3>After the target changes direction</h3>${bars(t.after_change.map((b) => [b.label, b.on_target, ""]), share)}
     ${t.stretch_s !== null ? `<h3>Unbroken on target</h3><div class="note-body">Half your time on target came in unbroken stretches of ${t.stretch_s.toFixed(1)} s or longer${t.stretch_before_s !== null ? ` (${t.stretch_before_s.toFixed(1)} s before)` : ""}. Longer stretches mean steadier tracking: the share of time on target counts many short slips the same as one long one.</div>` : ""}
+    ${t.centered_deg != null ? `<h3>Centering</h3><div class="note-body">While on target, your crosshair sits ${t.centered_deg.toFixed(2)}° from the target's center (median)${t.centered_before_deg != null ? `, ${t.centered_before_deg.toFixed(2)}° before` : ""}. Lower is more centered: the share of time on target counts the edge of a target the same as its middle.</div>` : ""}
     <div class="note-body">${t.recovery_s === null ? "Not enough direction changes yet to measure recovery." : t.recovery_s === 0 ? "Direction changes don't cost you time on target." : `Your time on target is back to normal about ${Math.round(t.recovery_s * 1000)} ms after a direction change.`}</div>
     <h3>Ahead or behind</h3>
     ${svg(`<line x1="20" x2="${W - 20}" y1="30" y2="30" stroke="var(--border)" stroke-width="6" stroke-linecap="round"/>

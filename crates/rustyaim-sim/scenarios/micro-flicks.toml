@@ -1,5 +1,5 @@
 name = "Micro Flicks"
-description = "Tiny targets that appear just next to the last one. Trains small, precise corrections."
+description = "Tiny targets that appear just next to the last one. Each one stays up for 1.5 s. Adaptive mode rates the smallest target you hit 85% of the time, so precision counts rather than reaction speed. Trains small, precise corrections."
 author = "RustyAim"
 category = "clicking"
 skill = "static_clicking"
@@ -11,6 +11,7 @@ duration_s = 60.0
 [targets]
 count = 1
 radius = 0.12
+lifetime_s = 1.5
 
 [targets.spawn]
 distance = [10.0, 10.0]
@@ -25,7 +26,7 @@ per_miss = -30.0
 
 [adaptive]
 goal = 0.85
-knob = "lifetime"
-easy = 2.5
-hard = 0.3
-start = 1.0
+knob = "radius"
+easy = 0.3
+hard = 0.03
+start = 0.12

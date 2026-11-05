@@ -1,5 +1,5 @@
 name = "Strafe Clicks"
-description = "A body-sized target strafing side to side. Click it as it changes direction. Trains reading movement."
+description = "A body-sized target strafing side to side. Click it within 2 s, usually as it changes direction. Adaptive mode rates the strafe speed at which you land 85% of them. Trains reading movement."
 author = "RustyAim"
 category = "clicking"
 skill = "dynamic_clicking"
@@ -14,6 +14,7 @@ shape = "capsule"
 radius = 0.3
 height = 1.6
 color = "#ffb547"
+lifetime_s = 2.0
 
 [targets.spawn]
 distance = [12.0, 16.0]
@@ -29,10 +30,11 @@ change_every_s = [0.35, 1.0]
 [scoring]
 per_kill = 100.0
 per_miss = -20.0
+per_timeout = -40.0
 
 [adaptive]
 goal = 0.85
-knob = "lifetime"
-easy = 3.5
-hard = 0.5
-start = 1.6
+knob = "target_speed"
+easy = 8.0
+hard = 120.0
+start = 20.0

@@ -1123,6 +1123,8 @@ fn rate_word(knob: Knob, per_target: bool) -> &'static str {
     match knob {
         Knob::TargetSpeed if per_target => "Finished in time",
         Knob::TargetSpeed => "On target",
+        // Precise Track: size rated per tracking segment.
+        Knob::Radius if !per_target => "On target",
         Knob::KillPace => "On pace",
         _ => "Hit rate",
     }
@@ -1237,5 +1239,14 @@ mod tests {
         let sim = Sim::new(s.clone(), 1);
         let bars = bars_for(&s, &sim.targets()[0]);
         assert_eq!(bars, vec![(Bar::Health, 1.0)]);
+    }
+
+    /// Precise Track is rated on size per tracking segment: the HUD shows time on
+    /// target, not a hit rate. Micro Flicks (size, clicking) still shows hit rate.
+    #[test]
+    fn size_ratings_name_what_they_count() {
+        assert_eq!(rate_word(Knob::Radius, false), "On target");
+        assert_eq!(rate_word(Knob::Radius, true), "Hit rate");
+        assert_eq!(rate_word(Knob::KillPace, false), "On pace");
     }
 }

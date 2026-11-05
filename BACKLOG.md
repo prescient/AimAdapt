@@ -53,7 +53,7 @@ Last reviewed: Nov 4, 2026 (after the first playtest session).
   - **Switching:** speed, evasive, stability.
 
 ### To do
-- [ ] `todo` P3 Noise-based drift for control tracking (acceleration already makes turns curve).
+- [ ] `todo` P3 Noise-based drift for control tracking (curve movement and acceleration already make smooth paths).
 - [ ] `todo` P3 Player movement (WASD strafing).
 - [ ] `todo` P3 Projectile weapons with travel time; spread and recoil.
 - [ ] `todo` P3 Visual themes: room colors, target outlines, high contrast.
@@ -75,13 +75,18 @@ Last reviewed: Nov 4, 2026 (after the first playtest session).
   - Speed Switch: kill pace. A kill within the pace of the one before is a success; each empty window is a failure. No per-target timers.
   - Stability Switch and Switch Track: target speed, counting only time while a target is engaged (damaged and not yet healed). Their targets heal when you leave them and show health bars.
   - The HUD and results show kills a minute; Insights splits acquisition time from time on target while killing.
+- [x] Every knob matches what its scenario trains (from a scoring review of every built-in).
+  - Kill pace for Static Grid, Timed Grid and Wide Flicks, so untimed drills aren't copies of their timed versions and grid ratings don't measure the queue. With a hitscan weapon, a kill after a spray of misses isn't a success.
+  - Target size for Micro Flicks (fixed 1.5 s lifetime) and Precise Track (fixed slow speed), so the rating is precision rather than reaction time or speed.
+  - Target speed for Strafe Clicks (fixed 2 s lifetime), so it and Timed Strafe Clicks rate speed and time separately.
+  - Control Track moves in real curves (`curve` movement: steady speed, turning heading).
+  - Insights adds centering while on target and, on lifetime ratings, the share that's reaction time.
 - [x] Replaced the first version, which used 0–100 levels and a staircase.
 
 ### To do
 - [ ] `spike` P1 Tune against real play. The default easy/hard ranges, first guesses and the "consistent vs. fades gradually" cut-off are educated guesses that have only been checked with the bot.
 - [ ] `todo` P2 Show the stretch/near/easy split and breakthroughs per run in Insights.
 - [ ] `todo` P2 Offer (not force) another calibration run when a rating has become very uncertain, e.g. after a long break. From [playtesting](PLAYTEST.md).
-- [ ] `todo` P2 Timed Grid still rates each target's own timer, so the order you clear its three targets matters. The time-left bars and colors help; if it still feels like a queue, consider kill pace there too. From [playtesting](PLAYTEST.md).
 
 ## 4. Programs and workouts
 

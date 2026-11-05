@@ -68,6 +68,9 @@ pub struct Target {
     next_jump: f32,
     /// Seconds into the run of the last hit, for the regen delay.
     last_hit_at: f32,
+    /// Curve movement: how fast the heading turns, degrees per second (negative
+    /// turns the other way).
+    turn: f32,
     next_change: f32,
     last_change: f32,
     age: f32,
@@ -356,6 +359,9 @@ struct Pace {
     missed: bool,
     /// This window's value, planned chance and pick.
     window: Option<(f32, f32, Pick)>,
+    /// Clicking misses since the last kill: a kill after a spray of them isn't a
+    /// success, as with the lifetime knob.
+    misses: u32,
 }
 
 pub struct Sim {
@@ -701,9 +707,10 @@ impl Sim {
     fn pace_kill(&mut self, now: f32) {
         let Some((value, _, _)) = self.pace_window() else { return };
         if !self.pace.missed && now - self.pace.since <= value {
-            self.outcome(value, 1.0, false);
+            let ok = self.pace.misses <= MAX_MISSES_PER_TARGET;
+            self.outcome(value, if ok { 1.0 } else { 0.0 }, false);
         }
-        self.pace = Pace { since: now, missed: false, window: None };
+        self.pace = Pace { since: now, ..Pace::default() };
     }
 
     /// Feeds an outcome at a knob value to the rating.
@@ -857,6 +864,7 @@ impl Sim {
             Some(i) => self.damage(i, damage, events),
             None => {
                 self.stats.misses += 1;
+                self.pace.misses += 1;
                 events.push(Event::Miss);
             }
         }
@@ -1032,14 +1040,22 @@ impl Sim {
                     t.next_change -= dt;
                     if t.next_change <= 0.0 {
                         t.next_change = self.rng.range(mv.change_every_s);
-                        let own = Movement { speed: t.speed.unwrap_or(mv.speed), ..mv.clone() };
-                        t.goal = new_rate(&mut self.rng, &own, t.distance, t.pitch, t.goal);
-                        if mv.accel <= 0.0 {
-                            t.rate = t.goal;
+                        if mv.kind == MovementKind::Curve {
+                            // Keep going, but bend the other way (or the same way at a new rate).
+                            t.turn = new_turn(&mut self.rng, &mv);
+                        } else {
+                            let own = Movement { speed: t.speed.unwrap_or(mv.speed), ..mv.clone() };
+                            t.goal = new_rate(&mut self.rng, &own, t.distance, t.pitch, t.goal);
+                            if mv.accel <= 0.0 {
+                                t.rate = t.goal;
+                            }
                         }
                         t.last_change = now;
                     }
-                    if mv.accel > 0.0 {
+                    if mv.kind == MovementKind::Curve {
+                        t.rate = rotate(t.rate, t.turn * dt, t.pitch);
+                        t.goal = t.rate;
+                    } else if mv.accel > 0.0 {
                         t.rate = steer(t.rate, t.goal, mv.accel, t.distance, t.pitch, dt);
                     }
                 }
@@ -1194,6 +1210,7 @@ impl Sim {
             (0.0, 0.0)
         };
         let next_jump = if mv.jumps() { self.rng.range(mv.jump_every_s) } else { 0.0 };
+        let turn = new_turn(&mut self.rng, mv);
         let height = tc.height * radius / self.scenario.targets.radius.max(1e-6);
         self.targets.push(Target {
             id,
@@ -1213,6 +1230,7 @@ impl Sim {
             lift_v: 0.0,
             next_jump,
             last_hit_at: f32::NEG_INFINITY,
+            turn,
             next_change,
             last_change: now,
             age: 0.0,
@@ -1262,16 +1280,34 @@ fn new_rate(rng: &mut Rng, mv: &Movement, distance: f32, pitch: f32, old: [f32; 
             };
             [side * speed * yaw_per_m, 0.0]
         }
-        MovementKind::Random => {
+        MovementKind::Random | MovementKind::Curve => {
             let a = rng.next_f32() * std::f32::consts::TAU;
-            let (x, y) = (a.cos(), a.sin() * mv.vertical);
+            // A curve turns through every heading anyway, so it starts in any direction.
+            let vertical = if mv.kind == MovementKind::Curve { 1.0 } else { mv.vertical };
+            let (x, y) = (a.cos(), a.sin() * vertical);
             let len = (x * x + y * y).sqrt().max(1e-6);
             [x / len * speed * yaw_per_m, y / len * speed * per_m]
         }
     }
 }
 
-/// Keeps an angle inside `r`, reversing the rate when it hits an edge.
+/// Curve movement: a turn rate from the scenario's range, to a random side.
+fn new_turn(rng: &mut Rng, mv: &Movement) -> f32 {
+    if mv.kind != MovementKind::Curve {
+        return 0.0;
+    }
+    let side = if rng.next_f32() < 0.5 { -1.0 } else { 1.0 };
+    side * rng.range(mv.turn_deg_s)
+}
+
+/// Rotates a velocity's heading on screen by `deg`, keeping its speed.
+fn rotate(rate: [f32; 2], deg: f32, pitch: f32) -> [f32; 2] {
+    let c = pitch.to_radians().cos().max(0.2);
+    let (x, y) = (rate[0] * c, rate[1]);
+    let (sin, cos) = deg.to_radians().sin_cos();
+    [(x * cos - y * sin) / c, x * sin + y * cos]
+}
+
 /// Turns `rate` toward `goal` at `accel` m/s², measured on screen at `distance`.
 fn steer(rate: [f32; 2], goal: [f32; 2], accel: f32, distance: f32, pitch: f32, dt: f32) -> [f32; 2] {
     let c = pitch.to_radians().cos().max(0.2);
@@ -2144,6 +2180,180 @@ mod tests {
         let a = r.adaptive.unwrap();
         assert!(a.calibration());
         assert!(a.value < 1.0 && a.value > 0.5, "rated near 0.7 s: {}", a.value);
+    }
+
+    /// Plays a clicker who shoots the oldest target (the first to time out)
+    /// `gap` seconds after the last kill or timeout, after `misses` deliberate misses.
+    fn click_every(mut sim: Sim, gap: f32, misses: u32) -> RunResult {
+        let mut last = 0.0;
+        while sim.phase() != Phase::Finished {
+            let (kills, timeouts) = (sim.stats().kills, sim.stats().timeouts);
+            let oldest = |sim: &Sim| sim.targets().iter().max_by(|a, b| a.age.total_cmp(&b.age)).map(|t| t.pos);
+            if sim.elapsed() - last >= gap
+                && let Some(at) = oldest(&sim)
+            {
+                for _ in 0..misses {
+                    sim.step(FRAME, shoot(-at));
+                    sim.step(FRAME, idle());
+                }
+                let at = oldest(&sim).unwrap_or(at);
+                sim.step(FRAME, shoot(at));
+            } else {
+                sim.step(FRAME, idle());
+            }
+            if sim.stats().kills > kills || sim.stats().timeouts > timeouts {
+                last = sim.elapsed();
+            }
+        }
+        sim.result()
+    }
+
+    fn short(id: &str) -> Scenario {
+        let mut s = builtin(id);
+        s.timing.duration_s = 30.0;
+        s
+    }
+
+    /// Scoring review, findings 1 and 2: in adaptive mode the untimed clicking
+    /// drills got per-target timers and became copies of their timed versions, and
+    /// with several targets up a lifetime rating measured the queue. They're rated
+    /// on the pace between kills now.
+    #[test]
+    fn untimed_and_grid_clicking_is_rated_on_kill_pace() {
+        for id in ["builtin:static-grid", "builtin:timed-grid", "builtin:wide-flicks"] {
+            let s = short(id);
+            assert_eq!(s.adaptive.resolve(&s).knob, Knob::KillPace, "{id}");
+            let prior = prior_at(Knob::KillPace, 1.0, None);
+            let value = Sim::adaptive(s.clone(), 2, Some(prior), Mix::Balanced).run_pick().unwrap().0;
+            let fast = click_every(Sim::adaptive(s.clone(), 2, Some(prior), Mix::Balanced), value * 0.6, 0);
+            let a = fast.adaptive.unwrap();
+            assert_eq!(a.success_rate, Some(1.0), "{id}: {a:?}");
+            assert!(a.outcomes > 15, "{id}: one outcome per kill: {}", a.outcomes);
+            let slow = click_every(Sim::adaptive(s.clone(), 2, Some(prior), Mix::Balanced), value * 1.7, 0);
+            assert_eq!(slow.adaptive.unwrap().success_rate, Some(0.0), "{id}");
+        }
+        // Untimed stays untimed, and Timed Grid keeps its own 2 s timers.
+        assert_eq!(short("builtin:static-grid").targets.lifetime_s, 0.0);
+        let tg = short("builtin:timed-grid");
+        let sim = Sim::adaptive(tg.clone(), 2, Some(prior_at(Knob::KillPace, 1.0, None)), Mix::Balanced);
+        assert_eq!(sim.current().targets.lifetime_s, tg.targets.lifetime_s);
+    }
+
+    /// Kill pace on a clicking drill: a kill after a spray of misses isn't a
+    /// success, as with the lifetime knob.
+    #[test]
+    fn spraying_clicks_doesnt_count_toward_kill_pace() {
+        let s = short("builtin:static-grid");
+        let prior = prior_at(Knob::KillPace, 1.0, None);
+        let value = Sim::adaptive(s.clone(), 2, Some(prior), Mix::Balanced).run_pick().unwrap().0;
+        let one = click_every(Sim::adaptive(s.clone(), 2, Some(prior), Mix::Balanced), value * 0.5, 1);
+        assert_eq!(one.adaptive.unwrap().success_rate, Some(1.0), "one miss is allowed");
+        let spray = click_every(Sim::adaptive(s, 2, Some(prior), Mix::Balanced), value * 0.5, 2);
+        assert_eq!(spray.adaptive.unwrap().success_rate, Some(0.0));
+    }
+
+    /// Scoring review, findings 3 and 4: Micro Flicks' lifetime rating was mostly
+    /// reaction time, and Precise Track's speed rating turned it into reactive
+    /// tracking as you improved. Both are rated on target size now, with time and
+    /// speed held fixed.
+    #[test]
+    fn precision_drills_are_rated_on_size() {
+        let micro = short("builtin:micro-flicks");
+        assert_eq!(micro.adaptive.resolve(&micro).knob, Knob::Radius);
+        let prior = prior_at(Knob::Radius, 0.1, None);
+        let sim = Sim::adaptive(micro.clone(), 3, Some(prior), Mix::Balanced);
+        let value = sim.run_pick().unwrap().0;
+        assert!(sim.targets().iter().all(|t| (t.radius - value).abs() < 1e-6), "targets at the run's size");
+        assert!(sim.targets().iter().all(|t| t.lifetime == 1.5), "a fixed, generous lifetime");
+        // Hit in time: success. Too slow: each timeout is a failure.
+        let quick = click_every(Sim::adaptive(micro.clone(), 3, Some(prior), Mix::Balanced), 0.4, 0);
+        let a = quick.adaptive.unwrap();
+        assert_eq!(a.success_rate, Some(1.0), "{a:?}");
+        assert!(a.outcomes > 30);
+        let late = click_every(Sim::adaptive(micro, 3, Some(prior), Mix::Balanced), 2.0, 0);
+        assert_eq!(late.adaptive.unwrap().success_rate, Some(0.0));
+
+        let precise = short("builtin:precise-track");
+        assert_eq!(precise.adaptive.resolve(&precise).knob, Knob::Radius);
+        let mut sim = Sim::adaptive(precise.clone(), 3, Some(prior_at(Knob::Radius, 0.15, None)), Mix::Balanced);
+        let value = sim.run_pick().unwrap().0;
+        assert_eq!(sim.current().targets.movement.speed, precise.targets.movement.speed, "speed stays slow");
+        while sim.phase() != Phase::Finished {
+            assert!((sim.targets()[0].radius - value).abs() < 1e-6);
+            let aim = sim.targets()[0].pos.normalize();
+            sim.step(FRAME, Input { aim, fire_pressed: false, fire_held: false });
+        }
+        let a = sim.result().adaptive.unwrap();
+        assert_eq!(a.success_rate, Some(1.0));
+        assert!(a.outcomes >= 14, "one outcome per 2 s segment: {}", a.outcomes);
+        // Calibration shrinks the ball segment by segment for a steady tracker.
+        let mut cal = Sim::adaptive(precise.clone(), 3, None, Mix::Balanced);
+        let mut sizes = Vec::new();
+        while cal.phase() != Phase::Finished {
+            sizes.push(cal.targets()[0].radius);
+            let aim = cal.targets()[0].pos.normalize();
+            cal.step(FRAME, Input { aim, fire_pressed: false, fire_held: false });
+        }
+        sizes.dedup();
+        assert!(sizes.len() >= 5, "{sizes:?}");
+        assert!(sizes.last().unwrap() < &precise.targets.radius, "{sizes:?}");
+    }
+
+    /// Scoring review, finding 6's follow-up: Strafe Clicks was a copy of Timed
+    /// Strafe Clicks in adaptive mode. It's rated on strafe speed now, with a fixed
+    /// lifetime, so the pair covers speed and time separately.
+    #[test]
+    fn strafe_clicks_is_rated_on_target_speed() {
+        let s = short("builtin:strafe-clicks");
+        assert_eq!(s.adaptive.resolve(&s).knob, Knob::TargetSpeed);
+        assert!(s.problems().is_empty(), "{:?}", s.problems());
+        let prior = prior_at(Knob::TargetSpeed, 20.0, None);
+        let sim = Sim::adaptive(s.clone(), 4, Some(prior), Mix::Balanced);
+        assert!(sim.rated_per_target());
+        assert!(sim.targets().iter().all(|t| t.lifetime == s.targets.lifetime_s));
+        let quick = click_every(Sim::adaptive(s.clone(), 4, Some(prior), Mix::Balanced), 0.3, 0);
+        assert_eq!(quick.adaptive.unwrap().success_rate, Some(1.0));
+        let late = click_every(Sim::adaptive(s, 4, Some(prior), Mix::Balanced), 2.5, 0);
+        assert_eq!(late.adaptive.unwrap().success_rate, Some(0.0));
+    }
+
+    /// Scoring review, finding 5: Control Track promised smooth arcs but moved in
+    /// straight lines with sharp turns. Curve movement keeps a steady speed while
+    /// the heading turns a little every frame.
+    #[test]
+    fn curve_movement_turns_smoothly_at_constant_speed() {
+        let control = builtin("builtin:control-track");
+        assert_eq!(control.targets.movement.kind, MovementKind::Curve);
+        let mv = control.targets.movement.clone();
+        let mut s = mover(mv.clone());
+        s.targets.spawn = control.targets.spawn.clone();
+        let mut sim = Sim::new(s, 5);
+        let heading = |t: &Target| {
+            let (x, y) = screen(t);
+            (y.atan2(x).to_degrees(), (x * x + y * y).sqrt())
+        };
+        let (mut prev, speed0) = heading(&sim.targets()[0]);
+        let max_step = mv.turn_deg_s.1 * FRAME * 1.05;
+        let (mut turned, mut smooth, mut frames) = (0.0f32, 0, 0);
+        for _ in 0..(240 * 20) {
+            let before = sim.targets()[0].rate;
+            sim.step(FRAME, look_away());
+            let t = &sim.targets()[0];
+            let (h, speed) = heading(t);
+            assert!((speed / speed0 - 1.0).abs() < 0.08, "speed {speed:.1} vs {speed0:.1} °/s");
+            let step = (h - prev + 540.0).rem_euclid(360.0) - 180.0;
+            // Bounces off the area's edge flip a component; everything else is a small turn.
+            let bounced = t.rate[0].signum() != before[0].signum() || t.rate[1].signum() != before[1].signum();
+            if !bounced {
+                assert!(step.abs() <= max_step, "heading jumped {step:.2}° in a frame");
+                turned += step.abs();
+                smooth += 1;
+            }
+            frames += 1;
+            prev = h;
+        }
+        assert!(smooth > frames * 9 / 10, "mostly smooth: {smooth} of {frames}");
+        assert!(turned > 360.0, "it keeps curving: {turned:.0}°");
     }
 
     fn builtin(id: &str) -> Scenario {

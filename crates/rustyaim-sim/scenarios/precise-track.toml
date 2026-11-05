@@ -1,5 +1,5 @@
 name = "Precise Track"
-description = "A small ball drifting slowly and smoothly. Keep the crosshair centered on it. Trains precise tracking."
+description = "A small ball drifting slowly and smoothly. Keep the crosshair centered on it. Adaptive mode keeps the speed and rates the smallest ball you can stay on 85% of the time. Trains precise tracking."
 author = "RustyAim"
 category = "tracking"
 skill = "precise_tracking"
@@ -36,7 +36,7 @@ per_damage = 1.0
 
 [adaptive]
 goal = 0.85
-knob = "target_speed"
-easy = 3.0
-hard = 80.0
-start = 9.0
+knob = "radius"
+easy = 0.4
+hard = 0.04
+start = 0.2

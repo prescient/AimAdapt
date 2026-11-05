@@ -1,5 +1,5 @@
 name = "Wide Flicks"
-description = "One small target at a time, always far from the last one. Trains big, accurate flicks."
+description = "One small target at a time, always far from the last one. Adaptive mode rates the pace between kills. Trains big, accurate flicks."
 author = "RustyAim"
 category = "clicking"
 skill = "static_clicking"
@@ -24,7 +24,7 @@ per_miss = -25.0
 
 [adaptive]
 goal = 0.85
-knob = "lifetime"
-easy = 3.5
-hard = 0.5
-start = 1.6
+knob = "kill_pace"
+easy = 3.0
+hard = 0.35
+start = 1.3

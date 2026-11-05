@@ -130,7 +130,7 @@ impl Knob {
         match self {
             Knob::Lifetime | Knob::KillPace => format!("{v:.2} s"),
             Knob::TargetSpeed => format!("{v:.0} °/s"),
-            Knob::Radius | Knob::Auto => format!("{v:.2} m"),
+            Knob::Radius | Knob::Auto => format!("{v:.3} m"),
         }
     }
 }

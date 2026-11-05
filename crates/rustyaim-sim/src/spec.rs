@@ -113,6 +113,11 @@ const MOVEMENT: &[Choice] = &[
     Choice { value: "static", label: "Static", help: "Targets stay put." },
     Choice { value: "strafe", label: "Strafe", help: "Side to side, reversing at random intervals." },
     Choice { value: "random", label: "Random", help: "A new random direction at each change." },
+    Choice {
+        value: "curve",
+        label: "Curve",
+        help: "Steady speed along curved paths that bend one way, then the other.",
+    },
 ];
 
 const KNOBS: &[Choice] = &[
@@ -299,6 +304,13 @@ pub const FIELDS: &[Field] = &[
         "Vertical share",
         "Random movement only: 0 keeps it level, 1 allows any direction.",
         num(0.0, 1.0, 0.05, ""),
+    ),
+    f(
+        "targets.movement.turn_deg_s",
+        "Movement",
+        "Turn rate",
+        "Curve movement only: how fast the heading turns. Each direction change picks a new rate and side.",
+        range(0.0, 720.0, 5.0, "°/s"),
     ),
     f(
         "targets.movement.accel",

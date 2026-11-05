@@ -390,6 +390,10 @@ pub struct Movement {
     pub jump_height: f32,
     #[serde(skip_serializing_if = "off_in_fingerprint")]
     pub jump_air_s: f32,
+    /// `curve` movement: how fast the heading turns, in degrees per second. Each
+    /// direction change picks a new turn rate from this range, turning left or right.
+    #[serde(skip_serializing_if = "off_in_fingerprint")]
+    pub turn_deg_s: Range,
 }
 
 impl Default for Movement {
@@ -405,6 +409,7 @@ impl Default for Movement {
             jump_every_s: Range(0.0, 0.0),
             jump_height: 0.0,
             jump_air_s: 0.0,
+            turn_deg_s: Range(0.0, 0.0),
         }
     }
 }
@@ -427,6 +432,9 @@ pub enum MovementKind {
     Strafe,
     /// A new random direction at each change.
     Random,
+    /// Steady speed along curved paths: the heading keeps turning, and each change
+    /// picks a new turn rate and side.
+    Curve,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -572,15 +580,24 @@ impl Scenario {
         // Targets must fit in the room.
         let half_w = self.arena.size[0] / 2.0;
         check(sp.distance.1 + t.radius < half_w.max(self.arena.size[2] / 2.0), "spawn distance reaches past the walls");
+        check(
+            m.kind != MovementKind::Curve
+                || (finite_range(m.turn_deg_s)
+                    && m.turn_deg_s.0 >= 0.0
+                    && m.turn_deg_s.1 > 0.0
+                    && m.turn_deg_s.1 <= 720.0),
+            "curve movement needs a turn rate of 0–720 °/s",
+        );
         p.extend(self.adaptive.problems());
+        let knob = self.adaptive.knob;
         if self.weapon.kind == WeaponKind::Hitscan
-            && self.adaptive.knob == crate::adaptive::Knob::TargetSpeed
+            && matches!(knob, crate::adaptive::Knob::TargetSpeed | crate::adaptive::Knob::Radius)
             && self.targets.lifetime_s <= 0.0
         {
-            p.push(
-                "with a hitscan weapon, adaptive target speed needs a target lifetime: a target counts as a                  success when it's killed before it times out"
-                    .into(),
-            );
+            p.push(format!(
+                "with a hitscan weapon, adaptive {} needs a target lifetime: a target counts as a success when it's killed before it times out",
+                knob.label().to_lowercase()
+            ));
         }
         p
     }
@@ -609,6 +626,25 @@ mod tests {
         s.adaptive.knob = crate::adaptive::Knob::TargetSpeed;
         assert!(s.problems().iter().any(|p| p.contains("lifetime")), "{:?}", s.problems());
         s.targets.lifetime_s = 1.5;
+        assert!(s.problems().is_empty(), "{:?}", s.problems());
+    }
+
+    /// Same for target size: a careful player who takes their time never misses.
+    #[test]
+    fn hitscan_target_size_needs_a_lifetime() {
+        let mut s = Scenario::default();
+        s.adaptive.knob = crate::adaptive::Knob::Radius;
+        assert!(s.problems().iter().any(|p| p.contains("target size needs a target lifetime")), "{:?}", s.problems());
+        s.targets.lifetime_s = 1.5;
+        assert!(s.problems().is_empty(), "{:?}", s.problems());
+    }
+
+    #[test]
+    fn curve_movement_needs_a_turn_rate() {
+        let mut s = Scenario::default();
+        s.targets.movement.kind = MovementKind::Curve;
+        assert!(s.problems().iter().any(|p| p.contains("turn rate")), "{:?}", s.problems());
+        s.targets.movement.turn_deg_s = Range(20.0, 60.0);
         assert!(s.problems().is_empty(), "{:?}", s.problems());
     }
 

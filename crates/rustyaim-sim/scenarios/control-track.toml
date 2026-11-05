@@ -25,10 +25,10 @@ yaw = [-50.0, 50.0]
 pitch = [-10.0, 25.0]
 
 [targets.movement]
-kind = "random"
+kind = "curve"
 speed = [2.5, 3.5]
 change_every_s = [2.0, 3.5]
-vertical = 0.9
+turn_deg_s = [25.0, 70.0]
 
 [scoring]
 per_kill = 0.0

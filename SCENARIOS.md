@@ -106,10 +106,11 @@ per_miss = -30.0
 
 | Field | Default | Meaning |
 |---|---|---|
-| `targets.movement.kind` | `"static"` | `static`, `strafe` (side to side, reversing at random intervals) or `random` (a new direction at each change). |
+| `targets.movement.kind` | `"static"` | `static`, `strafe` (side to side, reversing at random intervals), `random` (a new direction at each change) or `curve` (steady speed along curved paths: the heading keeps turning, and each change picks a new turn rate and side). |
 | `targets.movement.speed` | `[3.0, 5.0]` | Meters per second at the target's distance. |
 | `targets.movement.change_every_s` | `[0.4, 1.2]` | Seconds between direction changes. |
 | `targets.movement.vertical` | `0.5` | `random` only: 0 keeps movement level and 1 allows any direction. |
+| `targets.movement.turn_deg_s` | `[0, 0]` | `curve` only, and required there: how fast the heading turns, in degrees per second. Each direction change picks a new rate from this range, turning left or right. |
 | `targets.movement.accel` | `0.0` | How quickly a target changes velocity, in m/s². 0 reverses and turns instantly. With a value, a strafing target slows down, stops and speeds back up at each reversal, and `random` turns become curves. |
 | `targets.movement.approach_speed` | `[0.0, 0.0]` | Speed toward and away from the player, within `spawn.distance` (which then needs min < max). Sideways speed stays the same in meters per second, so a closer target crosses your view faster and looks bigger. |
 | `targets.movement.approach_every_s` | `[0.0, 0.0]` | Seconds between coming closer and backing away. `[0, 0]` uses `change_every_s`. |
@@ -135,15 +136,15 @@ Every scenario can be played in **Standard** mode, at the difficulty written in 
 
 - **Target lifetime** (seconds) for timed clicking. Your rating might be "0.62 s": you hit 85% of targets that last 0.62 s.
 - **Target speed** (degrees per second across your view) for tracking. "48 °/s" means you stay on target 85% of the time at that speed.
-- **Target size** (radius in meters).
-- **Kill pace** (seconds between kills) for speed switching. "1.50 s" means 85% of your kills come within 1.5 s of the one before, which is about 45 kills a minute.
+- **Target size** (radius in meters) where precision is the aim. Micro Flicks rates the smallest target you hit 85% of the time within a fixed 1.5 s, and Precise Track the smallest ball you stay on 85% of the time at a fixed slow speed.
+- **Kill pace** (seconds between kills) for speed switching and for clicking with no timer or several targets up (Static Grid, Timed Grid, Wide Flicks). "1.50 s" means 85% of your kills come within 1.5 s of the one before, which is about 45 kills a minute. A lifetime rating with several targets up would measure the queue: each timer keeps running while you shoot the others.
 
 **How the rating works.** The trainer models your chance of success at each value as an S-shaped curve. It keeps a probability estimate of where that curve sits and how steep it is, so it knows how sure it is, much like the Glicko version of Elo. Each outcome updates the estimate by how surprising it was. Succeeding at a value harder than your rating moves it more than succeeding at your level, and failing at a harder value costs less than failing at your level. The next run starts from your last rating on the same version of the scenario. Any change that affects play (its fingerprint) starts over with a calibration run, because a rating earned under other settings isn't on the same scale. The uncertainty grows with the days since you played, so after a break the rating moves more again.
 
-- **Clicking:** a target is a success if you destroy it before it times out with at most one miss on it. Spraying clicks doesn't count. A timeout is a failure. With a hitscan weapon, lifetime, size and target speed are all set target by target, and target speed needs `targets.lifetime_s` (without a timer a careful player would never fail).
+- **Clicking:** a target is a success if you destroy it before it times out with at most one miss on it. Spraying clicks doesn't count. A timeout is a failure. With a hitscan weapon, lifetime, size and target speed are all set target by target, and size and target speed need `targets.lifetime_s` (without a timer a careful player would never fail). Strafe Clicks rates target speed this way.
 - **Finished in time:** with a beam, `targets.lifetime_s` and the target-speed knob, each target is one outcome: a success if you finish it before it times out. Each target gets its own speed. With fast regen after a short `regen_delay_s`, that means unbroken tracking (Unbroken Strafes, Unbroken Float).
 - **Tracking:** each `segment_s`-second segment is one outcome: the share of that time the crosshair was on target, whether or not you're firing. With `engaged_only`, only time while a target is damaged and not yet healed counts, so the trip to a fresh target after a kill isn't off target, but leaving a half-killed target is, until it heals.
-- **Kill pace:** a kill within the pace of the one before is a success. Each full stretch of that length with no kill is a failure, and the late kill that ends it doesn't count as a success. Speed Switch, the built-in kill-pace scenario, has no target timers.
+- **Kill pace:** a kill within the pace of the one before is a success. Each full stretch of that length with no kill is a failure, and the late kill that ends it doesn't count as a success. With a hitscan weapon, a kill after more than one miss since the last kill doesn't count either. Speed Switch, Static Grid and Wide Flicks have no target timers. Timed Grid keeps its own 2 s timers, which don't change with the rating.
 
 **Calibration run, then one difficulty per run.** The first adaptive run on a scenario is a calibration run. It sets each target's (or segment's) difficulty as it goes, between 65% and 90% chance of success, to find your level within the run. The game labels it "Calibration run". Every later run plays at one fixed difficulty for the whole run, shown as "This run: …" before you start, and the rating takes in the run as you play. Each run's difficulty is picked from a mix: first a chance of success, then the value with that chance on your current curve.
 

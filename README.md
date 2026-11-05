@@ -27,13 +27,13 @@ Requirements: Windows 10 or 11 with the WebView2 runtime (included with Windows 
 - Hitscan and beam weapons; click, hold or always-on triggers.
 - Sphere and capsule targets, with optional lifetime, shrink, and health regeneration with a delay.
 - Timed targets show a time-left bar and change color by wave (three red, then three blue, then three red on Timed Grid), so newer targets stand out from older ones. Optional health bars.
-- Movement: still, strafing or random, with optional acceleration (targets slow down and speed back up at each turn, and random turns curve), movement toward and away from you, and jumps with gravity.
+- Movement: still, strafing, random or curved (steady speed with a turning heading, on Control Track), with optional acceleration (targets slow down and speed back up at each turn, and random turns curve), movement toward and away from you, and jumps with gravity.
 
 ![Results screen](docs/screenshots/game-results.jpg)
 
 ## Adaptive mode
 
-Each scenario has one difficulty setting: target lifetime for timed clicking, target speed for tracking, kill pace for speed switching. Adaptive mode estimates the value you succeed at 85% of the time, along with how certain that estimate is.
+Each scenario has one difficulty setting, chosen for what it trains: target lifetime for timed clicking, kill pace for grids, untimed flicks and speed switching, target size for precision (Micro Flicks, Precise Track), and target speed for tracking and strafe clicking. Adaptive mode estimates the value you succeed at 85% of the time, along with how certain that estimate is.
 
 - **How it updates:** a Bayesian estimate similar to Glicko. A surprising result moves the rating more than an expected one. The next run starts from your last rating on the same version of the scenario, and the uncertainty grows with the days since you last played. Changing a scenario's settings starts it over.
 - **Calibration run:** your first adaptive run on a scenario changes difficulty as you play, to find your level within the run.
@@ -51,7 +51,7 @@ Each scenario has one difficulty setting: target lifetime for timed clicking, ta
   - **Clicking:** a target is a success if it's destroyed before it times out, with at most one miss on it.
   - **Tracking:** each 2-second segment is scored by the share of time spent on target. Stability Switch and Switch Track only count time while a target is damaged and not yet healed, so moving between targets isn't counted against you. Their targets show health bars and heal when you leave them.
   - **Finished in time (Unbroken Strafes, Unbroken Float):** each target needs a stretch of beam and heals fast when you slip off. A target finished before it times out is a success, so only unbroken tracking counts. The rating is the target speed at which you finish 85% of them.
-  - **Kill pace (Speed Switch):** a kill within the pace of the one before is a success; each full stretch of that length with no kill is a failure.
+  - **Kill pace (Speed Switch, Static Grid, Timed Grid, Wide Flicks):** a kill within the pace of the one before is a success; each full stretch of that length with no kill is a failure. When clicking, a kill after a spray of misses doesn't count.
 
 Standard mode plays a scenario exactly as written and scores points.
 
@@ -103,8 +103,8 @@ Every run stores each target, each shot, tracking samples 30 times a second, and
 - **Flick speed:** time to kill vs. difficulty, as a Fitts' law fit and throughput in bits per second.
 - **By direction and distance:** hit rate and median time in 8 flick directions and 5 distance bands.
 - **Shot placement** relative to the target, aligned to the flick direction: overshooting vs. stopping short, and any vertical bias.
-- **Reaction time:** a histogram, with the median compared with earlier runs.
-- **Tracking:** time on target by target speed, recovery after direction changes, how far ahead of or behind the target you are, and unbroken stretches on target (half your time on target came in stretches at least this long).
+- **Reaction time:** a histogram, with the median compared with earlier runs. On lifetime ratings a note splits the rating into your reaction time and the part you control, which improves by more than the rating shows.
+- **Tracking:** time on target by target speed, recovery after direction changes, how far ahead of or behind the target you are, unbroken stretches on target (half your time on target came in stretches at least this long), and centering (median distance from the target's center while on it).
 - **Within a run:** success in 10-second segments.
 - **Notes** generated from the figures above.
 

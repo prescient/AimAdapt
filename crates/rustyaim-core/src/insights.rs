@@ -51,7 +51,7 @@ pub fn format_value(knob: &str, v: f64) -> String {
     match knob {
         "lifetime" | "kill_pace" => format!("{v:.2} s"),
         "target_speed" => format!("{v:.0} °/s"),
-        _ => format!("{v:.2} m"),
+        _ => format!("{v:.3} m"),
     }
 }
 
@@ -172,6 +172,10 @@ pub struct Tracking {
     /// like one long one; this tells steady tracking from jittery tracking.
     pub stretch_s: Option<f64>,
     pub stretch_before_s: Option<f64>,
+    /// Median distance from the target's center while on target (degrees): how
+    /// centered you stay, which the share of time on target can't see.
+    pub centered_deg: Option<f64>,
+    pub centered_before_deg: Option<f64>,
 }
 
 /// Tracking samples are taken this often (`rustyaim_sim::sim::SAMPLE_HZ`).
@@ -787,6 +791,10 @@ fn tracking_stats(db: &Db, recent: &[i64], before: &[i64]) -> Result<Option<Trac
     let b = load(before)?;
     let on_target_before = (b.len() >= 60).then(|| b.iter().filter(|x| x.0).count() as f64 / b.len() as f64);
     let mut err: Vec<f64> = s.iter().map(|x| x.1).collect();
+    let centered = |v: &[Sample]| {
+        let mut on: Vec<f64> = v.iter().filter(|x| x.0).map(|x| x.1).collect();
+        if on.len() >= 30 { median(&mut on) } else { None }
+    };
     let lead = mean(s.iter().filter(|x| x.2 > 2.0).map(|x| x.3)).unwrap_or(0.0);
 
     let bucket = |label: String, v: Vec<&Sample>| Bucket { label, samples: v.len(), on_target: share(&v) };
@@ -832,6 +840,8 @@ fn tracking_stats(db: &Db, recent: &[i64], before: &[i64]) -> Result<Option<Trac
         recovery_s,
         stretch_s: unbroken_stretch(db, recent)?,
         stretch_before_s: unbroken_stretch(db, before)?,
+        centered_deg: centered(&s),
+        centered_before_deg: centered(&b),
     }))
 }
 
@@ -882,6 +892,30 @@ fn notes(i: &Insights) -> Vec<Note> {
             );
         }
         push(format!("85% {unit_word}: {}", fmt(now)), body);
+        // A lifetime includes your reaction time, which practice barely moves, so
+        // the part you control improves by more than the rating shows.
+        if knob == "lifetime" {
+            let (react, whose) = match &i.reaction {
+                Some(r) => (r.median_ms / 1000.0, "your median reaction"),
+                None => (0.25, "a typical reaction"),
+            };
+            let rest = now - react;
+            if rest > 0.05 {
+                let mut body = format!(
+                    "About {react:.2} s of your {} is reaction time ({whose}), which practice barely changes. The part you control is the other {rest:.2} s.",
+                    fmt(now)
+                );
+                let first = rated[0].rating.unwrap_or(now);
+                if rated.len() >= 2 && first > now && first - react > 0.05 {
+                    body += &format!(
+                        " Since your first rating that part is down {:.0}%, while the rating is down {:.0}%.",
+                        (1.0 - rest / (first - react)) * 100.0,
+                        (1.0 - now / first) * 100.0
+                    );
+                }
+                push(format!("Of that, {react:.2} s is reaction"), body);
+            }
+        }
         if let Some(f) = rated
             .iter()
             .filter_map(|r| r.fastest)
@@ -889,7 +923,7 @@ fn notes(i: &Insights) -> Vec<Note> {
         {
             push(
                 format!("Best held: {}", fmt(f)),
-                "The hardest difficulty you've held the goal rate at for a whole run. Stretch runs give you the                  chance to beat it."
+                "The hardest difficulty you've held the goal rate at for a whole run. Stretch runs give you the chance to beat it."
                     .into(),
             );
         }
@@ -1236,6 +1270,10 @@ mod tests {
         assert!(titles.contains(&"Best held: 0.50 s"), "{titles:?}");
         let better = &i.notes.iter().find(|n| n.title.starts_with("85% speed")).unwrap().body;
         assert!(better.contains("better by 0.18 s"), "{better}");
+        // Scoring review, finding 9: the reaction floor. 0.80 → 0.62 s is 23% on the
+        // rating, but the part you control fell from 0.58 to 0.40 s, 31%.
+        let floor = &i.notes.iter().find(|n| n.title == "Of that, 0.22 s is reaction").unwrap().body;
+        assert!(floor.contains("other 0.40 s") && floor.contains("down 31%") && floor.contains("down 23%"), "{floor}");
 
         let o = overview(&db).unwrap();
         assert_eq!(o[0].scenario, "Timed Flicks");
@@ -1322,11 +1360,12 @@ mod tests {
         let samples = (0..900)
             .map(|i| {
                 let since = (i % 30) as f64 / 30.0;
+                // Off target for the first 200 ms after each change.
+                let on = since >= 0.2 && i % 7 != 0;
                 SampleRow {
                     t: i as f64 / 30.0,
-                    // Off target for the first 200 ms after each change.
-                    on_target: since >= 0.2 && i % 7 != 0,
-                    error_deg: if since < 0.2 { 2.0 } else { 0.4 },
+                    on_target: on,
+                    error_deg: if on { 0.3 + (i % 3) as f64 * 0.1 } else { 2.0 },
                     target_speed_dps: 25.0,
                     lead_deg: -0.5,
                     since_change_s: since,
@@ -1344,6 +1383,9 @@ mod tests {
         let i = scenario(&db, "Strafe Track").unwrap().unwrap();
         let t = i.tracking.as_ref().unwrap();
         assert!((t.lead_deg + 0.5).abs() < 1e-9);
+        // Scoring review, finding 7: how centered you stay while on target.
+        assert!((t.centered_deg.unwrap() - 0.4).abs() < 1e-9, "{t:?}");
+        assert_eq!(t.centered_before_deg, None);
         assert_eq!(t.recovery_s, Some(0.2), "{t:?}");
         assert!(t.after_change[0].on_target < 0.01);
         assert!(i.runs[0].on_target.unwrap() > 0.6);
