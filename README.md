@@ -190,3 +190,7 @@ Testing tools:
 Before a release, bump the version line in the [user guide](crates/aimadapt-app/ui/guide.md) and check its What's new section; a test fails until the guide's version matches. Pushing a version tag (`git tag v0.2.0` then `git push origin v0.2.0`) runs `.github/workflows/release.yml`. It builds the portable exe and both installers and attaches them to a GitHub release.
 
 If the repo is in a synced folder like OneDrive, move build output out of it with a local, gitignored `.cargo/config.toml` containing `[build]` and `target-dir = "C:/some/other/folder"`.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

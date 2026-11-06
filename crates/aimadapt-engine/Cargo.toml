@@ -3,6 +3,7 @@ name = "aimadapt-engine"
 description = "AimAdapt's built-in aim trainer"
 edition.workspace = true
 version.workspace = true
+license.workspace = true
 
 [dependencies]
 chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }

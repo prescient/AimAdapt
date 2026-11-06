@@ -5,3 +5,4 @@ members = ["crates/aimadapt-core", "crates/aimadapt-sim", "crates/aimadapt-engin
 [workspace.package]
 edition = "2024"
 version = "0.1.0"
+license = "MIT"
