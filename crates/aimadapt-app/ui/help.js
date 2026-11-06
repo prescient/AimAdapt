@@ -127,7 +127,7 @@ function scrollToHelp() {
 }
 
 // The Help link in each page's header goes to that page's section.
-const HELP_FOR = { edit: "edit", workout: "workout" };
+const HELP_FOR = { edit: "edit", workout: "workout", replay: "replay" };
 function helpLink() {
   const { view } = route();
   if (view === "help") return "";

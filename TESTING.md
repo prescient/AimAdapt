@@ -66,7 +66,7 @@ These are 78 tests over the scenario format, simulation, adaptive ratings, telem
 - **Ratings per scenario version** (`aimadapt-engine`): a rating carries over to the same scenario and to one with a new description, but not to one with different settings.
 - **Engine record** (`aimadapt-engine`): an engine run saved through `insert_runs` gets the right score, accuracy, length and `source`, keeps separate bests for variants, and is ignored when matching KovaaK's settings.
 
-**Engine record** also has an end-to-end test: two adaptive runs and a standard one are saved through `record::save`. The first adaptive run must be a calibration run that sets no best. The second, a day later, must start from the first's rating with the day counted, play at one value, and store its value and pick for the next run's guard rails, the names must keep both modes apart, telemetry and traces must be stored, and Insights must read all three back.
+**Engine record** also has an end-to-end test: two adaptive runs and a standard one are saved through `record::save`. The first adaptive run must be a calibration run that sets no best. The second, a day later, must start from the first's rating with the day counted, play at one value, and store its value and pick for the next run's guard rails, the names must keep both modes apart, telemetry, traces and replay frames must be stored, a replay must load with frames, trace and shots, and Insights must read all three back.
 
 **Engine smoke test:** `aimadapt-engine <scenario> --smoke <folder> --db <file>` (or `--workout <id>`) has a bot that plays like a person go through short runs, then saves screenshots mid-run and on each results screen. It needs a GPU, so it's run by hand, not on CI. Check the screenshots and that the runs, with telemetry, are in the test database. Opening the app with `--db <that file>` previews Insights on bot data.
 
@@ -94,7 +94,7 @@ Serialize the reports (`TrainingReport`, `ScenarioStats` and the rest) for the f
 
 ### 5. Database tests
 
-Already covered: a new database migrates to the current schema (version 6, which adds the run-level adaptive columns and engaged samples), and reopening keeps it.
+Already covered: a new database migrates to the current schema (version 7, which adds replay frames), and reopening keeps it.
 
 **Rule:** each new migration gets a test that opens a database from the previous version (saved as a fixture) and checks the data survived.
 

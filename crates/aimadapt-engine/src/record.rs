@@ -2,7 +2,8 @@
 //! with the same field names KovaaK's uses, so every progress and training screen
 //! counts AimAdapt runs without special cases; `Source` marks where it came from.
 //! The trainer's extra detail (adaptive rating, per-target and per-shot records,
-//! tracking samples, aim trace) goes into the `engine_*` tables for Insights.
+//! tracking samples, aim trace, replay frames) goes into the `engine_*` tables for
+//! Insights and replays.
 //!
 //! Adaptive runs are stored under "<name> (Adaptive)" so their score (the rating,
 //! in seconds or degrees per second) never mixes with standard points.
@@ -12,7 +13,7 @@ use std::path::Path;
 
 use aimadapt_core::db::SOURCE_ENGINE;
 use aimadapt_core::parse::{Kill, WeaponTotal};
-use aimadapt_core::telemetry::{EngineRun, SampleRow, ShotRow, TargetRow};
+use aimadapt_core::telemetry::{EngineRun, Frame, Pose, SampleRow, ShotRow, TargetRow};
 use aimadapt_core::{Db, RunFile};
 use aimadapt_sim::adaptive::{Knob, Mix, Pick, Prior};
 use aimadapt_sim::scenario::WeaponKind;
@@ -189,6 +190,25 @@ pub fn to_engine_run(info: &RunInfo) -> EngineRun {
         reps: info.reps.map(i64::from),
         block: info.block.filter(|b| *b != aimadapt_sim::workout::Block::None).map(|b| b.id().into()),
         trace: tel.trace_bytes(),
+        frames: tel
+            .frames
+            .iter()
+            .map(|fr| Frame {
+                t: f(fr.t),
+                targets: fr
+                    .targets
+                    .iter()
+                    .map(|p| Pose {
+                        no: i64::from(p.no),
+                        yaw: f(p.yaw_deg),
+                        pitch: f(p.pitch_deg),
+                        radius: f(p.radius_deg),
+                        height: f(p.height_deg),
+                        health: f(p.health),
+                    })
+                    .collect(),
+            })
+            .collect(),
         targets: tel
             .targets
             .iter()
@@ -452,6 +472,14 @@ mod tests {
         assert!(targets > 30, "{targets}");
         let trace: Vec<u8> = db.conn().query_row("SELECT trace FROM engine_runs LIMIT 1", [], |r| r.get(0)).unwrap();
         assert!(trace.len() > 1000);
+        let run_id: i64 = db.conn().query_row("SELECT run_id FROM engine_runs LIMIT 1", [], |r| r.get(0)).unwrap();
+        let replay = aimadapt_core::replay::replay(&db, run_id).unwrap().expect("new runs record replays");
+        assert!(
+            replay.frames.len() > 10 && !replay.trace.is_empty() && !replay.shots.is_empty(),
+            "{:?}",
+            replay.frames.len()
+        );
+        assert!(replay.frames.iter().any(|f| !f.targets.is_empty()));
         let workout: Option<String> = db
             .conn()
             .query_row("SELECT workout FROM engine_runs ORDER BY run_id LIMIT 1 OFFSET 1", [], |r| r.get(0))

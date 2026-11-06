@@ -209,8 +209,23 @@ Insights analyzes your runs in the built-in trainer, scenario by scenario. Every
 - **Switching:** how fast you reach the next target after a kill, and how well you stay on the one you're killing.
 - **Within a run:** success in 10-second segments, which shows slow starts or fading late.
 - **Notes:** plain-language takeaways from the figures above.
+- **Runs:** every run with its rating, hit rate, flick speed, reaction and time on target, and a **Replay** link to watch it again (see [Replay](#help/replay)).
 
 **Reaction time and lifetime ratings.** A lifetime rating includes your reaction time, which practice barely changes. A note splits the rating into your reaction and the part you control. That part improves by more than the rating shows: going from 0.80 s to 0.62 s is 23% on the rating, but with a 0.22 s reaction the part you control fell 31%.
+
+## Replay {#replay}
+
+Every run in the trainer can be watched again. In Insights, pick a scenario and click **Replay** next to a run in the runs table.
+
+The replay shows your own view: the crosshair stays in the middle and the view turns with it, as it did in the game, at the field of view you played at. The faint dots are a fixed grid, so you can see the view move even with no targets near.
+
+- **Targets** are drawn where they were, at their size. A target lights up while your crosshair is on it, and a white ring shows its health once it's been damaged.
+- **Trail:** a green line shows where the crosshair has been in the last 0.4 s, so you can see overshoot and corrections. Turn it off with **Trail**.
+- **Shots:** a white ring for a hit and a red cross for a miss, where the crosshair was. The ticks under the bar mark every shot, red for misses, so you can jump to them.
+- **Totals** in the corner count kills, shots and hit rate up to that moment. Tracking runs show kills and whether you're on target.
+- **Controls:** **Play**/**Pause**, the bar to jump anywhere, and **Speed** (0.25× to 2×). Keys: Space plays or pauses, ← and → skip a second (with Shift, five), `,` and `.` step one frame, Home and End go to the start and the end.
+
+A replay is redrawn from what the run recorded: your aim 240 times a second and the targets 60 times a second. It isn't a video, so it takes little space and records nothing outside the trainer. Runs from before replays were added, and KovaaK's runs, have none.
 
 ## Training time {#training}
 
@@ -274,6 +289,7 @@ Nothing is sent anywhere. Deleting one of your scenarios or workouts removes the
 ## What's new {#whats-new}
 
 **November 2026**
+- Replays: watch any new trainer run again from Insights, from your own view, at any speed, with your shots and the crosshair's trail.
 - The Reaction column in Insights' runs table leaves out flicks under 3°, like the Reaction time card, so the two agree in Micro Flicks.
 - The play area can sit anywhere on the screen, for example near the top, instead of always centered.
 - The mouse locks to the trainer again by itself after alt-tabbing.

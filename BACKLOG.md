@@ -128,9 +128,9 @@ Last reviewed: Nov 4, 2026 (after the first playtest session).
   - Tracking: time on target by speed, recovery after direction changes, and lead or lag.
   - Coaching notes.
 - [x] Skill profile across the nine sub-skills, three groups and overall (on the Program page).
+- [x] Replay a run from its aim trace and recorded target positions (60 Hz), from the player's view, at any speed.
 
 ### To do
-- [ ] `todo` P2 Replay a run from its aim trace, with targets, at any speed.
 - [ ] `todo` P2 Flick shape from the trace: peak speed, deceleration, and where corrections start.
 - [ ] `todo` P3 Rate of improvement per sub-skill (gain per week), with a projection.
 

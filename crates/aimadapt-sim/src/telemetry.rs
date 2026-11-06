@@ -93,6 +93,27 @@ pub struct TrackSample {
     pub engaged: bool,
 }
 
+/// Where one target was at a moment, for replays.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TargetPose {
+    pub no: u32,
+    /// Direction of its center from the player.
+    pub yaw_deg: f32,
+    pub pitch_deg: f32,
+    /// Angular radius, and for capsules the angular height (0 for spheres).
+    pub radius_deg: f32,
+    pub height_deg: f32,
+    /// Health left as a share of full health.
+    pub health: f32,
+}
+
+/// Every target alive at one moment.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TargetFrame {
+    pub t: f32,
+    pub targets: Vec<TargetPose>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Telemetry {
     pub targets: Vec<TargetRecord>,
@@ -100,6 +121,8 @@ pub struct Telemetry {
     pub samples: Vec<TrackSample>,
     /// (seconds, yaw°, pitch°) of the crosshair at up to 240 Hz, for replays.
     pub trace: Vec<[f32; 3]>,
+    /// The targets at up to 60 Hz, for replays.
+    pub frames: Vec<TargetFrame>,
 }
 
 impl Telemetry {

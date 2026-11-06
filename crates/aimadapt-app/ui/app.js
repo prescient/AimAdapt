@@ -15,6 +15,7 @@ const invoke = tauri
       if (cmd === "trainer") return d.trainer;
       if (cmd === "check_scenario") return [];
       if (cmd === "rescan") return d.snapshot.last_import;
+      if (cmd === "replay") return d.replays?.[args.runId] ?? null;
       throw new Error("Only available in the app");
     };
 
@@ -106,7 +107,7 @@ function route() {
 
 function render() {
   const { view, arg } = route();
-  const navView = view === "edit" || view === "workout" ? "play" : view;
+  const navView = view === "edit" || view === "workout" ? "play" : view === "replay" ? "insights" : view;
   document.querySelectorAll(".nav").forEach((a) => {
     const on = a.dataset.view === navView;
     a.classList.toggle("active", on);
@@ -119,9 +120,10 @@ function render() {
     return;
   }
   if (!ui.snap) return;
-  const views = { dashboard, play, edit, workout, program, insights, progress, training, benchmarks, library, settings, help: helpPage };
+  const views = { dashboard, play, edit, workout, program, insights, progress, training, benchmarks, library, settings, help: helpPage, replay: replayPage };
   main.innerHTML = (views[view] || dashboard)(arg);
   if (view === "progress") afterProgress(arg);
+  if (view === "replay") afterReplay();
 }
 
 function renderStatus() {

@@ -49,6 +49,8 @@ pub struct EngineRun {
     pub block: Option<String>,
     /// Little-endian f32 triples (seconds, yaw°, pitch°).
     pub trace: Vec<u8>,
+    /// Where the targets were, for replays (stored packed, see [`encode_frames`]).
+    pub frames: Vec<Frame>,
     pub targets: Vec<TargetRow>,
     pub shots: Vec<ShotRow>,
     pub samples: Vec<SampleRow>,
@@ -77,6 +79,121 @@ pub struct TargetRow {
     pub value: Option<f64>,
     pub chance: Option<f64>,
     pub pick: Option<String>,
+}
+
+/// One target at one moment, for replays. Angles in degrees.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Pose {
+    pub no: i64,
+    pub yaw: f64,
+    pub pitch: f64,
+    pub radius: f64,
+    /// Capsule height; 0 for spheres.
+    pub height: f64,
+    /// Health left, 0 to 1.
+    pub health: f64,
+}
+
+/// Every target alive at one moment.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Frame {
+    pub t: f64,
+    pub targets: Vec<Pose>,
+}
+
+/// Format of the packed replay frames, stored as their first byte.
+const FRAMES_V1: u8 = 1;
+/// Bytes per target in a packed frame.
+const POSE_BYTES: usize = 11;
+
+/// Packs replay frames small: per frame the time (f32) and target count (u8), then
+/// per target its number (u16), yaw and pitch (i16, 0.01°), radius and height (u16,
+/// 0.001°) and health (u8). A frame identical to the one before is left out, except
+/// the last of a still stretch, so a replay doesn't blend a sudden change (a hit on a
+/// static target) over the whole stretch.
+pub fn encode_frames(frames: &[Frame]) -> Vec<u8> {
+    fn body(f: &Frame) -> Vec<u8> {
+        let q = |v: f64, scale: f64, lo: f64, hi: f64| (v * scale).round().clamp(lo, hi);
+        let n = f.targets.len().min(255);
+        let mut b = vec![n as u8];
+        for p in &f.targets[..n] {
+            b.extend((p.no.clamp(0, 65535) as u16).to_le_bytes());
+            b.extend((q(p.yaw, 100.0, -32768.0, 32767.0) as i16).to_le_bytes());
+            b.extend((q(p.pitch, 100.0, -32768.0, 32767.0) as i16).to_le_bytes());
+            b.extend((q(p.radius, 1000.0, 0.0, 65535.0) as u16).to_le_bytes());
+            b.extend((q(p.height, 1000.0, 0.0, 65535.0) as u16).to_le_bytes());
+            b.push(q(p.health, 255.0, 0.0, 255.0) as u8);
+        }
+        b
+    }
+    fn push(out: &mut Vec<u8>, t: f64, b: &[u8]) {
+        out.extend((t as f32).to_le_bytes());
+        out.extend_from_slice(b);
+    }
+    let mut out = vec![FRAMES_V1];
+    let (mut last, mut held): (Option<Vec<u8>>, Option<f64>) = (None, None);
+    for f in frames {
+        let b = body(f);
+        if last.as_ref() == Some(&b) {
+            held = Some(f.t);
+            continue;
+        }
+        if let (Some(t), Some(prev)) = (held.take(), &last) {
+            push(&mut out, t, prev);
+        }
+        push(&mut out, f.t, &b);
+        last = Some(b);
+    }
+    if let (Some(t), Some(prev)) = (held, &last) {
+        push(&mut out, t, prev);
+    }
+    out
+}
+
+/// Unpacks [`encode_frames`]. Stops at a frame that's cut short; an unknown format
+/// gives no frames.
+pub fn decode_frames(bytes: &[u8]) -> Vec<Frame> {
+    let mut frames = Vec::new();
+    if bytes.first() != Some(&FRAMES_V1) {
+        return frames;
+    }
+    let u16_at = |b: &[u8], i: usize| u16::from_le_bytes([b[i], b[i + 1]]);
+    let i16_at = |b: &[u8], i: usize| i16::from_le_bytes([b[i], b[i + 1]]);
+    let mut rest = &bytes[1..];
+    while rest.len() >= 5 {
+        let t = f32::from_le_bytes([rest[0], rest[1], rest[2], rest[3]]);
+        let len = usize::from(rest[4]) * POSE_BYTES;
+        let Some(body) = rest.get(5..5 + len) else { break };
+        let targets = body
+            .as_chunks::<POSE_BYTES>()
+            .0
+            .iter()
+            .map(|c| Pose {
+                no: i64::from(u16_at(c, 0)),
+                yaw: f64::from(i16_at(c, 2)) / 100.0,
+                pitch: f64::from(i16_at(c, 4)) / 100.0,
+                radius: f64::from(u16_at(c, 6)) / 1000.0,
+                height: f64::from(u16_at(c, 8)) / 1000.0,
+                health: f64::from(c[10]) / 255.0,
+            })
+            .collect();
+        frames.push(Frame { t: f64::from(t), targets });
+        rest = &rest[5 + len..];
+    }
+    frames
+}
+
+/// Unpacks the aim trace: (seconds, yaw°, pitch°).
+pub fn decode_trace(bytes: &[u8]) -> Vec<[f32; 3]> {
+    bytes
+        .as_chunks::<12>()
+        .0
+        .iter()
+        .map(|c| {
+            let f = |i: usize| f32::from_le_bytes([c[i], c[i + 1], c[i + 2], c[i + 3]]);
+            [f(0), f(4), f(8)]
+        })
+        .collect()
 }
 
 /// A rating as stored, for starting the next run.
@@ -178,6 +295,11 @@ CREATE TABLE engine_samples (
 CREATE INDEX engine_samples_run ON engine_samples (run_id);
 "#;
 
+/// Schema v7: replay frames (where every target was, 60 times a second).
+pub(crate) const MIGRATION_REPLAY: &str = r#"
+ALTER TABLE engine_runs ADD COLUMN frames BLOB;
+"#;
+
 /// Schema v6: adaptive runs play at one difficulty after a calibration run.
 pub(crate) const MIGRATION_RUN_LEVEL: &str = r#"
 ALTER TABLE engine_runs ADD COLUMN run_value REAL;
@@ -243,9 +365,9 @@ impl Db {
             "INSERT OR IGNORE INTO engine_runs (run_id, base_scenario, category, adaptive, goal, success_rate,
                 level_timeline, workout, trace, knob, rating, rating_low, rating_high, start_rating, theta, slope,
                 rating_sd, fastest, mix, skill, program, program_day, rep, reps, block, run_value, run_pick,
-                planned_chance)
+                planned_chance, frames)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
-                     ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)",
+                     ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)",
             params![
                 run_id,
                 e.base_scenario,
@@ -275,6 +397,7 @@ impl Db {
                 e.run_value,
                 e.run_pick,
                 e.planned_chance,
+                (!e.frames.is_empty()).then(|| encode_frames(&e.frames)),
             ],
         )?;
         if changed == 0 {
@@ -398,6 +521,46 @@ impl Db {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn pose(no: i64, yaw: f64, health: f64) -> Pose {
+        Pose { no, yaw, pitch: -2.5, radius: 0.75, height: 0.0, health }
+    }
+
+    #[test]
+    fn replay_frames_round_trip_to_their_precision() {
+        let frames = vec![
+            Frame { t: 0.0, targets: vec![pose(1, -12.345, 1.0), Pose { height: 4.2, ..pose(2, 30.0, 0.5) }] },
+            Frame { t: 1.0 / 60.0, targets: vec![] },
+        ];
+        let back = decode_frames(&encode_frames(&frames));
+        assert_eq!(back.len(), 2);
+        let p = &back[0].targets[0];
+        assert_eq!(p.no, 1);
+        assert!((p.yaw + 12.345).abs() < 0.006 && (p.pitch + 2.5).abs() < 1e-9 && (p.radius - 0.75).abs() < 1e-9);
+        let q = &back[0].targets[1];
+        assert!((q.height - 4.2).abs() < 1e-9 && (q.health - 0.5).abs() < 0.003, "{q:?}");
+        assert!(back[1].targets.is_empty() && (back[1].t - 1.0 / 60.0).abs() < 1e-6);
+        assert!(decode_frames(&[]).is_empty() && decode_frames(&[9, 0, 0]).is_empty(), "unknown format");
+    }
+
+    #[test]
+    fn still_frames_are_dropped_but_changes_stay_sharp() {
+        // A static target, hit at 1 s: frames 0 to 60 are all the same.
+        let frames: Vec<Frame> = (0..=90)
+            .map(|i| Frame { t: i as f64 / 60.0, targets: vec![pose(1, 5.0, if i <= 60 { 1.0 } else { 0.5 })] })
+            .collect();
+        let back = decode_frames(&encode_frames(&frames));
+        let frame_no: Vec<f64> = back.iter().map(|f| (f.t * 60.0).round()).collect();
+        // The first frame, the last still one before the hit, the hit, and the end.
+        assert_eq!(frame_no, vec![0.0, 60.0, 61.0, 90.0]);
+        assert_eq!(back[1].targets[0].health, 1.0, "still full health right up to the hit");
+    }
+
+    #[test]
+    fn trace_unpacks_three_floats_per_sample() {
+        let bytes: Vec<u8> = [0.5f32, -10.0, 2.25].iter().flat_map(|v| v.to_le_bytes()).collect();
+        assert_eq!(decode_trace(&bytes), vec![[0.5, -10.0, 2.25]]);
+    }
 
     #[test]
     fn timeline_round_trips() {

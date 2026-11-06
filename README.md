@@ -99,7 +99,7 @@ The Play screen shows today's workout with a Start button.
 
 ## Insights
 
-Every run stores each target, each shot, tracking samples 30 times a second, and a 240 Hz aim trace. Insights shows, per scenario:
+Every run stores each target, each shot, tracking samples 30 times a second, a 240 Hz aim trace, and where the targets were 60 times a second. Insights shows, per scenario:
 
 - **Rating by run** with its likely range, and how it moved during the last run.
 - **Speed vs. hit rate curve:** where you're reliable (95%), your 85% rating, and the coin-flip point (50%), with observed hit rates.
@@ -110,6 +110,8 @@ Every run stores each target, each shot, tracking samples 30 times a second, and
 - **Tracking:** time on target by target speed, recovery after direction changes, how far ahead of or behind the target you are, unbroken stretches on target (half your time on target came in stretches at least this long), and centering (median distance from the target's center while on it).
 - **Within a run:** success in 10-second segments.
 - **Notes** generated from the figures above.
+
+Each run can also be **replayed** from your own view at any speed, with the targets, your shots and the crosshair's trail. Replays are redrawn from the aim trace and the targets' positions, recorded 60 times a second, so they're small and record nothing outside the trainer.
 
 ![Insights for a clicking scenario](docs/screenshots/insights.png)
 

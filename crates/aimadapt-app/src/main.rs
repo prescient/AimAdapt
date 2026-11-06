@@ -143,8 +143,15 @@ fn dump_snapshot(state: &AppData, path: &std::path::Path) -> Result<(), String> 
     let db = state.db.lock().map_err(err)?;
     let overview = aimadapt_core::insights::overview(&db).map_err(err)?;
     let mut insights = std::collections::BTreeMap::new();
+    // The latest replay of each scenario, so the preview can show one.
+    let mut replays = std::collections::BTreeMap::new();
     for o in &overview {
         if let Some(i) = aimadapt_core::insights::scenario(&db, &o.scenario).map_err(err)? {
+            if let Some(r) = i.runs.iter().rev().find(|r| r.replay)
+                && let Some(replay) = aimadapt_core::replay::replay(&db, r.run_id).map_err(err)?
+            {
+                replays.insert(r.run_id.to_string(), replay);
+            }
             insights.insert(o.scenario.clone(), i);
         }
     }
@@ -157,6 +164,7 @@ fn dump_snapshot(state: &AppData, path: &std::path::Path) -> Result<(), String> 
         program: &'a trainer::ProgramPage,
         insights_overview: &'a [aimadapt_core::insights::ScenarioSummary],
         insights: &'a std::collections::BTreeMap<String, aimadapt_core::insights::Insights>,
+        replays: &'a std::collections::BTreeMap<String, aimadapt_core::replay::Replay>,
     }
     let dump = Dump {
         snapshot: &snapshot,
@@ -165,6 +173,7 @@ fn dump_snapshot(state: &AppData, path: &std::path::Path) -> Result<(), String> 
         program: &program,
         insights_overview: &overview,
         insights: &insights,
+        replays: &replays,
     };
     let json = serde_json::to_string(&dump).map_err(err)?;
     std::fs::write(path, json).map_err(err)
@@ -283,6 +292,7 @@ fn main() {
             trainer::delete_workout,
             trainer::insights_overview,
             trainer::insights,
+            trainer::replay,
             trainer::play,
             trainer::play_workout,
             trainer::program,

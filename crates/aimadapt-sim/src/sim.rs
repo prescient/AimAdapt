@@ -10,7 +10,9 @@ use glam::Vec3;
 
 use crate::adaptive::{Knob, Mix, Pick, Prior, Rating};
 use crate::scenario::{Movement, MovementKind, Range, Scenario, Shape, Trigger, WeaponKind};
-use crate::telemetry::{Outcome, ShotRecord, TargetRecord, Telemetry, TrackSample, angle_deg, screen_offset};
+use crate::telemetry::{
+    Outcome, ShotRecord, TargetFrame, TargetPose, TargetRecord, Telemetry, TrackSample, angle_deg, screen_offset,
+};
 
 /// Beam damage and accuracy are sampled at this rate, independent of frame rate.
 pub const BEAM_TICK_HZ: f32 = 60.0;
@@ -21,6 +23,8 @@ pub const MAX_MISSES_PER_TARGET: u32 = 1;
 const SAMPLE_HZ: f32 = 30.0;
 /// Aim trace rate.
 const TRACE_HZ: f32 = 240.0;
+/// Replay frames: where every target is, this many times a second.
+const FRAME_HZ: f32 = 60.0;
 
 /// What the player is doing this frame.
 #[derive(Debug, Clone, Copy)]
@@ -175,6 +179,24 @@ impl Target {
     /// Damaged and not yet healed back to full.
     pub fn engaged(&self) -> bool {
         self.health > 1e-4 && self.health < self.max_health - 1e-4
+    }
+
+    /// Where it is now, as the player sees it, for replays.
+    fn pose(&self, shape: Shape) -> TargetPose {
+        let (yaw_deg, pitch_deg) = angles(self.pos);
+        let distance = self.pos.length().max(0.1);
+        let height_deg = match shape {
+            Shape::Sphere => 0.0,
+            Shape::Capsule => 2.0 * (self.height() / 2.0 / distance).atan().to_degrees(),
+        };
+        TargetPose {
+            no: self.track.no,
+            yaw_deg,
+            pitch_deg,
+            radius_deg: (self.radius / distance).atan().to_degrees(),
+            height_deg,
+            health: self.health_fraction(),
+        }
     }
 
     fn hit_by(&self, aim: Vec3, shape: Shape) -> Option<f32> {
@@ -393,6 +415,7 @@ pub struct Sim {
     telemetry: Telemetry,
     next_sample: f32,
     next_trace: f32,
+    next_frame: f32,
 }
 
 impl Sim {
@@ -460,6 +483,7 @@ impl Sim {
             telemetry: Telemetry::default(),
             next_sample: 0.0,
             next_trace: 0.0,
+            next_frame: 0.0,
         };
         sim.start_segment();
         let mut events = Vec::new();
@@ -792,6 +816,14 @@ impl Sim {
             self.next_trace = now + 1.0 / TRACE_HZ;
             let (yaw, pitch) = angles(aim);
             self.telemetry.trace.push([now, yaw, pitch]);
+        }
+
+        if now >= self.next_frame {
+            // Step on from the last frame's slot, not from now, so frames keep to
+            // 60 Hz instead of slipping to every third game frame.
+            self.next_frame = (self.next_frame + 1.0 / FRAME_HZ).max(now);
+            let targets = self.targets.iter().map(|t| t.pose(shape)).collect();
+            self.telemetry.frames.push(TargetFrame { t: now, targets });
         }
 
         if self.scenario.weapon.kind == WeaponKind::Beam && now >= self.next_sample {
@@ -2542,6 +2574,39 @@ mod tests {
         assert_eq!(t.entries, 2, "went past and came back");
         let shot = &r.telemetry.shots[0];
         assert!(shot.hit && shot.along > 0.0 && shot.across.abs() < 0.01, "{shot:?}");
+    }
+
+    #[test]
+    fn replay_frames_follow_every_target() {
+        let mut s = no_countdown(Scenario::default());
+        s.targets.count = 2;
+        s.targets.movement = Movement { kind: MovementKind::Strafe, ..Default::default() };
+        let mut sim = Sim::new(s, 7);
+        for _ in 0..240 {
+            sim.step(FRAME, idle());
+        }
+        // Shoot one target dead, then keep going.
+        let (no, at) = (sim.targets()[0].no(), sim.targets()[0].pos);
+        while sim.targets().iter().any(|t| t.no() == no) {
+            sim.step(FRAME, shoot(sim.targets().iter().find(|t| t.no() == no).map_or(at, |t| t.pos)));
+        }
+        let killed_at = sim.elapsed();
+        for _ in 0..60 {
+            sim.step(FRAME, idle());
+        }
+        let frames = sim.result().telemetry.frames;
+        let span = frames.last().unwrap().t - frames[0].t;
+        assert!((frames.len() as f32 / span - 60.0).abs() < 3.0, "{} frames in {span} s", frames.len());
+        let last = frames.last().unwrap();
+        assert_eq!(last.targets.len(), 2, "a new target replaced the dead one");
+        assert!(frames.iter().filter(|f| f.t > killed_at + 0.02).all(|f| f.targets.iter().all(|p| p.no != no)));
+        // Poses match the live targets.
+        for (p, t) in last.targets.iter().zip(sim.targets()) {
+            let (yaw, pitch) = angles(t.pos);
+            assert_eq!(p.no, t.no());
+            assert!((p.yaw_deg - yaw).abs() < 0.5 && (p.pitch_deg - pitch).abs() < 0.5, "{p:?}");
+            assert!(p.radius_deg > 0.1 && p.height_deg == 0.0 && p.health > 0.0, "{p:?}");
+        }
     }
 
     #[test]

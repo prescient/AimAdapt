@@ -1,6 +1,6 @@
 //! Commands for the Play, workout and Insights screens: listing scenarios and
 //! workouts with their bests and levels, saving and deleting the player's own,
-//! engine settings, analytics, and starting the trainer.
+//! engine settings, analytics, replays, and starting the trainer.
 //!
 //! The trainer runs as a second copy of this executable (`--play <id>` or
 //! `--workout <id>`), so the app stays one file and a crash in the game window
@@ -256,6 +256,13 @@ pub fn insights_overview(state: State<'_, AppData>) -> Result<InsightsOverview, 
 pub fn insights(state: State<'_, AppData>, scenario: String) -> Result<Option<insights::Insights>, String> {
     let db = state.db.lock().map_err(err)?;
     insights::scenario(&db, &scenario).map_err(err)
+}
+
+/// A trainer run's replay, or `None` for a run without one.
+#[tauri::command]
+pub fn replay(state: State<'_, AppData>, run_id: i64) -> Result<Option<aimadapt_core::replay::Replay>, String> {
+    let db = state.db.lock().map_err(err)?;
+    aimadapt_core::replay::replay(&db, run_id).map_err(err)
 }
 
 /// Trainer arguments for a scenario. The app's `main` must recognize every

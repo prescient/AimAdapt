@@ -8,6 +8,7 @@ pub mod insights;
 pub mod parse;
 pub mod programs;
 pub mod progress;
+pub mod replay;
 pub mod summary;
 pub mod telemetry;
 pub mod training;

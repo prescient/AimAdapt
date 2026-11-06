@@ -74,6 +74,8 @@ pub struct RunPoint {
     pub reaction_ms: Option<f64>,
     pub on_target: Option<f64>,
     pub workout: Option<String>,
+    /// The run recorded replay frames (runs from before replays didn't).
+    pub replay: bool,
 }
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
@@ -378,7 +380,7 @@ pub fn scenario(db: &Db, base_scenario: &str) -> Result<Option<Insights>, DbErro
     let mut stmt = conn.prepare(
         "SELECT r.id, r.finished_at, e.adaptive, e.rating, e.success_rate, r.score, r.accuracy, e.workout,
                 e.category, e.level_timeline, e.knob, e.rating_low, e.rating_high,
-                CASE WHEN e.run_value IS NOT NULL THEN e.fastest END, e.theta, e.slope
+                CASE WHEN e.run_value IS NOT NULL THEN e.fastest END, e.theta, e.slope, e.frames IS NOT NULL
          FROM engine_runs e JOIN runs r ON r.id = e.run_id
          WHERE e.base_scenario = ?1 ORDER BY r.finished_at, r.id",
     )?;
@@ -402,6 +404,7 @@ pub fn scenario(db: &Db, base_scenario: &str) -> Result<Option<Insights>, DbErro
                     reaction_ms: None,
                     on_target: None,
                     workout: r.get(7)?,
+                    replay: r.get(16)?,
                 },
                 r.get(8)?,
                 r.get(9)?,

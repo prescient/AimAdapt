@@ -101,10 +101,11 @@ function insightDetail(d) {
       ${t ? trackingCard(t) : ""}
       ${d.segments.some((s) => s.success !== null) ? segmentCard(d.segments) : ""}
     </div>
-    <section class="card"><h2>Runs</h2><div class="table-wrap"><table><thead><tr><th>When</th><th>Mode</th><th class="r">85% rating</th><th class="r">Hit</th><th class="r">Score</th><th class="r">Flick speed</th><th class="r">Reaction</th><th class="r">On target</th><th>Workout</th></tr></thead><tbody>
+    <section class="card"><h2>Runs</h2><div class="table-wrap"><table><thead><tr><th>When</th><th>Mode</th><th class="r">85% rating</th><th class="r">Hit</th><th class="r">Score</th><th class="r">Flick speed</th><th class="r">Reaction</th><th class="r">On target</th><th>Workout</th><th></th></tr></thead><tbody>
       ${[...d.runs].reverse().slice(0, 30).map((r) => `<tr><td style="white-space:nowrap">${esc(fmtShort(dt(r.finished_at)))}, ${esc(fmtTime(dt(r.finished_at)))}</td><td>${r.adaptive ? "Adaptive" : "Standard"}</td>
         <td class="r num">${r.rating !== null ? esc(fmtKnob(r.knob, r.rating)) : "–"}</td><td class="r mono">${share(r.success_rate ?? r.accuracy)}</td><td class="r mono">${r.adaptive ? "–" : num(r.score)}</td>
-        <td class="r mono">${r.throughput ? `${r.throughput.toFixed(1)}` : "–"}</td><td class="r mono">${ms(r.reaction_ms)}</td><td class="r mono">${share(r.on_target)}</td><td class="muted">${esc(r.workout ?? "")}</td></tr>`).join("")}
+        <td class="r mono">${r.throughput ? `${r.throughput.toFixed(1)}` : "–"}</td><td class="r mono">${ms(r.reaction_ms)}</td><td class="r mono">${share(r.on_target)}</td><td class="muted">${esc(r.workout ?? "")}</td>
+        <td>${r.replay ? `<a href="#replay/${r.run_id}" title="Watch this run again">Replay</a>` : ""}</td></tr>`).join("")}
     </tbody></table></div></section>`;
 }
 
