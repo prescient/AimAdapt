@@ -1,6 +1,7 @@
-// Insights: analytics for runs played in AimAdapt's own trainer. Loaded after app.js
-// and trainer.js. Everything comes from `insights_overview` and `insights`
-// (crates/aimadapt-core/src/insights.rs); this file only draws it.
+// Insights: analytics for runs played in AimAdapt's own trainer, drawn on each
+// scenario's page (scenarios.js). Loaded after app.js and trainer.js. Everything comes
+// from `insights_overview` and `insights` (crates/aimadapt-core/src/insights.rs);
+// this file only draws it.
 
 ui.insights = { overview: null, cache: new Map(), error: null };
 
@@ -13,7 +14,7 @@ async function loadInsightsOverview(force = false) {
   } catch (e) {
     ui.insights.error = String(e);
   }
-  if (route().view === "insights") render();
+  if (["scenarios", "today"].includes(route().view)) render();
 }
 
 async function insightsFor(name) {
@@ -24,7 +25,7 @@ async function insightsFor(name) {
     } catch (e) {
       c.set(name, { error: String(e) });
     }
-    if (route().view === "insights") render();
+    if (route().view === "scenarios") render();
   }
   return c.get(name);
 }
@@ -38,75 +39,35 @@ const delta = (now, before, unit = "", better = 1) => {
   return `<span class="${good ? "pos" : "neg"}">${d > 0 ? "+" : ""}${unit === "%" ? Math.round(d * 100) : d.toFixed(unit === "bits/s" ? 1 : 0)}${unit === "%" ? " pts" : unit ? ` ${unit}` : ""}</span> vs. runs before`;
 };
 
-function insights(name) {
-  const st = ui.insights;
-  if (st.error) return `<div class="page">${head("Built-in trainer analytics", "Insights")}<div class="card error">${esc(st.error)}</div></div>`;
-  if (!st.overview) {
-    loadInsightsOverview();
-    return `<div class="empty-state">Loading insights…</div>`;
-  }
-  if (!st.overview.length) {
-    return `<div class="page">${head("Built-in trainer analytics", "Insights")}
-      <div class="card note-body">Insights come from runs played in AimAdapt's own trainer, which records every target, shot and tracking moment. Play a scenario on the <a href="#play">Play</a> screen and come back.</div></div>`;
-  }
-  const selected = name || st.overview[0].scenario;
-  const data = st.cache.get(selected);
-  if (data === undefined) insightsFor(selected);
-  return `<div class="page">
-    ${head("Built-in trainer analytics", "Insights")}
-    <div class="row">
-      <section class="card" style="flex:1 1 260px;max-width:340px;align-self:flex-start">
-        <h2>Scenarios</h2>
-        <div class="scenario-list">${st.overview.map((s) => `<a class="scenario-item ${s.scenario === selected ? "on" : ""}" href="#insights/${encodeURIComponent(s.scenario)}">
-          <span class="main"><span class="name">${esc(s.scenario)}</span>
-          <span class="sub">${s.runs} run${s.runs === 1 ? "" : "s"} · ${esc(s.category)}${s.latest_rating !== null ? ` · 85% at ${esc(fmtKnob(s.knob, s.latest_rating))}` : ""}</span></span></a>`).join("")}</div>
-      </section>
-      <div style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column;gap:16px">
-        ${data === undefined ? `<div class="empty-state">Loading…</div>` : data === null ? `<div class="card note-body">No data for this scenario.</div>` : data.error ? `<div class="card error">${esc(data.error)}</div>` : insightDetail(data)}
-      </div>
-    </div>
-  </div>`;
-}
-
-function insightDetail(d) {
+// Up to eight key figures for a scenario, most important first.
+function insightKpis(d) {
   const adaptive = d.runs.filter((r) => r.adaptive && r.rating !== null && r.knob === d.knob);
   const latest = adaptive.at(-1);
   const best = adaptive.reduce((m, r) => (m === null || betterThan(d.knob, r.rating, m) ? r.rating : m), null);
   const fastest = adaptive.reduce((m, r) => (r.fastest !== null && (m === null || betterThan(d.knob, r.fastest, m)) ? r.fastest : m), null);
   const t = d.tracking;
   const sw = d.switching;
-  const kpis = [
+  return [
     latest ? kpi(`85% ${knobWord(d.knob)}`, esc(fmtKnob(d.knob, latest.rating)), `best ${esc(fmtKnob(d.knob, best))}${fastest !== null ? ` · held ${esc(fmtKnob(d.knob, fastest))}` : ""}`) : "",
     d.success !== null ? kpi("Targets hit", share(d.success), `destroyed before timing out · last ${d.recent_runs} runs`) : "",
-    d.fitts ? kpi("Flick speed", `${d.fitts.throughput.toFixed(1)}<small> bits/s</small>`, delta(d.fitts.throughput, d.fitts.throughput_before, "bits/s") || "speed for size and distance") : "",
-    d.reaction ? kpi("Reaction", `${Math.round(d.reaction.median_ms)}<small> ms</small>`, delta(d.reaction.median_ms, d.reaction.median_before_ms, "ms", -1) || "median, before moving") : "",
     t && !sw ? kpi("On target", share(t.on_target), delta(t.on_target, t.on_target_before, "%") || `median miss ${t.median_error_deg.toFixed(2)}°`) : "",
+    d.reaction ? kpi("Reaction", `${Math.round(d.reaction.median_ms)}<small> ms</small>`, delta(d.reaction.median_ms, d.reaction.median_before_ms, "ms", -1) || "median, before moving") : "",
+    d.fitts ? kpi("Flick speed", `${d.fitts.throughput.toFixed(1)}<small> bits/s</small>`, delta(d.fitts.throughput, d.fitts.throughput_before, "bits/s") || "speed for size and distance") : "",
     sw && sw.kills_per_min !== null ? kpi("Kills a minute", `${Math.round(sw.kills_per_min)}`, delta(sw.kills_per_min, sw.kills_per_min_before, "") || "overall switching pace") : "",
     sw && sw.acquire_ms !== null ? kpi("Acquire", `${Math.round(sw.acquire_ms)}<small> ms</small>`, delta(sw.acquire_ms, sw.acquire_before_ms, "ms", -1) || "kill to reaching the next target, median") : "",
     sw && sw.engaged_on_target !== null ? kpi("On target while killing", share(sw.engaged_on_target), delta(sw.engaged_on_target, sw.engaged_on_target_before, "%") || "time between targets not counted") : "",
-  ].join("");
-  return `
-    <section class="card"><div class="card-head"><h2>${esc(d.scenario)}</h2><a class="btn" href="#play">Play</a></div>
-      <div class="kpis">${kpis}</div>
-      ${d.notes.length ? `<div class="grid">${d.notes.map((n) => `<div class="note"><div class="note-title">${esc(n.title)}</div><div class="note-body">${esc(n.body)}</div></div>`).join("")}</div>` : `<div class="note-body">Play a few more runs for coaching notes.</div>`}
-    </section>
-    ${adaptive.length ? ratingCard(d, adaptive) : ""}
-    ${d.curve ? curveCard(d.curve) : ""}
-    <div class="insight-grid">
-      ${d.fitts ? fittsCard(d.fitts) : ""}
-      ${d.directions.length >= 3 ? directionCard(d.directions) : ""}
-      ${d.shots ? shotCard(d.shots) : ""}
-      ${d.reaction ? reactionCard(d.reaction) : ""}
-      ${d.distances.length ? distanceCard(d.distances) : ""}
-      ${t ? trackingCard(t) : ""}
-      ${d.segments.some((s) => s.success !== null) ? segmentCard(d.segments) : ""}
-    </div>
-    <section class="card"><h2>Runs</h2><div class="table-wrap"><table><thead><tr><th>When</th><th>Mode</th><th class="r">85% rating</th><th class="r">Hit</th><th class="r">Score</th><th class="r">Flick speed</th><th class="r">Reaction</th><th class="r">On target</th><th>Workout</th><th></th></tr></thead><tbody>
+  ].filter(Boolean);
+}
+
+// The latest 30 runs, each with a Replay link when it has one.
+function insightRunsTable(d) {
+  return `<div class="card-head"><h2>Runs</h2><span class="small muted">${d.runs.length} in all · newest first</span></div>
+    <div class="table-wrap"><table><thead><tr><th>When</th><th>Mode</th><th class="r">85% rating</th><th class="r">Hit</th><th class="r">Score</th><th class="r">Flick speed</th><th class="r">Reaction</th><th class="r">On target</th><th>Played in</th><th></th></tr></thead><tbody>
       ${[...d.runs].reverse().slice(0, 30).map((r) => `<tr><td style="white-space:nowrap">${esc(fmtShort(dt(r.finished_at)))}, ${esc(fmtTime(dt(r.finished_at)))}</td><td>${r.adaptive ? "Adaptive" : "Standard"}</td>
         <td class="r num">${r.rating !== null ? esc(fmtKnob(r.knob, r.rating)) : "–"}</td><td class="r mono">${share(r.success_rate ?? r.accuracy)}</td><td class="r mono">${r.adaptive ? "–" : num(r.score)}</td>
         <td class="r mono">${r.throughput ? `${r.throughput.toFixed(1)}` : "–"}</td><td class="r mono">${ms(r.reaction_ms)}</td><td class="r mono">${share(r.on_target)}</td><td class="muted">${esc(r.workout ?? "")}</td>
         <td>${r.replay ? `<a href="#replay/${r.run_id}" title="Watch this run again">Replay</a>` : ""}</td></tr>`).join("")}
-    </tbody></table></div></section>`;
+    </tbody></table></div>`;
 }
 
 // ---------- charts ----------
@@ -115,10 +76,11 @@ const W = 560, H = 240, PAD = { l: 44, r: 14, t: 14, b: 30 };
 const sx = (v, lo, hi) => PAD.l + ((v - lo) / (hi - lo || 1)) * (W - PAD.l - PAD.r);
 const sy = (v, lo, hi) => H - PAD.b - ((v - lo) / (hi - lo || 1)) * (H - PAD.t - PAD.b);
 
-function axes(xlo, xhi, ylo, yhi, xlabel, ylabel, yfmt = (v) => v, yn = 4) {
+// yfmt gets the exact tick value: rounding first made close ticks read the same.
+function axes(xlo, xhi, ylo, yhi, xlabel, ylabel, yfmt = (v) => Math.round(v * 10) / 10, yn = 4) {
   const ticks = (lo, hi, n = 4) => Array.from({ length: n + 1 }, (_, i) => lo + ((hi - lo) * i) / n);
   return `${ticks(ylo, yhi, yn).map((v) => `<line x1="${PAD.l}" x2="${W - PAD.r}" y1="${sy(v, ylo, yhi)}" y2="${sy(v, ylo, yhi)}" stroke="var(--border)" />
-      <text x="${PAD.l - 6}" y="${sy(v, ylo, yhi) + 4}" text-anchor="end" font-size="11" fill="var(--dim)">${yfmt(Math.round(v * 10) / 10)}</text>`).join("")}
+      <text x="${PAD.l - 6}" y="${sy(v, ylo, yhi) + 4}" text-anchor="end" font-size="11" fill="var(--dim)">${yfmt(v)}</text>`).join("")}
     ${ticks(xlo, xhi).map((v) => `<text x="${sx(v, xlo, xhi)}" y="${H - PAD.b + 16}" text-anchor="middle" font-size="11" fill="var(--dim)">${Math.round(v * 10) / 10}</text>`).join("")}
     <text x="${W - PAD.r}" y="${H - 2}" text-anchor="end" font-size="11" fill="var(--dim)">${xlabel}</text>
     <text x="${PAD.l}" y="${PAD.t - 2}" font-size="11" fill="var(--dim)">${ylabel}</text>`;

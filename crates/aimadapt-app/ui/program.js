@@ -1,6 +1,6 @@
-// Program: the weekly training plan (Core Week), today's workout, the week grid,
-// the skill profile and per-drill session gains. Loaded after trainer.js. Data
-// comes from the `program` command (crates/aimadapt-core/src/programs.rs).
+// The weekly training plan (Core Week): today's workout (on Today), and the week, the
+// skill profile and per-drill session gains (Progress › Skills). Loaded after
+// trainer.js. Data comes from the `program` command (crates/aimadapt-core/src/programs.rs).
 
 ui.program = { data: null, error: null };
 
@@ -28,8 +28,7 @@ async function loadProgram(force = false) {
   } catch (e) {
     ui.program.error = String(e);
   }
-  const v = route().view;
-  if (v === "program" || v === "play") render();
+  if (["today", "progress"].includes(route().view)) render();
 }
 
 function todayInfo() {
@@ -54,57 +53,29 @@ function workoutBlocks(w) {
   return `<div class="blocks">${groups.map((g) => `<div class="block-row"><span class="block-label">${esc(g.label)}</span><span>${g.items.join(", ")}</span></div>`).join("")}</div>`;
 }
 
-// Shown on the Play screen.
-function todayCard() {
-  if (!ui.program.data) {
-    loadProgram();
-    return "";
-  }
-  const d = ui.program.data;
-  const { today, next, stat } = todayInfo();
-  const playing = d.playing || ui.trainer.data?.playing;
-  if (!today.workout) {
-    return `<section class="card today-card"><div class="card-head"><h2>Today: rest day</h2><a class="btn" href="#program">View program</a></div>
-      <div class="note-body">${esc(d.name)} has no workout on ${esc(today.name)}. Next up: ${esc(next.name)}, ${esc(next.focus)}.</div></section>`;
-  }
-  const done = stat && stat.status === "done";
-  return `<section class="card today-card">
-    <div class="card-head" style="align-items:center"><div><div class="eyebrow">${esc(d.name)} · ${esc(today.name)}</div><h2>${esc(today.focus)}</h2></div>
-      <span class="chips"><a class="btn" href="#program">View program</a>
-      <button class="btn primary" type="button" data-action="play-program" data-day="${today.day}" ${playing ? "disabled" : ""}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l13 8-13 8z"></path></svg>${done ? "Play again" : stat && stat.done ? "Continue" : "Start"}</button></span></div>
-    <div class="small muted">${today.runs} runs · about ${Math.round(today.minutes)} minutes${stat && stat.done ? ` · ${stat.done} of ${stat.planned} done today` : ""}</div>
-    ${workoutBlocks(today.workout)}
-  </section>`;
-}
-
-function program() {
+// Progress › Skills: how each sub-skill and the week are going.
+function skillsTab() {
   const st = ui.program;
-  if (st.error) return `<div class="page">${head("Training program", "Program")}<div class="card error">${esc(st.error)}</div></div>`;
+  if (st.error) return `<div class="card error">${esc(st.error)}</div>`;
   if (!st.data || !ui.trainer.data) {
     loadProgram();
     if (!ui.trainer.data) loadTrainer();
-    return `<div class="empty-state">Loading program…</div>`;
+    return `<div class="empty-state">Loading…</div>`;
   }
   const d = st.data;
   const p = d.progress;
-  return `<div class="page">
-    ${head("Training program", esc(d.name))}
-    <div class="note-body">${esc(d.description)}</div>
-    ${todayCard()}
-    ${weekCard(d)}
-    <div class="row">
-      ${summaryCard(d)}
-      ${profileCard(p.profile)}
-    </div>
-    ${sessionsCard(p.sessions)}
-    <section class="card"><h2>The week</h2>
-      <div class="grid">${d.days.filter((x) => x.workout).map((x) => `<div class="note"><div class="note-title">${esc(x.name)}: ${esc(x.focus)}</div>
-        <div class="small muted">${x.runs} runs · about ${Math.round(x.minutes)} min${x.weak_spots ? " · rebuilt from your skill profile" : ""}</div>
-        ${workoutBlocks(x.workout)}
-        <div><button class="btn" type="button" data-action="play-program" data-day="${x.day}" ${d.playing ? "disabled" : ""}>Play ${esc(x.name)}</button></div></div>`).join("")}</div>
+  const s = p.summary;
+  return `<section class="kpis" aria-label="This week in numbers">
+      ${kpi("Days done", `${s.days_done} <small>of ${s.days_planned}</small>`, `${esc(d.name)} this week`)}
+      ${kpi("Minutes", Math.round(s.minutes), "This week, in the program")}
+      ${s.best ? kpi("Biggest gain", esc(SKILL_LABELS[s.best[0]]), `${pctChange(s.best[1], 1)} over the last 7 days`) : ""}
     </section>
-  </div>`;
+    <div class="row" style="align-items:flex-start">
+      ${profileCard(p.profile)}
+      ${summaryCard(d)}
+    </div>
+    ${weekCard(d)}
+    ${sessionsCard(p.sessions)}`;
 }
 
 function weekCard(d) {
@@ -120,9 +91,10 @@ function weekCard(d) {
           <div class="small">${w.done} / ${w.planned} runs${w.minutes ? ` · ${Math.round(w.minutes)} min` : ""}</div>` : `<div class="small muted">Rest day</div>`}
         ${STATUS_LABELS[w.status] ? `<span class="tag ${w.status === "done" ? "" : "grey"}">${STATUS_LABELS[w.status]}</span>` : ""}
         ${w.focus_change !== null ? `<div class="small"><span class="${w.focus_change >= 0 ? "pos" : "neg"}">${pctChange(w.focus_change, 1)}</span> vs last ${esc(info.name)}</div>` : ""}
+        ${w.planned && w.status !== "done" ? `<button class="btn small-btn" type="button" data-action="play-program" data-day="${w.day}" ${d.playing ? "disabled" : ""}>${w.done ? "Continue" : "Play"}</button>` : ""}
       </div>`;
     }).join("")}</div>
-    <div class="small muted">A day counts as done at 75% of its runs. The change compares the day's main drills with the same day last week.</div>
+    <div class="small muted">A day counts as done at 75% of its runs. The change compares the day's main drills with the same day last week. A missed day can be made up later in the week.</div>
   </section>`;
 }
 
@@ -130,16 +102,13 @@ function summaryCard(d) {
   const s = d.progress.summary;
   const sat = d.days.find((x) => x.weak_spots);
   const satFocus = sat?.workout?.items.filter((i) => i.block === "main" || i.block === "secondary").map((i) => scenarioName(i.scenario)) ?? [];
-  return `<section class="card grow-1"><h2>Weekly summary</h2>
-    <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px">
-      <div class="tile"><div class="small muted">Days done</div><div class="kpi-value">${s.days_done} / ${s.days_planned}</div></div>
-      <div class="tile"><div class="small muted">Minutes</div><div class="kpi-value">${Math.round(s.minutes)}</div></div>
-      <div class="tile"><div class="small muted">Streak</div><div class="kpi-value">${s.streak}</div></div>
-    </div>
-    ${s.best ? `<div class="note"><div class="note-title">Biggest gain: ${esc(SKILL_LABELS[s.best[0]])}</div><div class="note-body">${pctChange(s.best[1], 1)} over the last 7 days.</div></div>` : ""}
-    ${s.lagging ? `<div class="note"><div class="note-title">Furthest behind: ${esc(SKILL_LABELS[s.lagging])}</div><div class="note-body">${d.progress.profile.skills.find((x) => x.skill === s.lagging)?.runs ? "Your smallest gain since you started." : "Not trained yet."}</div></div>` : ""}
-    ${s.stale.length && s.stale.length < 9 ? `<div class="note"><div class="note-title">Not trained in a week</div><div class="note-body">${s.stale.map((x) => esc(SKILL_LABELS[x])).join(", ")}.</div></div>` : ""}
-    ${sat ? `<div class="note"><div class="note-title">Saturday's weak spots</div><div class="note-body">${satFocus.length ? esc(satFocus.join(", ")) : "Built from your profile."} These are rebuilt from your skill profile, so they change as you improve.</div></div>` : ""}
+  const notes = [
+    s.lagging ? [`Furthest behind: ${SKILL_LABELS[s.lagging]}`, d.progress.profile.skills.find((x) => x.skill === s.lagging)?.runs ? "Your smallest gain since you started." : "Not trained yet."] : null,
+    s.stale.length && s.stale.length < 9 ? ["Not trained in a week", `${s.stale.map((x) => SKILL_LABELS[x]).join(", ")}.`] : null,
+    sat ? [`${sat.name}'s weak spots`, `${satFocus.length ? satFocus.join(", ") : "Built from your profile"}. Rebuilt from your skill profile, so they change as you improve.`] : null,
+  ].filter(Boolean);
+  return `<section class="card grow-1"><h2>Worth knowing</h2>
+    ${notes.map(([t, b]) => `<div class="note"><div class="note-title">${esc(t)}</div><div class="note-body">${esc(b)}</div></div>`).join("") || `<div class="note-body">Notes show up here as the week goes on.</div>`}
   </section>`;
 }
 

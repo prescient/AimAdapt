@@ -33,7 +33,7 @@ async function loadReplay(id) {
 
 function replayPage(arg) {
   if (rp.id !== arg) loadReplay(arg);
-  const title = (t) => head("Replay", t, `<a class="btn" href="#insights">Back to Insights</a>`);
+  const title = (t) => head("Replay", t, `<a class="btn" href="#scenarios">Back to Scenarios</a>`);
   if (rp.error) return `<div class="page">${title("Replay")}<div class="card error">${esc(rp.error)}</div></div>`;
   if (rp.data === undefined) return `<div class="empty-state">Loading replay…</div>`;
   if (rp.data === null) {
@@ -42,7 +42,7 @@ function replayPage(arg) {
   const d = rp.data;
   const base = d.scenario.replace(/ \(Adaptive\)$/, "");
   const when = `${fmtShort(dt(d.finished_at))}, ${fmtTime(dt(d.finished_at))}`;
-  const back = `<a class="btn" href="#insights/${encodeURIComponent(base)}">Back to Insights</a>`;
+  const back = `<a class="btn" href="${scenarioHrefByName(base)}">Back to ${esc(base)}</a>`;
   return `<div class="page">
     ${head(`Replay · ${esc(when)}`, esc(d.scenario), back)}
     <section class="card replay">

@@ -1,6 +1,7 @@
-// Settings: the trainer's settings profiles (one per game, typically) and the
-// profile switcher on the Play screen. Loaded after trainer.js; profiles come with
-// the `trainer` payload and are saved with `save_profiles`.
+// Settings, in four tabs: Aim and display (the trainer's settings profiles, one per
+// game typically), Goals and time, KovaaK's, and Your data (the last three drawn by
+// app.js). Loaded after trainer.js; profiles come with the `trainer` payload and are
+// saved with `save_profiles`.
 
 ui.settings = {
   draft: null, // a copy of trainer.profiles being edited
@@ -54,48 +55,25 @@ function selectedProfile() {
   return s.draft.profiles.find((p) => p.name === s.selected) ?? s.draft.profiles[0];
 }
 
-// ---------- Play screen bar ----------
-
-function profileBar() {
-  const d = ui.trainer.data;
-  const ps = d.profiles;
-  const p = ps.profiles.find((x) => x.name === ps.active) ?? ps.profiles[0];
-  const disp = p.settings.display;
-  return `<section class="profile-bar">
-    <label class="profile-pick"><span class="small muted">Playing with</span>
-      <select class="select" data-action-change="switch-profile" aria-label="Settings profile">${ps.profiles.map((x) => `<option value="${esc(x.name)}" ${x.name === ps.active ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>
-    <span class="small muted">${esc(sensText(p))} · FOV ${num(p.settings.fov)} · ${modeLabel[disp.mode]}${disp.resolution ? ` ${sizeText(disp.resolution)}` : ""}${disp.play_area ? ` · play area ${sizeText(disp.play_area)}` : ""}</span>
-    <a class="btn" href="#settings">Edit settings</a>
-  </section>`;
-}
-
-async function switchProfile(name) {
-  const saved = structuredClone(ui.trainer.data.profiles);
-  saved.active = name;
-  try {
-    await invoke("save_profiles", { profiles: saved });
-    ui.trainer.message = null;
-  } catch (e) {
-    ui.trainer.message = String(e);
-  }
-  ui.settings.draft = null;
-  await loadTrainer();
-}
-
 // ---------- Settings screen ----------
 
-function settings() {
+function settingsPage(arg) {
+  const tab = SETTINGS_TABS.some(([id]) => id === arg) ? arg : "aim";
   const tr = ui.trainer;
-  if (tr.error) return `<div class="page">${head("Trainer settings", "Settings")}<div class="card error">${esc(tr.error)}</div></div>`;
-  if (!tr.data || !ui.settings.draft) {
-    loadTrainer();
-    return `<div class="empty-state">Loading settings…</div>`;
-  }
+  const ready = tr.data && ui.settings.draft;
+  if (!ready && !tr.error) loadTrainer();
+  const body = tab === "aim"
+    ? tr.error ? `<div class="card error">${esc(tr.error)}</div>` : ready ? settingsAim() : `<div class="empty-state">Loading settings…</div>`
+    : { goals: goalsTab, kovaaks: kovaaksTab, data: dataTab }[tab]();
+  const actions = tab === "aim" && ready ? `<span class="chips" id="settings-actions">${settingsActions()}</span>` : "";
+  return `<div class="page">${head("How AimAdapt is set up", "Settings", actions)}${tabs("settings", SETTINGS_TABS, tab)}${body}</div>`;
+}
+
+function settingsAim() {
   const s = ui.settings;
-  const d = tr.data;
+  const d = ui.trainer.data;
   const p = selectedProfile();
-  return `<div class="page">
-    ${head("Trainer settings", "Settings", `<span class="chips" id="settings-actions">${settingsActions()}</span>`)}
+  return `
     ${d.settings_saved ? "" : `<section class="banner info"><div class="banner-body">${d.kovaaks_profile ? "This profile was matched to your latest KovaaK's run. Save to keep it." : "These are defaults. Set your sensitivity and save."}</div></section>`}
     <div id="settings-problems">${settingsProblems()}</div>
     <div class="row">
@@ -114,8 +92,7 @@ function settings() {
         </div>
       </section>
       <div style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column;gap:16px">${profileEditor(p)}</div>
-    </div>
-  </div>`;
+    </div>`;
 }
 
 function settingsActions() {
@@ -139,7 +116,7 @@ function profileList() {
 
 // Refreshes the parts that change while typing, without redrawing the form.
 function refreshSettingsBits() {
-  if (route().view !== "settings") return;
+  if (route().view !== "settings" || !document.getElementById("settings-actions")) return;
   const set = (id, html) => {
     const el = document.getElementById(id);
     if (el) el.innerHTML = html;
@@ -397,8 +374,7 @@ document.addEventListener("input", (e) => {
 
 document.addEventListener("change", (e) => {
   const el = e.target;
-  if (el.dataset.actionChange === "switch-profile") switchProfile(el.value);
-  else if (el.dataset.actionChange === "area-spot") {
+  if (el.dataset.actionChange === "area-spot") {
     const d = selectedProfile().settings.display;
     ui.settings.areaCustom = el.value === "custom";
     if (el.value !== "custom") d.play_area_position = el.value === "center" ? null : AREA_SPOTS[el.value];

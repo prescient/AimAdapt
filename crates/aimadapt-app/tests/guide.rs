@@ -30,7 +30,8 @@ fn every_page_has_a_section() {
     let views = APP_JS.split("const views = {").nth(1).and_then(|s| s.split('}').next()).expect("views in app.js");
     let views: Vec<&str> =
         views.split(',').map(|v| v.split(':').next().unwrap().trim()).filter(|v| !v.is_empty()).collect();
-    assert!(views.len() >= 10, "{views:?}");
+    // Today, Scenarios, Progress, Settings, Help, the two editors and Replay.
+    assert!(views.len() >= 8, "{views:?}");
     for v in views {
         if v != "help" {
             assert!(ids.contains(&v), "ui/guide.md needs a section with {{#{v}}} for the {v} page");

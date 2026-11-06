@@ -2,6 +2,8 @@
 //! per shot and per tracking sample, plus the adaptive rating and its history and the
 //! aim trace. KovaaK's runs have none of this; [`crate::insights`] builds analytics on it.
 
+use std::collections::HashMap;
+
 use rusqlite::{OptionalExtension, params};
 
 use crate::db::{Db, DbError};
@@ -462,6 +464,17 @@ impl Db {
         Ok(true)
     }
 
+    /// When each workout was last played, by name: the finish time of the latest run
+    /// saved as part of it. Program days count under their workout's name.
+    pub fn workouts_last_played(&self) -> Result<HashMap<String, String>, DbError> {
+        let mut stmt = self.conn().prepare(
+            "SELECT e.workout, MAX(r.finished_at) FROM engine_runs e JOIN runs r ON r.id = e.run_id
+             WHERE e.workout IS NOT NULL GROUP BY e.workout",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        rows.collect()
+    }
+
     /// The latest adaptive rating for a scenario, for showing.
     pub fn last_rating(&self, base_scenario: &str) -> Result<Option<StoredRating>, DbError> {
         self.last_rating_where(base_scenario, None)
@@ -560,6 +573,45 @@ mod tests {
     fn trace_unpacks_three_floats_per_sample() {
         let bytes: Vec<u8> = [0.5f32, -10.0, 2.25].iter().flat_map(|v| v.to_le_bytes()).collect();
         assert_eq!(decode_trace(&bytes), vec![[0.5, -10.0, 2.25]]);
+    }
+
+    #[test]
+    fn workouts_remember_when_they_were_last_played() {
+        use crate::parse::RunFile;
+        use chrono::NaiveDate;
+        use std::collections::BTreeMap;
+        let mut db = Db::open_in_memory().unwrap();
+        let mut save = |n: u32, workout: Option<&str>| {
+            let at = NaiveDate::from_ymd_opt(2026, 11, n).unwrap().and_hms_opt(7, 0, 0).unwrap();
+            let mut fields = BTreeMap::new();
+            fields.insert("Source".to_string(), "rustyaim".to_string());
+            let name = format!("rustyaim/test/{n}");
+            let run = RunFile {
+                file_name: name.clone(),
+                scenario: "Timed Flicks".into(),
+                mode: "RustyAim".into(),
+                finished_at: at,
+                fields,
+                kills: vec![],
+                weapons: vec![],
+            };
+            db.insert_runs(&[run], at).unwrap();
+            let e = EngineRun {
+                base_scenario: "Timed Flicks".into(),
+                category: "clicking".into(),
+                workout: workout.map(String::from),
+                ..Default::default()
+            };
+            assert!(db.save_engine_run(&name, &e).unwrap());
+        };
+        save(2, Some("Quick Warm-up"));
+        save(4, Some("Quick Warm-up"));
+        save(5, Some("Core Week: Thursday"));
+        save(6, None);
+        let last = db.workouts_last_played().unwrap();
+        assert_eq!(last.len(), 2, "runs outside a workout don't count: {last:?}");
+        assert!(last["Quick Warm-up"].starts_with("2026-11-04"), "the latest of its runs: {last:?}");
+        assert!(last["Core Week: Thursday"].starts_with("2026-11-05"));
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # Scenario files
 
-AimAdapt's built-in trainer plays scenarios written as TOML files. The built-in scenarios live in [`crates/aimadapt-sim/scenarios`](crates/aimadapt-sim/scenarios). Your own scenarios go in `%APPDATA%\AimAdapt\scenarios`. The Play screen's editor writes them there, and you can also edit the files by hand.
+AimAdapt's built-in trainer plays scenarios written as TOML files. The built-in scenarios live in [`crates/aimadapt-sim/scenarios`](crates/aimadapt-sim/scenarios). Your own scenarios go in `%APPDATA%\AimAdapt\scenarios`. The scenario editor (on Scenarios, **New scenario** or **Copy & edit**) writes them there, and you can also edit the files by hand.
 
 Every field is optional. A missing field takes the default shown below, so a file only needs the values it changes. Unknown fields are rejected, which catches typos like `radiuss`. The app's editor is built from the same field list ([`crates/aimadapt-sim/src/spec.rs`](crates/aimadapt-sim/src/spec.rs)), and a test checks that this page covers every field.
 
@@ -228,7 +228,7 @@ focus = "Weak spots"
 weak_spots = true
 ```
 
-Workout items can carry a `block` (`warmup`, `main`, `secondary` or `maintenance`). The Program page groups drills by block and compares each day's main drills with the same day last week.
+Workout items can carry a `block` (`warmup`, `main`, `secondary` or `maintenance`). Today and Progress › Skills group drills by block, and Progress compares each day's main drills with the same day last week.
 
 ## Playing from the command line
 

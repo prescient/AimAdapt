@@ -97,12 +97,12 @@ Last reviewed: Nov 4, 2026 (after the first playtest session).
 - [x] Core Week, Monday to Saturday, about 29 minutes a day:
   - Five drills per day: warm-up, main ×5, secondary ×4, maintenance ×3.
   - Saturday covers your weak spots; Sunday is rest.
-- [x] Program page:
+- [x] Program view (now Today and Progress › Skills):
   - Week grid that allows catching up a missed day later in the week.
   - Skill profile measured from the end of your first day on each drill.
   - Weekly summary and streak.
   - Rep and carry-over gains for each drill.
-- [x] Today card on the Play screen.
+- [x] Today's workout card (now the Today page).
 
 ### To do
 - [ ] `todo` P1 Start Core Week from the real app window and play it by hand for a full week; fix whatever comes up.
@@ -127,7 +127,7 @@ Last reviewed: Nov 4, 2026 (after the first playtest session).
   - Shot placement, reaction histogram and 10-second segments.
   - Tracking: time on target by speed, recovery after direction changes, and lead or lag.
   - Coaching notes.
-- [x] Skill profile across the nine sub-skills, three groups and overall (on the Program page).
+- [x] Skill profile across the nine sub-skills, three groups and overall (on Progress › Skills).
 - [x] Replay a run from its aim trace and recorded target positions (60 Hz), from the player's view, at any speed.
 
 ### To do
@@ -138,23 +138,27 @@ Last reviewed: Nov 4, 2026 (after the first playtest session).
 
 ### Done
 - [x] Settings tab with profiles, usually one per game. Each profile holds sensitivity in that game's units (Overwatch 2, Valorant, CS2, Apex, Call of Duty, or cm/360), DPI, FOV with the game's usual value, adaptive mix, crosshair with a preview, and display settings.
-- [x] Switch profiles from the Play screen; `--profile <name>` in the engine. The first profile is matched to your latest KovaaK's run.
+- [x] Profiles switch in Settings (Scenarios shows the active one); `--profile <name>` in the engine. The first profile is matched to your latest KovaaK's run.
 
 ### To do
 - [ ] `todo` P2 More games (Fortnite, Rainbow Six Siege, Marvel Rivals, The Finals) once their sensitivity formulas are checked.
-- [ ] `todo` P3 Editable training-time rules (session gap, day start, daily goal), which are fixed defaults today.
+- [ ] `todo` P2 Editable goals and training-time rules (daily and weekly goal, session gap, day start) in Settings › Goals and time, which shows fixed defaults today.
 
 ## 7. App screens
 
 ### Done
-- [x] Navigation: Dashboard, Play, Progress, Program, Insights, Training time, Benchmarks, Library & import, Settings, Help.
+- [x] Four pages instead of ten (mockups on the design canvas): Today, Scenarios, Progress (Skills, Benchmarks, Time) and Settings (Aim and display, Goals and time, KovaaK's, Your data), with Help at the bottom of the sidebar. Old addresses redirect.
+- [x] Scenarios: one list of trainer scenarios, workouts and KovaaK's scenarios, newest first by day, with name search and Skill, Tag and Trainer filters, beside the selected one as a single scrolling page (Play, figures, rating chart, what to work on, Insights, runs with replays).
+- [x] Today: the program day with each drill's rating, the week, recently played and two notes.
+- [x] Progress › Time lists every session.
 - [x] Help: the user guide (`ui/guide.md`) with contents, search and What's new. Every page's header links to its section. A test keeps it in step with the pages, built-ins, ratings, trainer keys and version.
-- [x] Dashboard, Progress, Training time and Benchmarks cover KovaaK's runs and standard trainer runs. Adaptive runs are charted in Insights instead, because their result is a time or speed.
 
-### To do
-- [ ] `todo` P1 Rework the Dashboard around the trainer: today's program day, this week, skill profile and recent ratings. It's still KovaaK's-centric.
-- [ ] `todo` P2 Date range control on the Dashboard (7 days, 30 days, all time).
+### To do (second step of the simpler layout)
+- [ ] `todo` P1 Today: "Since your last session" (rating changes and breakthroughs since the session before) and each drill's change against the same day last week.
+- [ ] `todo` P2 One streak: the program streak and the all-runs streak still differ (Today shows the all-runs one).
+- [ ] `todo` P2 Settings save as you change them, instead of Save and Undo.
 - [ ] `todo` P3 Folder picker for the KovaaK's stats folder.
+- [ ] `todo` P3 Skill and tags for KovaaK's scenarios (Voltaic packs map to sub-skills), so the Skill filter covers them.
 
 ## 8. KovaaK's import (secondary)
 

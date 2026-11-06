@@ -2,37 +2,54 @@
 
 This guide is for AimAdapt 0.1.0. It covers every page of the app, the trainer window, how ratings work, and what each built-in scenario trains.
 
+The app has four pages, in the sidebar: **Today** (what to play now), **Scenarios** (everything you can play, and how you're doing on each), **Progress** (how you're doing overall) and **Settings**. Help is at the bottom of the sidebar, and every page has a Help link to its own section.
+
 ## Getting started {#start}
 
 1. **Set up your aim.** Open Settings. Pick the game you play, type your sensitivity exactly as it is in that game, and set your mouse DPI and field of view. If KovaaK's is installed, **Match my KovaaK's settings** copies your latest KovaaK's run instead.
 2. **Choose a display mode.** Borderless full screen is the default. See [Settings](#help/settings) for exclusive full screen, a window, and a smaller play area on a big monitor.
-3. **Play today's workout.** Open Play. The card at the top shows today's day of the Core Week program. Press **Start** and the trainer opens over the app.
+3. **Play today's workout.** Today shows today's day of the Core Week program. Press **Start** and the trainer opens over the app.
 4. **Expect a calibration run.** Your first adaptive run on each scenario finds your level as you play, so it gets harder and easier along the way. After that, every run plays at one difficulty.
-5. **Check your progress.** The Program page shows your week and your skill profile. Insights breaks down each scenario: where you miss, how fast you react, how steady your tracking is.
+5. **Check your progress.** Progress shows your week and your skill profile. Each scenario's page on Scenarios breaks it down: where you miss, how fast you react, how steady your tracking is, with a replay of every run.
 
 Train most days, keep sessions to about half an hour, and take Sunday off. Day-to-day changes under about 5% are mostly luck. Look at the trend over a week or two.
 
-## Dashboard {#dashboard}
+## Today {#today}
 
-The Dashboard summarizes all your training: trainer runs in standard mode and any KovaaK's runs AimAdapt has imported.
+Today is the home page: what to play now and how the week is going.
 
-- **Banner:** how long you've trained today against your daily goal, or a reminder that your streak ends with the day.
-- **Totals:** active training time (inside runs), session time (including menus and breaks), runs, your streak, and this week's time against the weekly goal.
-- **Daily time:** the last seven days.
-- **Most played** and **Most improved:** scenarios by runs, and by improvement from your first scores to your best.
-- **Recent sessions:** your last five sessions with their active time.
-- **Rescan folder** checks the KovaaK's stats folder for new runs. New runs are also picked up automatically while the app is open.
+- **Streak and today's time** at the top: the days in a row you've trained, and today's active time against your daily goal.
+- **Today's workout:** today's day of the Core Week program, with each drill's block (warm-up, main, secondary, maintenance), its runs and your current 85% rating. The bar shows how many of today's runs you've done. The button says **Start**, **Continue** if you've done part of it, or **Play again** once it's done. **Something else** goes to Scenarios. A drill's name opens it on Scenarios. On a rest day it tells you what's next.
+- **This week:** each day's minutes in the program, coloured done, partial or missed. **Week in detail** opens Progress › Skills.
+- **Recently played:** your last five scenarios or workouts, with your current figure.
+- **Worth knowing:** up to two things: the skill furthest behind in your profile, and a pattern from your history, such as cold starts, a plateau or a settings change.
 
-## Play {#play}
+## Scenarios {#scenarios}
 
-Play is where you start the trainer.
+Scenarios lists everything you can play or have played: the trainer's scenarios, your workouts and your KovaaK's scenarios, newest first and grouped by day (Today, Yesterday, then weekdays and dates). Scenarios you haven't played yet come last. Each row shows the skill, when you played it and your current figure: the 85% rating, a best score, or a workout's run count.
 
-- **Today's workout:** today's Core Week day, with its blocks and drills, how many runs, and about how long it takes. The button says **Start**, **Continue** if you've done part of it today, or **Play again** once it's done. On a rest day it tells you what's next.
-- **Workouts:** several scenarios back to back in one session. **Start** plays one; **Copy & edit** makes your own version of a built-in. **New workout** starts an empty one. See [Workouts](#help/workout).
-- **Scenarios:** every built-in and your own, filtered by category (clicking, tracking, switching, or yours). Each card has **Standard** and **Adaptive** buttons. **New scenario** opens the editor.
-- **Playing with:** the settings profile the trainer will use, with its sensitivity, FOV and display mode. Switch profiles here, or use **Edit settings**.
+**Finding one:** search by name, or filter by **Skill**, **Tag** (from each scenario's tags) or **Trainer** (AimAdapt or KovaaK's). **Clear filters** shows everything again. The list stays where you scrolled it while you pick scenarios.
+
+**Playing:** pick a scenario and use **Play adaptive** or **Standard** at the top of its page; **Copy & edit** (or **Edit** for your own) opens the [scenario editor](#help/edit). A workout's page lists its runs, with **Start** and **Copy & edit** (see [Workouts](#help/workout)). **New workout** and **New scenario** start empty ones. **Playing with** shows the settings profile the trainer will use; it opens Settings.
 
 While the trainer is open, the page says so and the start buttons are disabled. Each run is saved when its timer ends, so quitting partway through a workout keeps the runs you finished.
+
+**A scenario's page** is one scrolling page. The links under its name (**Overview**, **What to work on**, **Insights**, **Runs**) jump down it.
+- **Overview:** up to four key figures (your 85% rating with your best and best held, targets hit, time on target, reaction, flick speed, or for switching kills a minute and acquire time), the rating by run with its likely range, and **Last run**: how the rating moved during your latest run.
+- **What to work on:** plain-language notes from the figures below.
+- **Insights:** what your runs in the trainer recorded. Every run stores each target, each shot, tracking samples 30 times a second and the aim trace, so these come from what you actually did:
+  - **Speed vs. hit rate:** your chance of success at each difficulty. You're reliable (95%) at one end and it's a coin flip (50%) at the other. A steep drop means you're consistent up to your limit; a gentle one means misses creep in early.
+  - **Speed vs. difficulty:** time to kill against how hard each flick was (distance and size), as a Fitts' law fit. Throughput, in bits per second, is your flick speed corrected for difficulty.
+  - **By flick direction** and **By flick distance:** hit rate and median time in eight directions and five distance bands, to find a weak side.
+  - **Where shots land:** your shots relative to the target, lined up with the flick, so you can see overshooting, stopping short, or a vertical bias.
+  - **Reaction time:** how long before your crosshair starts moving toward a new target, as a histogram. It counts flicks of 3° or more, since on a tiny correction "started moving" hardly means anything. The Reaction column in the runs table counts the same flicks.
+  - **Tracking:** time on target by target speed, how long you take to recover after the target changes direction, whether you trail or lead it, your unbroken stretches on target (half your time on target came in stretches at least this long), and centering (how far from the center you sit while on target).
+  - **Within a run:** success in 10-second segments, which shows slow starts or fading late.
+- **Runs:** your latest 30 runs with their rating, hit rate, flick speed, reaction and time on target, the workout they were part of, and a **Replay** link to watch each one again (see [Replay](#help/replay)).
+
+**Reaction time and lifetime ratings.** A lifetime rating includes your reaction time, which practice barely changes. A note splits the rating into your reaction and the part you control. That part improves by more than the rating shows: going from 0.80 s to 0.62 s is 23% on the rating, but with a 0.22 s reaction the part you control fell 31%.
+
+**KovaaK's scenarios** show their score history: personal best, average, accuracy and improvement, every score over time with your bests marked, a trend and any plateau, and every run. Changes to your sensitivity show as markers on the chart, so you can tell a settings change from a real gain. Restarted runs (much shorter than usual) never count as bests. KovaaK's stats files don't record shots, reaction or tracking, so these scenarios have no Insights or replays. Standard-mode runs of a trainer scenario are on its own page, with their score in the runs table.
 
 ## In the trainer {#trainer}
 
@@ -92,7 +109,7 @@ The mix (Steady, Balanced or Push) is a setting in your profile. A stretch run n
 
 **Ratings belong to one version of a scenario.** Changing anything that affects play (speed, size, timers, movement) starts the rating over with a calibration run, because the old rating isn't on the same scale. Changing only the name or description keeps it.
 
-## Built-in scenarios {#scenarios}
+## Built-in scenarios {#builtins}
 
 There are 29 built-ins across nine sub-skills, at least two for each. In the Core Week program, most drills swap week by week with a variant that trains the same sub-skill.
 
@@ -145,7 +162,7 @@ There are 29 built-ins across nine sub-skills, at least two for each. In the Cor
 | Stability Switch | Three strafing targets that each need a long, steady beam. | Target speed, while on a kill |
 | Depth Stability Switch | Like Stability Switch, with targets that come closer and back away. | Target speed, while on a kill |
 
-## Program {#program}
+## The Core Week program {#program}
 
 Core Week is a six-day plan of about 29 minutes a day, built around reps rather than variety.
 
@@ -161,11 +178,7 @@ Core Week is a six-day plan of about 29 minutes a day, built around reps rather 
 
 Each day has a warm-up (one drill, two standard runs), two main drills of five reps, two secondary drills of four, and a maintenance drill from another skill group (three reps). Most drills alternate week by week with a variant that trains the same sub-skill, for example Strafe Track one week and Hop Strafe Track the next. The training day starts at 4 AM, so a late-night session counts toward the day it started on.
 
-The Program page shows:
-- **This week:** each day as done, partial or missed, with minutes, and each day's main drills compared with the same day last week. A missed day can be made up later in the week with its **Play** button.
-- **Skill profile:** the change in each of the nine sub-skills, each group and overall, measured from the end of your first day on each drill.
-- **Weekly summary:** days done, minutes, streak, biggest gain, the skill furthest behind, and skills you haven't trained in a week.
-- **Reps and carry-over:** your first rep against your last rep of each drill, and how much of the previous session's rating carried over to the next.
+Today shows the day's workout; Progress › Skills shows the week, your skill profile and how each drill moves across its reps.
 
 ## Workouts {#workout}
 
@@ -176,46 +189,39 @@ Built-in workouts:
 - **Daily Fundamentals:** about eight minutes of clicking, tracking and switching, all adaptive.
 - **Clicking Focus:** timed flicks at every distance, plus reaction and moving targets.
 - **Tracking Focus:** reactive strafes, smooth tracking and switching.
-- **Core Week: Monday** to **Core Week: Friday:** the program's days, which you can also play on their own.
+- **Core Week: Monday** to **Core Week: Friday:** the program's days. They're played from Today and Progress › Skills, so they aren't in the Scenarios list.
 
-**Editing a workout:** add scenarios, set runs and mode for each, and reorder them with the arrows. **Save & start** saves it and plays it straight away. Built-ins are copied before editing, so the originals stay as they are.
+Workouts are in the Scenarios list with the scenarios, by when you last played them.
+
+**Editing a workout:** add scenarios, set runs and mode for each, and reorder them with the arrows. **Save & start** saves it and plays it straight away. Built-ins are copied before editing, so the originals stay as they are. **Cancel** goes back to the workout's page.
 
 ## Scenario editor {#edit}
 
 The editor is a form with every scenario setting, grouped as in the file format: about, timing, weapon, targets, spawn area, movement, scoring, adaptive and arena. Each field explains itself, and values are checked as you type. Anything that needs fixing is listed under **Fix before saving**.
 
 - **Built-ins are copied before editing.** Your copy is saved in your own scenarios folder.
-- **Save & play adaptive** saves and starts an adaptive run.
+- **Save & play adaptive** saves and starts an adaptive run. **Save** and **Cancel** go back to the scenario's page.
 - **Changing settings starts the rating over** with a calibration run (see [Adaptive mode](#help/adaptive)).
 - Scenario files are TOML, so you can also edit them in a text editor. SCENARIOS.md in the project documents every field.
 
 ## Progress {#progress}
 
-Progress lists every scenario you've played, with search, sorting and a filter for scenarios with three or more runs. Open one to see its history: every score over time, your personal best, trend and any plateau. Changes to your sensitivity show as markers on the chart, so you can tell a settings change from a real gain. Restarted runs (much shorter than usual) never count as bests.
+Progress shows how you're doing across all your scenarios, in three tabs.
 
-Progress covers KovaaK's runs and standard-mode trainer runs. Adaptive ratings are on Insights and Program.
+**Skills**
+- **Key figures:** days done this week in the program, minutes, your overall change since you started each drill, and your biggest gain over the last seven days.
+- **Skill profile:** the change in each of the nine sub-skills, each group and overall, measured from the end of your first day on each drill.
+- **Worth knowing:** the skill furthest behind, skills you haven't trained in a week, and what Saturday's weak-spots day will play.
+- **This week:** each Core Week day as done, partial or missed, with runs and minutes, and each day's main drills compared with the same day last week. A day counts as done at 75% of its runs. A day you haven't finished has a **Play** (or **Continue**) button, so a missed day can be made up later in the week.
+- **Reps and carry-over:** your first rep against your last rep of each drill, and how much of the previous session's rating carried over to the next.
 
-## Insights {#insights}
+**Benchmarks** lists your bests on Voltaic Season 5 scenarios from your KovaaK's stats files. Each opens the scenario on Scenarios.
 
-Insights analyzes your runs in the built-in trainer, scenario by scenario. Every run stores each target, each shot, tracking samples 30 times a second and the aim trace, so these figures come from what you actually did.
-
-- **Rating:** your 85% rating, your best and your best held, and the rating by run with its likely range. **Last run** shows how the rating moved during the run.
-- **Speed vs. hit rate:** your chance of success at each difficulty. You're reliable (95%) at one end and it's a coin flip (50%) at the other. A steep drop means you're consistent up to your limit; a gentle one means misses creep in early.
-- **Speed vs. difficulty:** time to kill against how hard each flick was (distance and size), as a Fitts' law fit. Throughput, in bits per second, is your flick speed corrected for difficulty.
-- **By flick direction** and **By flick distance:** hit rate and median time in eight directions and five distance bands, to find a weak side.
-- **Where shots land:** your shots relative to the target, lined up with the flick, so you can see overshooting, stopping short, or a vertical bias.
-- **Reaction time:** how long before your crosshair starts moving toward a new target, as a histogram. It counts flicks of 3° or more, since on a tiny correction "started moving" hardly means anything. The Reaction column in the runs table counts the same flicks.
-- **Tracking:** time on target by target speed, how long you take to recover after the target changes direction, whether you trail or lead it, your unbroken stretches on target (half your time on target came in stretches at least this long), and centering (how far from the center you sit while on target).
-- **Switching:** how fast you reach the next target after a kill, and how well you stay on the one you're killing.
-- **Within a run:** success in 10-second segments, which shows slow starts or fading late.
-- **Notes:** plain-language takeaways from the figures above.
-- **Runs:** every run with its rating, hit rate, flick speed, reaction and time on target, and a **Replay** link to watch it again (see [Replay](#help/replay)).
-
-**Reaction time and lifetime ratings.** A lifetime rating includes your reaction time, which practice barely changes. A note splits the rating into your reaction and the part you control. That part improves by more than the rating shows: going from 0.80 s to 0.62 s is 23% on the rating, but with a 0.22 s reaction the part you control fell 31%.
+**Time** shows when and how much you train, counting KovaaK's runs and trainer runs together: totals (active time, session time, days trained, days the daily goal was met), daily time for the last seven days, a calendar of daily time (use the arrows to change month), every session newest first, the last seven days as session blocks, time by day of the week, runs by hour of day, and active against idle time. How time is counted is in [Settings › Goals and time](#help/settings).
 
 ## Replay {#replay}
 
-Every run in the trainer can be watched again. In Insights, pick a scenario and click **Replay** next to a run in the runs table.
+Every run in the trainer can be watched again. On Scenarios, pick a scenario and click **Replay** next to a run in its **Runs**. **Back to** returns to the scenario.
 
 The replay shows your own view: the crosshair stays in the middle and the view turns with it, as it did in the game, at the field of view you played at. The faint dots are a fixed grid, so you can see the view move even with no targets near.
 
@@ -227,28 +233,11 @@ The replay shows your own view: the crosshair stays in the middle and the view t
 
 A replay is redrawn from what the run recorded: your aim 240 times a second and the targets 60 times a second. It isn't a video, so it takes little space and records nothing outside the trainer. Runs from before replays were added, and KovaaK's runs, have none.
 
-## Training time {#training}
-
-Training time shows when and how much you train: a calendar of daily time (use the arrows to change month), active against idle time, time by day of the week, runs by hour of day, and every session.
-
-How time is counted:
-- A new session starts after a 15-minute break.
-- Session time runs from a session's first run to its last, so it includes menus and breaks. Active time is time inside runs.
-- The training day starts at 4 AM.
-
-## Benchmarks {#benchmarks}
-
-Benchmarks lists your bests on Voltaic Season 5 scenarios from your KovaaK's stats files. Rank thresholds aren't loaded yet, so ranks show as a dash for now.
-
-## Library & import {#library}
-
-AimAdapt finds KovaaK's in any of your Steam libraries and imports its per-run stats files (FPSAimTrainer\stats). It only reads them and never changes your KovaaK's files.
-
-This page shows the stats folder, how many runs and scenarios are in the database, any files that couldn't be read, the rules for counting time and restarts, and your sensitivity history: each period with its sensitivity, DPI, FOV, cm/360 and run count. If your FPS sits at KovaaK's cap, it suggests raising the cap.
-
 ## Settings {#settings}
 
-Settings holds your profiles. Each profile has its own sensitivity, DPI, field of view, adaptive mix, crosshair and display settings, typically one per game. **Playing with** chooses the profile the trainer uses; **Use this one** switches to the selected one. **Add**, **Duplicate** and **Delete** manage them. Changes aren't used until you press **Save settings**; **Undo changes** throws them away.
+Settings has four tabs: **Aim and display**, **Goals and time**, **KovaaK's** and **Your data**.
+
+**Aim and display** holds your profiles. Each profile has its own sensitivity, DPI, field of view, adaptive mix, crosshair and display settings, typically one per game. The trainer plays with the active one (Scenarios shows which); **Use this one** makes the selected profile active. **Add**, **Duplicate** and **Delete** manage them. Changes aren't used until you press **Save settings**; **Undo changes** throws them away.
 
 **Aim**
 - **Game:** pick the game, then type your sensitivity exactly as it is in that game. AimAdapt converts it to cm/360 at your DPI. Choose cm/360 to enter it directly.
@@ -268,6 +257,16 @@ Settings holds your profiles. Each profile has its own sensitivity, DPI, field o
 
 Sensitivity is in degrees per mouse count, so it stays the same at any resolution or play-area size.
 
+**Goals and time** shows your daily goal (30 minutes active; the weekly goal is seven times it) and how time is counted:
+- A new session starts after a 15-minute break.
+- Session time runs from a session's first run to its last, so it includes menus and breaks. Active time is time inside runs.
+- The training day starts at 4 AM.
+- A run under half the usual length of its scenario counts as restarted, and never as a best.
+
+**KovaaK's:** AimAdapt finds KovaaK's in any of your Steam libraries and imports its per-run stats files (FPSAimTrainer\stats). It only reads them and never changes your KovaaK's files. The tab shows the stats folder, how many files it found and imported, any files that couldn't be read, and **Rescan folder**. **Sensitivity history** lists each period with its sensitivity, DPI, FOV, cm/360 and run count. If your FPS sits at KovaaK's cap, it suggests raising the cap.
+
+**Your data** shows where your database and your own scenarios and workouts are (see [Your data](#help/data)).
+
 ## Your data {#data}
 
 Everything is stored on your computer in `%APPDATA%\AimAdapt`:
@@ -283,14 +282,15 @@ Nothing is sent anywhere. Deleting one of your scenarios or workouts removes the
 
 - **The mouse isn't locked to the trainer.** It locks again by itself within half a second of the trainer getting focus back. If it doesn't, click inside the trainer window.
 - **A rating started over.** The scenario's settings changed, so it calibrates again. This happens when you edit a scenario, and when an update changes a built-in.
-- **No KovaaK's runs.** Library & import shows where AimAdapt looked. It searches every Steam library for FPSAimTrainer\stats. Use **Rescan folder** after installing KovaaK's.
+- **No KovaaK's runs.** Settings › KovaaK's shows where AimAdapt looked. It searches every Steam library for FPSAimTrainer\stats. Use **Rescan folder** after installing KovaaK's.
 - **The trainer opens in the wrong place.** It opens over the app window, so move the app window where you want the trainer, or use full screen.
 
 ## What's new {#whats-new}
 
 **November 2026**
-- Replays: watch any new trainer run again from Insights, from your own view, at any speed, with your shots and the crosshair's trail.
-- The Reaction column in Insights' runs table leaves out flicks under 3°, like the Reaction time card, so the two agree in Micro Flicks.
+- A simpler layout: four pages instead of ten. **Today** has today's workout and the week; **Scenarios** lists everything you can play, newest first with filters, beside the selected scenario's page (Play, figures, notes, Insights and runs on one scrolling page); **Progress** has Skills, Benchmarks and Time; **Settings** gains Goals and time, KovaaK's (what was Library & import) and Your data. Old links still go to the right place.
+- Replays: watch any new trainer run again from its scenario's page, from your own view, at any speed, with your shots and the crosshair's trail.
+- The Reaction column in a scenario's runs table leaves out flicks under 3°, like the Reaction time chart, so the two agree in Micro Flicks.
 - The play area can sit anywhere on the screen, for example near the top, instead of always centered.
 - The mouse locks to the trainer again by itself after alt-tabbing.
 - Hop Strafe Track, Unbroken Strafes, Hop Switch and Hop Clicks strafe further side to side. Their ratings start with a new calibration run.

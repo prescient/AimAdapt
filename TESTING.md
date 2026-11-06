@@ -113,7 +113,9 @@ The Tauri commands (`snapshot`, `scenario`, `rescan`) build their payloads from 
 
 ### 8. UI tests
 
-- **Now:** browser preview against a data dump (`--dump-snapshot`, see README). Every screen must render with no console errors.
+- **Now:** browser preview against a data dump (`--dump-snapshot`, see README). Every screen must render with no console errors: Today, Scenarios (a trainer scenario, a workout and a KovaaK's scenario), each tab of Progress and Settings, both editors, Replay and Help. Old addresses (`#dashboard`, `#play`, `#program`, `#insights/<name>`, `#progress/<name>`, `#training`, `#benchmarks`, `#library`) must land on their new page.
+- **Static checks** in `crates/aimadapt-app/tests/ui.rs` read the JS as text, for bugs a browser can't catch in CI yet: the first render waits for every script, old page addresses still redirect, chart ticks are formatted from their exact value, and target speeds show one decimal. `tests/guide.rs` keeps the user guide in step with the pages.
+- **Screenshots** in the README come from a bot-played demo database (with the KovaaK's fixtures imported) spread over a week, taken with headless Edge against the preview.
 - **Planned:** a Playwright smoke test on CI. It loads each screen against a snapshot built from the fixture database, not personal data, and checks key numbers and zero console errors. GitHub runners have Node, so this doesn't add Node to local development.
 - **Later:** full app tests through `tauri-driver` (WebDriver), if the UI grows enough to need them.
 

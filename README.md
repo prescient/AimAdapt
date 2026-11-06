@@ -85,21 +85,33 @@ Every day uses five drills, with reps instead of variety. Most drills alternate 
 
 Saturday's drills are chosen from your weakest sub-skills.
 
-![Program](docs/screenshots/program.png)
+## The app
 
-The Program page shows:
-- **This week:** each day as done, partial or missed, with minutes, and the day's main drills compared with the same day last week. A missed day can be made up later in the week.
-- **Skill profile:** the change in each of the nine sub-skills, each group and overall. It's measured from the end of your first day on each drill.
-- **Weekly summary:** days done, minutes, streak, biggest gain, the skill furthest behind, and skills not trained in a week.
-- **Reps and carry-over:** rep 1 vs. the last rep of each drill, and how much of the previous session's rating carried over.
+Four pages, in the sidebar:
 
-The Play screen shows today's workout with a Start button.
+- **Today:** today's program workout with each drill's runs and 85% rating, and Start, Continue or Play again. Also the week at a glance, what you played last, and a couple of things worth knowing.
+- **Scenarios:** everything you can play or have played (the trainer's scenarios, your workouts and your KovaaK's scenarios) in one list, newest first and grouped by day, with a name search and Skill, Tag and Trainer filters. The selected one fills the rest of the page as one scrolling page: Play adaptive and Standard at the top, then its key figures, rating chart, what to work on, Insights and runs with replays.
+- **Progress:** three tabs.
+  - **Skills:** the skill profile (the change in each of the nine sub-skills, each group and overall, measured from the end of your first day on each drill), the week (each day done, partial or missed, its minutes and its main drills against the same day last week, with Play to make up a missed day), and reps and carry-over (rep 1 against the last rep of each drill, and how much of the previous session's rating carried over).
+  - **Benchmarks:** your Voltaic Season 5 bests.
+  - **Time:** sessions, daily time, a calendar, and when you train.
+- **Settings:** four tabs.
+  - **Aim and display:** settings profiles.
+  - **Goals and time:** the daily goal and how time is counted.
+  - **KovaaK's:** the stats folder, import status and sensitivity history.
+  - **Your data:** where your files are.
 
-![Play](docs/screenshots/play.png)
+Help is at the bottom of the sidebar, and every page links to its section of the user guide.
+
+![Today](docs/screenshots/today.png)
+
+![Scenarios](docs/screenshots/scenarios.png)
+
+![Progress](docs/screenshots/progress.png)
 
 ## Insights
 
-Every run stores each target, each shot, tracking samples 30 times a second, a 240 Hz aim trace, and where the targets were 60 times a second. Insights shows, per scenario:
+Every run stores each target, each shot, tracking samples 30 times a second, a 240 Hz aim trace, and where the targets were 60 times a second. Each scenario's page shows:
 
 - **Rating by run** with its likely range, and how it moved during the last run.
 - **Speed vs. hit rate curve:** where you're reliable (95%), your 85% rating, and the coin-flip point (50%), with observed hit rates.
@@ -129,11 +141,11 @@ Each run can also be **replayed** from your own view at any speed, with the targ
 
 ## KovaaK's import
 
-If KovaaK's is installed, AimAdapt imports its per-run stats files from your Steam libraries, and keeps importing new ones while it's open. The Dashboard, Progress, Training time and Benchmarks screens cover those runs together with standard-mode trainer runs:
-- Personal bests, trends and plateaus.
-- Sessions and active time.
-- Streaks and a daily goal.
-- Sensitivity history.
+If KovaaK's is installed, AimAdapt imports its per-run stats files from your Steam libraries, and keeps importing new ones while it's open. KovaaK's scenarios are in the Scenarios list with the trainer's, and Progress counts their runs too:
+- Personal bests, trends and plateaus, on each scenario's page.
+- Sessions, active time, streaks and a daily goal, on Today and Progress › Time.
+- Voltaic Season 5 bests, on Progress › Benchmarks.
+- Sensitivity history, in Settings › KovaaK's, with changes marked on score charts.
 
 The `aimadapt-cli` command line tool shows the same reports.
 

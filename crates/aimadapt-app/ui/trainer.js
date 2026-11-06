@@ -1,6 +1,7 @@
-// Play screen, workouts, and the scenario and workout editors for the built-in
-// trainer. Loaded after app.js and uses its helpers (esc, num, head, invoke, ui,
-// render, route, fmtShort, dt).
+// The built-in trainer's data, the scenario and workout editors, and the actions
+// that start the trainer. Loaded after app.js and uses its helpers (esc, num, head,
+// invoke, ui, render, route, fmtShort, dt). The Scenarios page (scenarios.js) lists
+// and shows what this loads.
 //
 // The scenario editor's form is built from `trainer.fields`, the engine's own list of
 // every scenario setting with its limits and help text, so new engine options show up
@@ -9,21 +10,12 @@
 ui.trainer = {
   data: null,
   error: null,
-  filter: "all",
   edit: null, // scenario being edited: { forId, replace, builtin, scenario, problems }
   wedit: null, // workout being edited: { forId, replace, builtin, workout, problems }
   message: null,
 };
 
-const CATEGORIES = [
-  ["all", "All"],
-  ["clicking", "Clicking"],
-  ["tracking", "Tracking"],
-  ["switching", "Switching"],
-  ["mine", "Yours"],
-];
-
-const TRAINER_VIEWS = ["play", "edit", "workout", "settings", "program"];
+const TRAINER_VIEWS = ["today", "scenarios", "edit", "workout", "settings", "progress"];
 
 async function loadTrainer() {
   try {
@@ -78,91 +70,6 @@ const betterThan = (knob, a, b) => (higherIsHarder(knob) ? a > b : a < b);
 const scenarioName = (id) => ui.trainer.data?.scenarios.find((e) => e.id === id)?.scenario?.name ?? id.replace(/^(builtin|user):/, "");
 const minutes = (s) => `${Math.max(1, Math.round(s / 60))} min`;
 
-// ---------- Play ----------
-
-function play() {
-  const tr = ui.trainer;
-  if (tr.error) return `<div class="page">${head("Built-in aim trainer", "Play")}<div class="card error">${esc(tr.error)}</div></div>`;
-  if (!tr.data) {
-    loadTrainer();
-    return `<div class="empty-state">Loading scenarios…</div>`;
-  }
-  const d = tr.data;
-  const list = d.scenarios.filter((e) => {
-    if (tr.filter === "all") return true;
-    if (tr.filter === "mine") return !e.builtin;
-    return e.scenario?.category === tr.filter;
-  });
-  return `<div class="page">
-    ${head("Built-in aim trainer", "Play", `<span class="chips">
-      <button class="btn" type="button" data-action="new-workout">New workout</button>
-      <button class="btn primary" type="button" data-action="new-scenario">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>New scenario</button></span>`)}
-    ${d.playing ? `<section class="banner info"><div><div class="banner-title">The trainer is open</div><div class="banner-body">Finish or press Esc to come back. Each run is saved when its timer ends.</div></div></section>` : ""}
-    ${tr.message ? `<section class="banner"><div class="banner-body">${esc(tr.message)}</div></section>` : ""}
-    ${profileBar()}
-    ${typeof todayCard === "function" ? todayCard() : ""}
-    <section class="banner info"><div><div class="banner-title">Adaptive mode keeps you at about 85%</div>
-      <div class="banner-body">Adaptive mode rates you in real units: the target lifetime, tracking speed or kill pace you succeed at 85% of the time. Your first adaptive run on a scenario is a calibration run that finds your level as you play. After that, each run plays at one difficulty for the whole run: most near your rating, some harder stretch runs and a few easy ones (change the mix in Settings). Holding 85% for a whole run faster than ever is a breakthrough. Standard mode plays the scenario exactly as written.</div></div></section>
-    ${workoutsCard()}
-    <div class="chips" role="group" aria-label="Filter scenarios">
-      ${CATEGORIES.map(([k, label]) => `<button class="chip ${tr.filter === k ? "on" : ""}" type="button" data-action="trainer-filter" data-filter="${k}" aria-pressed="${tr.filter === k}">${label}</button>`).join("")}
-    </div>
-    <div class="grid">${list.map(scenarioCard).join("") || `<div class="card note-body">No scenarios here yet. Use New scenario to make one.</div>`}</div>
-    <div class="small muted">Your scenarios and workouts are TOML files in <span class="mono">${esc(d.scenarios_dir)}</span> and <span class="mono">${esc(d.workouts_dir)}</span>. See SCENARIOS.md for every setting.</div>
-  </div>`;
-}
-
-function workoutsCard() {
-  const d = ui.trainer.data;
-  return `<section class="card">
-    <div class="card-head"><h2>Workouts</h2><span class="small muted">Several scenarios back to back in one session</span></div>
-    <div class="workout-list">${d.workouts.map((e) => {
-      const w = e.workout;
-      const id = esc(e.id);
-      if (!w) return `<div class="workout-row"><div class="main"><div class="title">${esc(e.id)}</div><div class="sub error">${esc(e.error)}</div></div>
-        <button class="btn" type="button" data-action="delete-workout" data-id="${id}">Delete file</button></div>`;
-      const steps = w.items.map((i) => `${esc(scenarioName(i.scenario))}${i.runs > 1 ? ` ×${i.runs}` : ""}${i.mode === "standard" ? " (standard)" : ""}`).join(", ");
-      return `<div class="workout-row">
-        <div class="main"><div class="title">${esc(w.name)} ${e.builtin ? "" : '<span class="tag gold">Yours</span>'} <span class="small muted">${minutes(e.seconds)} · ${w.items.reduce((a, i) => a + i.runs, 0)} runs</span></div>
-          <div class="sub">${esc(w.description)}</div><div class="sub">${steps}</div></div>
-        <span class="chips">
-          <button class="btn primary" type="button" data-action="play-workout" data-id="${id}" ${d.playing ? "disabled" : ""}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l13 8-13 8z"></path></svg>Start</button>
-          <a class="btn" href="#workout/${encodeURIComponent(e.id)}">${e.builtin ? "Copy &amp; edit" : "Edit"}</a></span>
-      </div>`;
-    }).join("")}</div>
-  </section>`;
-}
-
-function scenarioCard(e) {
-  const s = e.scenario;
-  const id = esc(e.id);
-  if (!s) {
-    return `<section class="card"><div class="card-head"><h3>${esc(e.id.replace(/^user:/, ""))}</h3><span class="tag grey">Can't load</span></div>
-      <div class="note-body error">${esc(e.error)}</div>
-      <div class="chips"><button class="btn" type="button" data-action="delete-scenario" data-id="${id}">Delete file</button></div></section>`;
-  }
-  const playing = ui.trainer.data.playing ? "disabled" : "";
-  const level = e.rating !== null && e.rating !== undefined
-    ? `85% ${knobWord(e.knob)} <span class="num">${esc(fmtKnob(e.knob, e.rating))}</span>${e.best_rating !== null && betterThan(e.knob, e.best_rating, e.rating) ? ` <span class="muted">(best ${esc(fmtKnob(e.knob, e.best_rating))})</span>` : ""}${e.fastest !== null ? ` · held ${esc(fmtKnob(e.knob, e.fastest))}` : ""}`
-    : '<span class="muted">Not rated yet</span>';
-  const standard = e.runs ? ` · best score <span class="num">${num(e.best)}</span>` : "";
-  return `<section class="card scenario-card">
-    <div class="card-head"><h3>${esc(s.name)}</h3><span>${e.builtin ? "" : '<span class="tag gold">Yours</span> '}<span class="tag grey">${esc(s.category)}</span></span></div>
-    <div class="note-body">${esc(s.description || "No description.")}</div>
-    <div class="small muted">${esc(scenarioFacts(s))}</div>
-    <div class="small">${level}${standard}</div>
-    <div class="chips">
-      <button class="btn primary" type="button" data-action="play" data-id="${id}" data-adaptive="1" ${playing}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l13 8-13 8z"></path></svg>Adaptive</button>
-      <button class="btn" type="button" data-action="play" data-id="${id}" data-adaptive="0" ${playing}>Standard</button>
-      <a class="btn" href="#edit/${encodeURIComponent(e.id)}">${e.builtin ? "Copy &amp; edit" : "Edit"}</a>
-      ${e.runs || e.adaptive_runs ? `<a class="btn" href="#insights/${encodeURIComponent(s.name)}">Insights</a>` : ""}
-    </div>
-  </section>`;
-}
-
 // ---------- Scenario editor ----------
 
 function edit(id) {
@@ -176,7 +83,7 @@ function edit(id) {
     let scenario;
     if (id === "new") scenario = structuredClone(tr.data.scenarios.find((e) => e.id === "builtin:timed-flicks")?.scenario);
     else scenario = structuredClone(entry?.scenario);
-    if (!scenario) return `<div class="page">${head("Scenario editor", "Not found")}<div class="card note-body">That scenario couldn't be loaded. <a href="#play">Back to Play</a></div></div>`;
+    if (!scenario) return `<div class="page">${head("Scenario editor", "Not found")}<div class="card note-body">That scenario couldn't be loaded. <a href="#scenarios">Back to Scenarios</a></div></div>`;
     if (id === "new") Object.assign(scenario, { name: "My scenario", author: "", description: "", tags: [] });
     else if (entry.builtin) Object.assign(scenario, { name: `${scenario.name} (my copy)`, author: "" });
     tr.edit = { forId: id, replace: entry && !entry.builtin ? id : null, builtin: !!entry?.builtin, scenario, problems: [] };
@@ -190,7 +97,7 @@ function edit(id) {
   }
   return `<div class="page">
     ${head(e.replace ? "Edit scenario" : e.builtin ? "Copy of a built-in scenario" : "New scenario", esc(e.scenario.name || "Untitled"), `<span class="chips">
-      <a class="btn" href="#play">Cancel</a>
+      <a class="btn" href="${e.replace || e.forId !== "new" ? scenarioHref(e.forId) : "#scenarios"}">Cancel</a>
       ${e.replace ? `<button class="btn" type="button" data-action="delete-scenario" data-id="${esc(e.replace)}">Delete</button>` : ""}
       <button class="btn" type="button" data-action="save-scenario">Save</button>
       <button class="btn primary" type="button" data-action="save-play">Save &amp; play adaptive</button></span>`)}
@@ -329,7 +236,7 @@ async function saveScenario(thenPlay) {
     ui.trainer.edit = null;
     ui.trainer.message = `Saved ${e.scenario.name}.`;
     await loadTrainer();
-    location.hash = "#play";
+    location.hash = scenarioHref(id);
     if (thenPlay) await startPlay(id, true);
   } catch (err) {
     e.problems = String(err).split("; ");
@@ -349,7 +256,7 @@ function workout(id) {
   if (!tr.wedit || tr.wedit.forId !== id) {
     const entry = tr.data.workouts.find((e) => e.id === id);
     let w = id === "new" ? { name: "My workout", description: "", author: "", items: [{ scenario: "builtin:timed-flicks", runs: 2, mode: "adaptive" }] } : structuredClone(entry?.workout);
-    if (!w) return `<div class="page">${head("Workout", "Not found")}<div class="card note-body"><a href="#play">Back to Play</a></div></div>`;
+    if (!w) return `<div class="page">${head("Workout", "Not found")}<div class="card note-body"><a href="#scenarios">Back to Scenarios</a></div></div>`;
     if (entry?.builtin) w.name = `${w.name} (my copy)`;
     tr.wedit = { forId: id, replace: entry && !entry.builtin ? id : null, builtin: !!entry?.builtin, workout: w, problems: [] };
   }
@@ -362,7 +269,7 @@ function workout(id) {
   }, 0);
   return `<div class="page">
     ${head(e.replace ? "Edit workout" : e.builtin ? "Copy of a built-in workout" : "New workout", esc(w.name || "Untitled"), `<span class="chips">
-      <a class="btn" href="#play">Cancel</a>
+      <a class="btn" href="${e.forId !== "new" ? scenarioHref(`workout:${e.forId}`) : "#scenarios"}">Cancel</a>
       ${e.replace ? `<button class="btn" type="button" data-action="delete-workout" data-id="${esc(e.replace)}">Delete</button>` : ""}
       <button class="btn" type="button" data-action="save-workout">Save</button>
       <button class="btn primary" type="button" data-action="save-workout-play">Save &amp; start</button></span>`)}
@@ -396,7 +303,7 @@ async function saveWorkout(thenPlay) {
     ui.trainer.wedit = null;
     ui.trainer.message = `Saved ${e.workout.name}.`;
     await loadTrainer();
-    location.hash = "#play";
+    location.hash = scenarioHref(`workout:${id}`);
     if (thenPlay) await startWorkout(id);
   } catch (err) {
     e.problems = String(err).split("; ");
@@ -432,10 +339,7 @@ document.addEventListener("click", async (e) => {
   if (!btn) return;
   const action = btn.dataset.action;
   const tr = ui.trainer;
-  if (action === "trainer-filter") {
-    tr.filter = btn.dataset.filter;
-    render();
-  } else if (action === "play") startPlay(btn.dataset.id, btn.dataset.adaptive === "1");
+  if (action === "play") startPlay(btn.dataset.id, btn.dataset.adaptive === "1");
   else if (action === "play-workout") startWorkout(btn.dataset.id);
   else if (action === "new-scenario") location.hash = "#edit/new";
   else if (action === "new-workout") location.hash = "#workout/new";
@@ -476,7 +380,7 @@ document.addEventListener("click", async (e) => {
     } catch (err) {
       tr.message = String(err);
     }
-    location.hash = "#play";
+    location.hash = "#scenarios";
     loadTrainer();
   }
 });

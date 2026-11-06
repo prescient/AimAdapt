@@ -65,6 +65,8 @@ pub struct TrainerWorkout {
     error: Option<String>,
     /// Total play time in seconds, from each scenario's duration.
     seconds: f64,
+    /// When a run of it last finished, if it's been played.
+    last_played: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -148,6 +150,7 @@ pub fn build_trainer(state: &AppData, t: &TrainerState) -> Result<Trainer, Strin
             e.scenario.as_ref().map(|s| (e.id.as_str(), f64::from(s.timing.duration_s + s.timing.countdown_s) + 12.0))
         })
         .collect();
+    let workout_last = db.workouts_last_played().map_err(err)?;
     let workouts = workout::load_all(&t.workouts_dir())
         .into_iter()
         .map(|e| {
@@ -161,7 +164,8 @@ pub fn build_trainer(state: &AppData, t: &TrainerState) -> Result<Trainer, Strin
                 Ok(w) => (Some(w), None),
                 Err(m) => (None, Some(m)),
             };
-            TrainerWorkout { id: e.id, builtin: e.builtin, workout, error, seconds }
+            let last_played = workout.as_ref().and_then(|w| workout_last.get(&w.name).cloned());
+            TrainerWorkout { id: e.id, builtin: e.builtin, workout, error, seconds, last_played }
         })
         .collect();
 
