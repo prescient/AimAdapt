@@ -477,7 +477,7 @@ pub fn scenario(db: &Db, base_scenario: &str) -> Result<Option<Insights>, DbErro
             .map(|t| id_bits(t) / (t.ended_at - t.start_at))
             .collect();
         run.throughput = (ratios.len() >= 5).then(|| mean(ratios).unwrap_or(0.0));
-        let mut rx: Vec<f64> = ts.iter().filter_map(|t| t.reaction).map(|r| r * 1000.0).collect();
+        let mut rx = reactions_ms(ts);
         run.reaction_ms = if rx.len() >= 5 { median(&mut rx) } else { None };
         run.on_target = on_by_run.get(&run.run_id).filter(|(n, _)| *n > 0).map(|(n, on)| *on as f64 / *n as f64);
     }
@@ -662,11 +662,18 @@ fn distance_stats(ts: &[&T]) -> Vec<DistanceStat> {
         .collect()
 }
 
+/// Shortest flick, in degrees, whose reaction time counts. On shorter ones
+/// "started moving" hardly means anything.
+const MIN_REACTION_FLICK_DEG: f64 = 3.0;
+
+/// Reaction times in ms, for flicks long enough to count. The Runs table and the
+/// Reaction card both use this, so they agree.
+fn reactions_ms(ts: &[T]) -> Vec<f64> {
+    ts.iter().filter(|t| t.distance >= MIN_REACTION_FLICK_DEG).filter_map(|t| t.reaction).map(|r| r * 1000.0).collect()
+}
+
 fn reaction_stats(recent: &[T], before: &[T]) -> Option<Reaction> {
-    let ms = |ts: &[T]| -> Vec<f64> {
-        // Only flicks long enough that "started moving" means something.
-        ts.iter().filter(|t| t.distance >= 3.0).filter_map(|t| t.reaction).map(|r| r * 1000.0).collect()
-    };
+    let ms = reactions_ms;
     let mut v = ms(recent);
     if v.len() < 10 {
         return None;
@@ -1288,6 +1295,29 @@ mod tests {
         assert_eq!(o[0].best_rating, Some(0.62), "lower lifetime is better");
         assert_eq!(o[0].fastest, Some(0.62 * 0.8));
         assert_eq!(db.last_rating("Timed Flicks").unwrap().unwrap().knob, "lifetime");
+    }
+
+    /// Bug: the Runs table's Reaction column counted flicks under 3°, but the
+    /// Reaction card didn't, so in micro-flick scenarios the two medians disagreed.
+    #[test]
+    fn run_reaction_leaves_out_short_flicks_like_the_card() {
+        let mut db = Db::open_in_memory().unwrap();
+        let mut e = clicking_run(0.8);
+        for (i, t) in e.targets.iter_mut().enumerate() {
+            // Half the flicks are 1° micro-corrections that "react" almost at once.
+            if i % 2 == 0 {
+                t.distance_deg = 1.0;
+                t.reaction_s = Some(0.05);
+            } else {
+                t.reaction_s = Some(0.25);
+            }
+        }
+        save(&mut db, 1, &e);
+        let i = scenario(&db, "Timed Flicks").unwrap().unwrap();
+        let card = i.reaction.as_ref().unwrap().median_ms;
+        assert!((card - 250.0).abs() < 1e-6, "{card}");
+        let run = i.runs[0].reaction_ms.unwrap();
+        assert!((run - card).abs() < 1e-6, "run column {run} ms, card {card} ms");
     }
 
     #[test]

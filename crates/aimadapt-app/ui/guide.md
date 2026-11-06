@@ -204,7 +204,7 @@ Insights analyzes your runs in the built-in trainer, scenario by scenario. Every
 - **Speed vs. difficulty:** time to kill against how hard each flick was (distance and size), as a Fitts' law fit. Throughput, in bits per second, is your flick speed corrected for difficulty.
 - **By flick direction** and **By flick distance:** hit rate and median time in eight directions and five distance bands, to find a weak side.
 - **Where shots land:** your shots relative to the target, lined up with the flick, so you can see overshooting, stopping short, or a vertical bias.
-- **Reaction time:** how long before your crosshair starts moving toward a new target, as a histogram.
+- **Reaction time:** how long before your crosshair starts moving toward a new target, as a histogram. It counts flicks of 3° or more, since on a tiny correction "started moving" hardly means anything. The Reaction column in the runs table counts the same flicks.
 - **Tracking:** time on target by target speed, how long you take to recover after the target changes direction, whether you trail or lead it, your unbroken stretches on target (half your time on target came in stretches at least this long), and centering (how far from the center you sit while on target).
 - **Switching:** how fast you reach the next target after a kill, and how well you stay on the one you're killing.
 - **Within a run:** success in 10-second segments, which shows slow starts or fading late.
@@ -274,6 +274,7 @@ Nothing is sent anywhere. Deleting one of your scenarios or workouts removes the
 ## What's new {#whats-new}
 
 **November 2026**
+- The Reaction column in Insights' runs table leaves out flicks under 3°, like the Reaction time card, so the two agree in Micro Flicks.
 - The play area can sit anywhere on the screen, for example near the top, instead of always centered.
 - The mouse locks to the trainer again by itself after alt-tabbing.
 - Hop Strafe Track, Unbroken Strafes, Hop Switch and Hop Clicks strafe further side to side. Their ratings start with a new calibration run.
