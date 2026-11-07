@@ -14,11 +14,11 @@
 use std::path::Path;
 
 use aimadapt_sim::scenario::{Category, Scoring, Shape, Skill, Timing, Trigger, Weapon, WeaponKind};
-use aimadapt_sim::world::{AccuracyMult, World, WorldMesh, WorldSpawn};
+use aimadapt_sim::world::{AccuracyMult, PlayerBlock, World, WorldBox, WorldMesh, WorldSpawn};
 use aimadapt_sim::{Scenario, Vec3};
 
 use crate::map::{Map, MapFormat, Placement, Solid, Teams};
-use crate::scenario::Sce;
+use crate::scenario::{BotChoice, Sce};
 use crate::settings::Section;
 
 /// Unreal units in a meter.
@@ -106,8 +106,11 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
         teams.push(slot.team.and_then(|t| t.trim().parse::<u32>().ok()).unwrap_or(2));
         for c in &slot.choices {
             let Some(ch) = c.character else { continue };
-            if ch.f32_or("MaxSpeed", 0.0) > 0.0 && !c.bot.is("NoDodging") {
+            if moves(c, ch) {
                 push_once(&mut reasons, "moving bots (coming with bot movement)");
+            }
+            if ch.is("InvertBlockedSpawn") && ch.f32_or("BlockedSpawnRadius", 0.0) > 0.0 {
+                push_once(&mut reasons, "bots that appear close to each other (an inverted blocked spawn radius)");
             }
             match kind {
                 None => kind = Some(ch),
@@ -200,8 +203,12 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
     if let Some(c) = bot.vec3("EnemyBodyColor").filter(|c| c.iter().any(|v| *v > 0.0)) {
         t.color = hex_color(c);
     }
-    if bot.f32_or("HealthRegenPerSec", 0.0) > 0.0 {
-        notes.push("bots don't regenerate health yet".into());
+    // Regen counts from the last hit. Negative regen isn't played.
+    let regen = bot.f32_or("HealthRegenPerSec", 0.0);
+    t.regen_per_s = regen.max(0.0);
+    t.regen_delay_s = bot.f32_or("HealthRegenDelay", 0.0).clamp(0.0, 10.0);
+    if regen < 0.0 {
+        notes.push("negative health regen is left out".into());
     }
     if weapon.f32_or("HitscanRadius", 0.0) > 1.0 {
         notes.push("the weapon's hit radius is left out".into());
@@ -211,6 +218,20 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
         return Err(problems);
     }
     Ok(Imported { scenario, notes })
+}
+
+/// Whether a bot moves, unless `NoDodging` keeps it still: it runs (`MaxSpeed`),
+/// flies up and down (`IsFlyer` with a flight speed: its dodge profile's jumps and
+/// crouches move it), or jumps (a jump speed and a dodge profile that jumps).
+fn moves(c: &BotChoice, ch: &Section) -> bool {
+    if c.bot.is("NoDodging") {
+        return false;
+    }
+    let flies =
+        ch.is("IsFlyer") && (ch.f32_or("FlightVelocityUp", 0.0) > 0.0 || ch.f32_or("FlightVelocityDown", 0.0) > 0.0);
+    let jumps =
+        ch.f32_or("JumpVelocityMax", 0.0) > 0.0 && c.dodges.iter().any(|(d, _)| d.f32_or("JumpFrequency", 0.0) > 0.0);
+    ch.f32_or("MaxSpeed", 0.0) > 0.0 || flies || jumps
 }
 
 fn push_once(v: &mut Vec<String>, s: &str) {
@@ -281,42 +302,46 @@ fn world(
 
     let bot_teams: Vec<u32> = if teams.is_empty() { vec![2] } else { teams.to_vec() };
     let mut spawns = Vec::new();
-    let mut volumes = 0;
     for s in &map.spawns {
         let usable = bot_teams.iter().any(|t| team_can_use(s.teams, *t))
             && (s.characters.is_empty() || s.characters.iter().any(|c| c.eq_ignore_ascii_case(bot.name())));
         if !usable || s.weight <= 0.0 {
             continue;
         }
-        if s.volume.is_some() {
-            volumes += 1;
-        }
         // The offset runs along the spawn point's own axes: Unreal right, up and back.
         let q = ue_rotation(s.angles.unwrap_or_default());
         let axis = |v: [f32; 3]| (turn * axes((q * glam::Vec3::from_array(v)).to_array())).to_array();
+        let pos = place(map_point(s.position, map_scale));
+        // A volume is a box placed like a `Cube`: from its lowest corner, 100 units
+        // per scale step, turned by its rotation.
+        let edges = s.volume.as_ref().map_or([[0.0; 3]; 3], |v| {
+            let corner = |c: [f32; 3]| place(map_point(transform(v, c), map_scale)) - pos;
+            [corner([CUBE_UU, 0.0, 0.0]), corner([0.0, CUBE_UU, 0.0]), corner([0.0, 0.0, CUBE_UU])]
+                .map(|e| e.to_array())
+        });
         spawns.push(WorldSpawn {
-            pos: place(map_point(s.position, map_scale)).to_array(),
+            pos: pos.to_array(),
             weight: s.weight,
             axes: [axis([0.0, 1.0, 0.0]), axis([0.0, 0.0, 1.0]), axis([-1.0, 0.0, 0.0])],
+            edges,
         });
     }
     if spawns.is_empty() {
         reasons.push("the map has no spawn point the bots can use".into());
         return None;
     }
-    if volumes > 0 {
-        notes.push("spawn volumes are played as their center point".into());
-    }
     // Each axis of the offset is picked between the two values, so their order
     // doesn't matter (ww5t writes min above max).
     let a = axes(bot.vec3("SpawnOffsetMin").unwrap_or_default()) / UU_PER_M;
     let b = axes(bot.vec3("SpawnOffsetMax").unwrap_or_default()) / UU_PER_M;
     let mut meshes = Vec::new();
+    let mut walls = Vec::new();
     let mut skipped = std::collections::BTreeSet::new();
     for solid in &map.solids {
         match solid {
             Solid::Primitive { mesh, place: p } if mesh.eq_ignore_ascii_case("Cube") => {
                 meshes.push(cube(p, map_scale, &place));
+                walls.push(cube_box(p, map_scale, &place));
             }
             Solid::Primitive { mesh, .. } => {
                 skipped.insert(mesh.clone());
@@ -341,8 +366,21 @@ fn world(
         offset_max: b.to_array(),
         blocked_radius: bot.f32_or("BlockedSpawnRadius", 0.0).max(0.0) / UU_PER_M,
         meshes,
+        walls,
+        player_block: player.and_then(player_block),
         ..World::default()
     })
+}
+
+/// The player profile's rules for where bots may appear, if it has any.
+fn player_block(p: &Section) -> Option<PlayerBlock> {
+    let b = PlayerBlock {
+        radius: p.f32_or("BlockedSpawnRadius", 0.0).max(0.0) / UU_PER_M,
+        fov_deg: p.f32_or("BlockSpawnFOV", 0.0).clamp(0.0, 360.0),
+        distance: p.f32_or("BlockSpawnDistance", 0.0).max(0.0) / UU_PER_M,
+        invert: p.is("InvertBlockedSpawn"),
+    };
+    (b.radius > 0.0 || b.fov_deg > 0.0).then_some(b)
 }
 
 /// A JSON rotation (roll, pitch, yaw in degrees, as written) as a rotation of
@@ -357,6 +395,14 @@ fn ue_rotation(r: [f32; 3]) -> glam::Quat {
 fn transform(p: &Placement, v: [f32; 3]) -> [f32; 3] {
     let scaled = glam::Vec3::new(v[0] * p.scale[0], v[1] * p.scale[1], v[2] * p.scale[2]);
     (ue_rotation(p.rotation) * scaled + glam::Vec3::from_array(p.location)).to_array()
+}
+
+/// A `Cube` brush as a solid box: its lowest corner and three edges.
+fn cube_box(p: &Placement, map_scale: f32, place: &impl Fn(Vec3) -> Vec3) -> WorldBox {
+    let at = |c: [f32; 3]| place(map_point(transform(p, c), map_scale));
+    let corner = at([0.0; 3]);
+    let edges = [[CUBE_UU, 0.0, 0.0], [0.0, CUBE_UU, 0.0], [0.0, 0.0, CUBE_UU]].map(|c| (at(c) - corner).to_array());
+    WorldBox { corner: corner.to_array(), edges }
 }
 
 /// A `Cube` brush: 100 units per scale step from its lowest corner.
@@ -417,5 +463,121 @@ mod tests {
         // Unreal X 100..300 is sim Z -1..-3 m.
         assert!(xs.iter().all(|z| (*z + 1.0).abs() < 1e-5 || (*z + 3.0).abs() < 1e-5), "{xs:?}");
         assert_eq!(m.triangles.len(), 12);
+    }
+
+    /// Made up for this test: three still bots on a map whose only bot spawn is a
+    /// `SpawnVolume`, 1 m deep, 8 m wide and 2 m tall, 10 m ahead.
+    const VOLUME_SCE: &str = r#"Name=AimAdapt Test - Box
+AimTypeTag=Clicking
+PlayerProfile=Gunner
+AddedBots=Dot.bot;Dot.bot;Dot.bot
+BotTeams=2;2;2
+ScorePerKill=1.0
+MapScale=1.0
+[Character Profile]
+Name=Gunner
+MaxHealth=1.0
+MaxSpeed=0.0
+WeaponProfileNames=Tapper
+[Weapon Profile]
+Name=Tapper
+Type=Hitscan
+Category=SemiAuto
+DamagePerShot=1.0
+TimeBetweenShots=0.2
+[Bot Profile]
+Name=Dot
+CharacterProfile=Dot Ball
+[Character Profile]
+Name=Dot Ball
+MaxHealth=1.0
+MaxSpeed=0.0
+MainBBType=Spheroid
+MainBBRadius=20.0
+MainBBHeight=40.0
+[Map Data]
+{"version": "1.0.0", "objects": [
+ {"type": "gameObject", "name": "SpawnPoint", "location": "0, 0, 0", "rotation": "0, 0, 0", "scale": "1, 1, 1", "properties": [{"name": "TeamMask", "value": 1}]},
+ {"type": "gameObject", "name": "SpawnVolume", "location": "1000, -400, -100", "rotation": "0, 0, 0", "scale": "1, 8, 2", "properties": [{"name": "TeamMask", "value": 0}]}
+]}
+"#;
+
+    /// Bug: every bot on a spawn volume appeared at one spot, the volume's corner,
+    /// so on "4BK - Micro Horizontal Easy Reflex" the balls sat on top of each other
+    /// and came back in the same place. A volume is a box placed from its lowest
+    /// corner, 100 units per scale step like a `Cube`, and bots appear anywhere in it.
+    #[test]
+    fn bots_appear_anywhere_in_a_spawn_volume() {
+        let imported = convert(&Sce::parse(VOLUME_SCE), "box.sce", "0").unwrap();
+        let world = imported.scenario.world.unwrap();
+        let mut rng = aimadapt_sim::sim::Rng::new(5);
+        let points: Vec<Vec3> = (0..200).map(|_| world.spawn_pos(&mut rng, &[], 0.2, Vec3::NEG_Z)).collect();
+        // Unreal x 1000–1100, y −400–400, z −100–100 is sim z −10 to −11, x −4 to 4, y −1 to 1.
+        for p in &points {
+            assert!(
+                (-4.0..=4.0).contains(&p.x) && (-1.0..=1.0).contains(&p.y) && (-11.0..=-10.0).contains(&p.z),
+                "{p}"
+            );
+        }
+        let spread = |f: fn(&Vec3) -> f32| {
+            let v: Vec<f32> = points.iter().map(f).collect();
+            v.iter().cloned().fold(f32::MIN, f32::max) - v.iter().cloned().fold(f32::MAX, f32::min)
+        };
+        assert!(spread(|p| p.x) > 7.0 && spread(|p| p.y) > 1.5 && spread(|p| p.z) > 0.8, "{:?}", &points[..5]);
+        assert!(imported.notes.is_empty(), "{:?}", imported.notes);
+    }
+
+    fn reasons(text: &str) -> Vec<String> {
+        convert(&Sce::parse(text), "box.sce", "0").err().unwrap_or_default()
+    }
+
+    /// Bug: "4BK - SYV Easy Slow Regen Edit" played as a still ball. Its bot has no
+    /// `MaxSpeed` but flies up and down, so it can't be played until bots move.
+    #[test]
+    fn flying_and_jumping_bots_are_moving_bots() {
+        let moving = |r: Vec<String>| r.iter().any(|r| r.starts_with("moving bots"));
+        let flyer =
+            VOLUME_SCE.replace("MainBBType=Spheroid", "MainBBType=Spheroid\nIsFlyer=true\nFlightVelocityUp=800.0");
+        assert!(moving(reasons(&flyer)), "{:?}", reasons(&flyer));
+        let jumper = VOLUME_SCE
+            .replace("CharacterProfile=Dot Ball", "CharacterProfile=Dot Ball\nDodgeProfileNames=Hop")
+            .replace("MainBBType=Spheroid", "MainBBType=Spheroid\nJumpVelocityMax=256.0")
+            .replace("[Map Data]", "[Dodge Profile]\nName=Hop\nJumpFrequency=1.0\n[Map Data]");
+        assert!(moving(reasons(&jumper)), "{:?}", reasons(&jumper));
+        // NoDodging keeps both still.
+        let still = flyer.replace("CharacterProfile=Dot Ball", "CharacterProfile=Dot Ball\nNoDodging=true");
+        assert_eq!(reasons(&still), Vec::<String>::new());
+        // Bots that cluster (an inverted blocked radius) aren't played yet either.
+        let cluster = VOLUME_SCE
+            .replace("MainBBType=Spheroid", "MainBBType=Spheroid\nBlockedSpawnRadius=100.0\nInvertBlockedSpawn=true");
+        assert!(reasons(&cluster).iter().any(|r| r.starts_with("bots that appear close")));
+    }
+
+    /// Bugs: health regen was left out (Pokeball Small heals 4 hp/s), the player's
+    /// spawn rules were ignored (1w4ts, ww5t), and walls didn't stop bots appearing
+    /// inside them (Amare Microcluster).
+    #[test]
+    fn regen_the_players_spawn_rules_and_walls_come_through() {
+        let text = VOLUME_SCE
+            .replace("MainBBType=Spheroid", "MainBBType=Spheroid\nHealthRegenPerSec=4.0\nHealthRegenDelay=0.25")
+            .replace("WeaponProfileNames=Tapper", "WeaponProfileNames=Tapper\nBlockSpawnFOV=40.0\nBlockSpawnDistance=9999.0\nInvertBlockedSpawn=true")
+            .replace(
+                "\n]}",
+                ",\n {\"type\": \"brush\", \"name\": \"Default\", \"mesh\": \"Cube\", \"location\": \"1050, -500, -200\", \"rotation\": \"0, 0, 0\", \"scale\": \"1, 10, 4\"}\n]}",
+            );
+        let s = convert(&Sce::parse(&text), "box.sce", "0").unwrap().scenario;
+        assert_eq!((s.targets.regen_per_s, s.targets.regen_delay_s), (4.0, 0.25));
+        let w = s.world.unwrap();
+        let b = w.player_block.clone().unwrap();
+        assert_eq!((b.fov_deg, b.invert), (40.0, true));
+        assert!((b.distance - 99.99).abs() < 1e-3);
+        // The wall: Unreal x 1050–1150 is sim z -10.5 to -11.5, its front face inside
+        // the spawn volume (z -10 to -11), so every bot ends up in front of it.
+        assert_eq!(w.walls.len(), 1);
+        let mut rng = aimadapt_sim::sim::Rng::new(9);
+        for _ in 0..100 {
+            let p = w.spawn_pos(&mut rng, &[], 0.2, Vec3::NEG_Z);
+            assert!(p.z >= -10.5 + 0.2 - 1e-4, "{p}");
+        }
     }
 }

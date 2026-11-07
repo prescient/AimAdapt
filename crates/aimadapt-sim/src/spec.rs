@@ -212,7 +212,7 @@ pub const FIELDS: &[Field] = &[
         "targets.regen_per_s",
         "Targets",
         "Regeneration",
-        "Beam only: health restored per second while off target.",
+        "Health restored per second: with a beam while off target, with hitscan once the regen delay has passed since the last hit.",
         num(0.0, 10_000.0, 5.0, "/s"),
     ),
     f(

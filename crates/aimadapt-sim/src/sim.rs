@@ -862,6 +862,14 @@ impl Sim {
     }
 
     fn fire_hitscan(&mut self, dt: f32, aim: Vec3, input: Input, events: &mut Vec<Event>) {
+        // Regen: a target heals once `regen_delay_s` has passed since it was last hit.
+        let regen = self.current.targets.regen_per_s * dt;
+        if regen > 0.0 {
+            let (now, delay) = (self.elapsed(), self.current.targets.regen_delay_s);
+            for t in self.targets.iter_mut().filter(|t| now - t.last_hit_at >= delay) {
+                t.health = (t.health + regen).min(t.max_health);
+            }
+        }
         let w = &self.scenario.weapon;
         let interval = if w.fire_rate > 0.0 { 1.0 / w.fire_rate } else { 0.0 };
         self.cooldown = (self.cooldown - dt).max(0.0);
@@ -1209,10 +1217,11 @@ impl Sim {
             }
         }
         let pos = match &self.current.world {
-            // Imported scenarios: the map's spawn points, kept apart by distance.
+            // Imported scenarios: the map's spawn points, kept apart by distance, out
+            // of walls and where the player's view allows.
             Some(w) => {
                 let others: Vec<Vec3> = self.targets.iter().map(|t| t.pos).collect();
-                w.spawn_pos(&mut self.rng, &others)
+                w.spawn_pos(&mut self.rng, &others, tc.radius, self.last_aim)
             }
             None => {
                 let distance = self.rng.range(sp.distance);
@@ -1925,6 +1934,34 @@ mod tests {
         for a in airtimes {
             assert!((a - 0.7).abs() < 0.03, "airtime {a:.3} s");
         }
+    }
+
+    /// Bug: regen only worked with a beam, so imported hitscan scenarios with
+    /// `HealthRegenPerSec` (Pokeball Small) never healed.
+    #[test]
+    fn hitscan_targets_heal_after_the_delay() {
+        let mut s = builtin("builtin:static-grid");
+        s.targets.count = 1;
+        s.targets.health = 3.0;
+        s.weapon.damage = 1.0;
+        s.targets.regen_per_s = 2.0;
+        s.targets.regen_delay_s = 0.2;
+        let mut sim = Sim::new(s, 1);
+        let at = sim.targets()[0].pos.normalize();
+        while sim.phase() == Phase::Countdown {
+            sim.step(FRAME, Input { aim: Vec3::Y, fire_pressed: false, fire_held: false });
+        }
+        sim.step(FRAME, Input { aim: at, fire_pressed: true, fire_held: true });
+        assert_eq!(sim.targets()[0].health, 2.0);
+        let idle = Input { aim: Vec3::Y, fire_pressed: false, fire_held: false };
+        for _ in 0..24 {
+            sim.step(FRAME, idle);
+        }
+        assert_eq!(sim.targets()[0].health, 2.0, "no healing in the first 0.1 s");
+        for _ in 0..240 {
+            sim.step(FRAME, idle);
+        }
+        assert_eq!(sim.targets()[0].health, 3.0, "healed back to full");
     }
 
     #[test]

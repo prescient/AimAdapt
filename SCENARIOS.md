@@ -81,7 +81,7 @@ per_miss = -30.0
 | `targets.radius` | `0.3` | Radius in meters. |
 | `targets.height` | `1.8` | Capsule height in meters, including the rounded ends. |
 | `targets.health` | `100.0` | Damage needed to destroy a target. Equal to `weapon.damage` means one shot. Use a huge value for pure tracking. |
-| `targets.regen_per_s` | `0.0` | Beam only: health restored per second while the crosshair is off the target. |
+| `targets.regen_per_s` | `0.0` | Health restored per second: with a beam while the crosshair is off the target, with hitscan once `regen_delay_s` has passed since the last hit. |
 | `targets.regen_delay_s` | `0.0` | Seconds after the last hit before a target starts healing. A short delay forgives a brief slip; regen close to the beam's damage rate means a kill needs an unbroken stretch on target. |
 | `targets.color` | `"#ff5a4e"` | Target color as `#rrggbb`. |
 | `targets.respawn_delay_s` | `0.0` | Seconds before a destroyed target is replaced. |

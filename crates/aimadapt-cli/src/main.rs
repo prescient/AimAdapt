@@ -486,11 +486,17 @@ fn print_progress_list(p: &Progress, settings: &ProgressSettings, sort: SortBy, 
 fn describe_import(s: &aimadapt_sim::Scenario) -> String {
     let t = &s.targets;
     let Some(w) = &s.world else { return String::new() };
-    let dist: Vec<f32> = w.spawns.iter().map(|p| aimadapt_sim::Vec3::from_array(p.pos).length()).collect();
+    use aimadapt_sim::Vec3;
+    // A volume counts from its center.
+    let center = |p: &aimadapt_sim::world::WorldSpawn| {
+        Vec3::from_array(p.pos) + p.edges.iter().map(|e| Vec3::from_array(*e) / 2.0).sum::<Vec3>()
+    };
+    let dist: Vec<f32> = w.spawns.iter().map(|p| center(p).length()).collect();
     let (near, far) = dist.iter().fold((f32::MAX, 0.0f32), |(a, b), d| (a.min(*d), b.max(*d)));
     let size = 2.0 * (t.radius / near.max(0.01)).atan().to_degrees();
+    let volumes = w.spawns.iter().filter(|p| p.edges.iter().flatten().any(|v| *v != 0.0)).count();
     format!(
-        "{} × {:?} r {:.2} m, {:.0} hp, {} spawn points {:.1}–{:.1} m away ({:.2}° wide at the nearest), offset {:?}–{:?}, apart {:.2} m; {:.0} shots/s {:?}; score {}/kill {}/hit × {:?}",
+        "{} × {:?} r {:.2} m, {:.0} hp, {} spawn points ({volumes} volumes) {:.1}–{:.1} m away ({:.2}° wide at the nearest), offset {:?}–{:?}, apart {:.2} m; {:.0} shots/s {:?}; score {}/kill {}/hit × {:?}",
         t.count,
         t.shape,
         t.radius,

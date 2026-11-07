@@ -278,7 +278,8 @@ pub struct Targets {
     pub height: f32,
     /// Damage needed to destroy a target.
     pub health: f32,
-    /// Restore health when the crosshair leaves the target (beam only).
+    /// Health restored per second: with a beam while the crosshair is off the
+    /// target, with hitscan once `regen_delay_s` has passed since the last hit.
     pub regen_per_s: f32,
     /// Seconds after the last hit before regen starts. 0 heals straight away.
     #[serde(skip_serializing_if = "off_in_fingerprint")]
