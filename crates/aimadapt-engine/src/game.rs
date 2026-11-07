@@ -340,6 +340,35 @@ fn color(hex: &str) -> Color {
     Color::srgb(r, g, b)
 }
 
+/// An imported map's triangles with flat normals, and texture coordinates from
+/// the two axes each face is most square to, so the 2 m grid lies flat on it.
+fn world_mesh(m: &aimadapt_sim::world::WorldMesh) -> Mesh {
+    let mut positions = Vec::with_capacity(m.triangles.len() * 3);
+    let mut normals = Vec::with_capacity(m.triangles.len() * 3);
+    let mut uvs = Vec::with_capacity(m.triangles.len() * 3);
+    for tri in &m.triangles {
+        let [a, b, c] = tri.map(|i| Vec3::from_array(m.positions[i as usize]));
+        let n = (b - a).cross(c - a).normalize_or_zero();
+        let abs = n.abs();
+        for p in [a, b, c] {
+            let uv = if abs.x >= abs.y && abs.x >= abs.z {
+                [p.z, p.y]
+            } else if abs.y >= abs.z {
+                [p.x, p.z]
+            } else {
+                [p.x, p.y]
+            };
+            positions.push(p.to_array());
+            normals.push(n.to_array());
+            uvs.push([uv[0] / 2.0, uv[1] / 2.0]);
+        }
+    }
+    Mesh::new(bevy::mesh::PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
+}
+
 /// A light grid on a transparent background, tiled over the walls so movement is
 /// easy to judge.
 fn grid_texture() -> Image {
@@ -407,6 +436,33 @@ fn rebuild_world(
     let floor = color(&s.arena.floor_color);
     let t = 0.1;
 
+    // Imported scenarios draw their own map instead of the room.
+    if let Some(world) = &s.world {
+        for m in &world.meshes {
+            let base = color(&m.color);
+            let mesh = meshes.add(world_mesh(m));
+            let solid = materials.add(StandardMaterial {
+                base_color: base,
+                perceptual_roughness: 1.0,
+                reflectance: 0.0,
+                double_sided: true,
+                cull_mode: None,
+                ..default()
+            });
+            let lines = materials.add(StandardMaterial {
+                base_color: base.lighter(0.08),
+                base_color_texture: Some(grid.clone()),
+                alpha_mode: AlphaMode::Blend,
+                unlit: true,
+                double_sided: true,
+                cull_mode: None,
+                depth_bias: 50.0,
+                ..default()
+            });
+            commands.spawn((WorldItem, Mesh3d(mesh.clone()), MeshMaterial3d(solid), Transform::IDENTITY));
+            commands.spawn((WorldItem, Mesh3d(mesh), MeshMaterial3d(lines), Transform::IDENTITY));
+        }
+    }
     // Each panel: size, center, color, and how many 2 m grid cells it spans.
     let floor_y = -eye - t / 2.0;
     let panels = [
@@ -417,7 +473,7 @@ fn rebuild_world(
         (Vec3::new(t, h, d), Vec3::new(-w / 2.0 - t / 2.0, h / 2.0 - eye, 0.0), wall, Vec2::new(d, h)),
         (Vec3::new(t, h, d), Vec3::new(w / 2.0 + t / 2.0, h / 2.0 - eye, 0.0), wall, Vec2::new(d, h)),
     ];
-    for (size, center, base, cells) in panels {
+    for (size, center, base, cells) in if s.world.is_some() { Vec::new() } else { panels.to_vec() } {
         let mat = materials.add(StandardMaterial {
             base_color: base,
             perceptual_roughness: 1.0,

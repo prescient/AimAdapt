@@ -19,16 +19,24 @@ Train most days, keep sessions to about half an hour, and take Sunday off. Day-t
 Today is the home page: what to play now and how the week is going.
 
 - **Streak and today's time** at the top: the days in a row you've trained, and today's active time against your daily goal.
-- **Today's workout:** today's day of the Core Week program, with each drill's block (warm-up, main, secondary, maintenance), its runs and your current 85% rating. The bar shows how many of today's runs you've done. The button says **Start**, **Continue** if you've done part of it, or **Play again** once it's done. **Something else** goes to Scenarios. A drill's name opens it on Scenarios. On a rest day it tells you what's next.
+- **Today's workout:** today's day of the Core Week program, with each drill's block (warm-up, main, secondary, maintenance), its runs and your current 85% rating. The bar shows how many of today's runs you've done. The button says **Start**, **Continue** if you've done part of it, or **Play again** once it's done. **Something else** opens Scenarios on Browse. A drill's name opens it on Scenarios. On a rest day it tells you what's next.
 - **This week:** each day's minutes in the program, coloured done, partial or missed. **Week in detail** opens Progress › Skills.
-- **Recently played:** your last five scenarios or workouts, with your current figure.
-- **Worth knowing:** up to two things: the skill furthest behind in your profile, and a pattern from your history, such as cold starts, a plateau or a settings change.
+- **Favorites:** the scenarios and workouts you've starred (up to six), with **Play** or **Start**.
+- **Recently played:** your last five scenarios or workouts, with your current figure and **Play** or **Start**. Play starts an adaptive run. KovaaK's scenarios have no Play button, since you play those in KovaaK's.
+- **Worth knowing:** up to two things: the skill furthest behind in your profile (with a link to that skill's scenarios on Browse), and a pattern from your history, such as cold starts, a plateau or a settings change.
 
 ## Scenarios {#scenarios}
 
-Scenarios lists everything you can play or have played: the trainer's scenarios, your workouts and your KovaaK's scenarios, newest first and grouped by day (Today, Yesterday, then weekdays and dates). Scenarios you haven't played yet come last. Each row shows the skill, when you played it and your current figure: the 85% rating, a best score, or a workout's run count.
+Scenarios has the list on the left and the selected scenario or workout on the right. The list has four tabs:
 
-**Finding one:** search by name, or filter by **Skill**, **Tag** (from each scenario's tags) or **Trainer** (AimAdapt or KovaaK's). **Clear filters** shows everything again. The list stays where you scrolled it while you pick scenarios.
+- **Recent:** everything you've played, in the trainer or in KovaaK's, newest first and grouped by day (Today, Yesterday, then weekdays and dates). Filter by **Trainer** (AimAdapt or KovaaK's). Rows marked "KovaaK's history" are scenarios you played in KovaaK's: their page shows your scores, but you play them in KovaaK's.
+- **Browse:** every scenario you can play in the trainer, played or not, grouped by skill. Filter by **Skill**, or pick tags (for example *tracking* and *smooth*) to show only scenarios that have all of them. **More** shows the rest of the tags. **Sort** lists them by skill, by name, most played first, or longest since you played them (scenarios you've never played come first).
+- **Workouts:** the built-in workouts and yours, most recently played first. The program's own days are on Today and Progress.
+- **Yours:** the scenarios and workouts you made or copied with Copy & edit.
+
+Each row shows the skill, when you played it and your current figure: the 85% rating, a best score, or a workout's run count. Search by name works on every tab. **Clear filters** shows the whole tab again. Switching tabs keeps the open scenario open, and the list stays where you scrolled it while you pick scenarios.
+
+**Favorites and hiding:** the star at the top of any scenario's or workout's page adds it to your favorites. Favorites come first on Browse, Workouts and Yours, have a star on Recent, and show on Today. **Hide** keeps something off the lists, for example an old KovaaK's scenario you don't play any more. Its runs aren't deleted. The **hidden** link under the list shows what you've hidden, and **Show again** brings one back.
 
 **Playing:** pick a scenario and use **Play adaptive** or **Standard** at the top of its page; **Copy & edit** (or **Edit** for your own) opens the [scenario editor](#help/edit). A workout's page lists its runs, with **Start** and **Copy & edit** (see [Workouts](#help/workout)). **New workout** and **New scenario** start empty ones. **Playing with** shows the settings profile the trainer will use; it opens Settings.
 
@@ -49,7 +57,7 @@ While the trainer is open, the page says so and the start buttons are disabled. 
 
 **Reaction time and lifetime ratings.** A lifetime rating includes your reaction time, which practice barely changes. A note splits the rating into your reaction and the part you control. That part improves by more than the rating shows: going from 0.80 s to 0.62 s is 23% on the rating, but with a 0.22 s reaction the part you control fell 31%.
 
-**KovaaK's scenarios** show their score history: personal best, average, accuracy and improvement, every score over time with your bests marked, a trend and any plateau, and every run. Changes to your sensitivity show as markers on the chart, so you can tell a settings change from a real gain. Restarted runs (much shorter than usual) never count as bests. KovaaK's stats files don't record shots, reaction or tracking, so these scenarios have no Insights or replays. Standard-mode runs of a trainer scenario are on its own page, with their score in the runs table.
+**KovaaK's scenarios** show their score history: personal best, average, accuracy and improvement, every score over time with your bests marked, a trend and any plateau, and every run. Changes to your sensitivity show as markers on the chart, so you can tell a settings change from a real gain. Restarted runs (much shorter than usual) never count as bests. KovaaK's stats files don't record shots, reaction or tracking, so these scenarios have no Insights or replays. Standard-mode runs of a trainer scenario are on its own page, with their score in the runs table. Some KovaaK's scenarios can also be played in AimAdapt's trainer: their page then has **Play in AimAdapt** (see [Playing KovaaK's scenarios](#help/kovaaks-play)).
 
 ## In the trainer {#trainer}
 
@@ -219,6 +227,18 @@ Progress shows how you're doing across all your scenarios, in three tabs.
 
 **Time** shows when and how much you train, counting KovaaK's runs and trainer runs together: totals (active time, session time, days trained, days the daily goal was met), daily time for the last seven days, a calendar of daily time (use the arrows to change month), every session newest first, the last seven days as session blocks, time by day of the week, runs by hour of day, and active against idle time. How time is counted is in [Settings › Goals and time](#help/settings).
 
+## Playing KovaaK's scenarios {#kovaaks-play}
+
+AimAdapt is learning to play your own KovaaK's scenarios (`.sce` files) in its trainer, closely enough that scores compare with KovaaK's. It reads the file from your KovaaK's or Workshop folder and never changes it.
+
+**What plays so far:** scenarios whose bots stand still, on KovaaK's newer (JSON) maps. That includes 11 of the 34 Voltaic S5 Novice benchmarks: the five 1w4ts and five ww5t scenarios, and DotTS. Moving bots, the older Reflex maps, projectiles, heads and the rest come later.
+
+**Playing one:** open a KovaaK's scenario on Scenarios (on Recent, or by searching). If AimAdapt can play it, its page has a **Play in AimAdapt** card with **Play**. If the file is there but uses something AimAdapt can't play yet, the page says what. Imported scenarios play in standard mode on the scenario's own map, with its bots, weapon, time limit and scoring, including the accuracy multiplier (some scenarios multiply the score by your accuracy or its square root). If the scenario locks the field of view to a range, your FOV is kept inside it for that run.
+
+**Your runs:** runs played in AimAdapt are kept apart from your KovaaK's runs of the same scenario. They don't change your KovaaK's bests, trends or benchmark ranks. The card shows how many you've played in AimAdapt and your best.
+
+**What's still different:** the card lists what plays differently from KovaaK's, for example walls that aren't drawn yet. The sizes and distances still have to be checked against KovaaK's, so a score here may not match a score there yet.
+
 ## Replay {#replay}
 
 Every run in the trainer can be watched again. On Scenarios, pick a scenario and click **Replay** next to a run in its **Runs**. **Back to** returns to the scenario.
@@ -288,6 +308,9 @@ Nothing is sent anywhere. Deleting one of your scenarios or workouts removes the
 ## What's new {#whats-new}
 
 **November 2026**
+- Play some KovaaK's scenarios in AimAdapt: scenarios with still bots on newer maps, including 11 Voltaic S5 Novice benchmarks. Their page on Scenarios has **Play in AimAdapt**, and those runs are kept apart from your KovaaK's runs.
+- Scenarios has four tabs: **Recent**, **Browse** (every scenario you can play, by skill, with tag chips and a sort), **Workouts** and **Yours**. Star favorites, and hide what you don't want on the lists.
+- Today shows your favorites, and its recently played list has Play buttons. The skill furthest behind links to its scenarios.
 - A simpler layout: four pages instead of ten. **Today** has today's workout and the week; **Scenarios** lists everything you can play, newest first with filters, beside the selected scenario's page (Play, figures, notes, Insights and runs on one scrolling page); **Progress** has Skills, Benchmarks and Time; **Settings** gains Goals and time, KovaaK's (what was Library & import) and Your data. Old links still go to the right place.
 - Replays: watch any new trainer run again from its scenario's page, from your own view, at any speed, with your shots and the crosshair's trail.
 - The Reaction column in a scenario's runs table leaves out flicks under 3°, like the Reaction time chart, so the two agree in Micro Flicks.

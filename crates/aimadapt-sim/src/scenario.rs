@@ -67,6 +67,9 @@ pub struct Scenario {
     pub scoring: Scoring,
     /// How adaptive mode changes the difficulty.
     pub adaptive: Adaptive,
+    /// Set on scenarios imported from KovaaK's: they play on the scenario's own map.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub world: Option<crate::world::World>,
 }
 
 impl Default for Scenario {
@@ -85,6 +88,7 @@ impl Default for Scenario {
             targets: Targets::default(),
             scoring: Scoring::default(),
             adaptive: Adaptive::default(),
+            world: None,
         }
     }
 }
@@ -509,6 +513,11 @@ impl Scenario {
         let m = &t.movement;
 
         check(self.schema <= SCHEMA_VERSION, "made for a newer version of AimAdapt");
+        if let Some(w) = &self.world {
+            for m in w.problems() {
+                check(false, &m);
+            }
+        }
         check(!self.name.trim().is_empty(), "name is empty");
         check(
             self.skill.group().is_none_or(|g| g == self.category),

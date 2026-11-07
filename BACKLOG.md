@@ -54,7 +54,8 @@ Last reviewed: Nov 4, 2026 (after the first playtest session).
   - **Switching:** speed, evasive, stability.
 
 ### To do
-- [ ] `todo` P2 Scenario and workout manager: one place to rename, edit, copy, delete (one or many) and hide or archive your scenarios and workouts, imported KovaaK's scenarios included. Create, edit and delete already work one at a time in the editor. Renaming needs care: history is stored by name, so a rename must carry the runs over (or scenarios get a stable id).
+- [x] Scenarios page tabs: Recent, Browse (every playable scenario by skill, tag chips you can combine, sort by skill, name, most played or longest since played), Workouts and Yours. Favorites (starred, first on the lists and on Today) and Hidden, saved in `list.json` in the data folder. Today's favorites and recently played have Play.
+- [ ] `todo` P2 Scenario and workout manager: one place to rename, edit, copy, delete (one or many) and archive your scenarios and workouts, imported KovaaK's scenarios included. Create, edit and delete already work one at a time in the editor, and hiding works from each item's page. Renaming needs care: history is stored by name, so a rename must carry the runs over (or scenarios get a stable id).
 - [ ] `todo` P3 Noise-based drift for control tracking (curve movement and acceleration already make smooth paths).
 - [ ] `todo` P3 Player movement (WASD strafing).
 - [ ] `todo` P3 Projectile weapons with travel time; spread and recoil.
@@ -202,11 +203,12 @@ What a `.sce` holds (surveyed from 225 local and workshop files, Nov 2026): an I
 
 ### To do
 - [x] Phase 1, reader and inventory (`crates/aimadapt-sce`): settings, both map formats, and each scenario's player, weapon and bots resolved through `.bot`, `.rot` and ability references. `aimadapt-cli sce [name]` lists each file as covered by phases 2–3 or with the features it uses beyond them. On this machine: 118 of 225 files covered, including all 34 Voltaic S5 Novice benchmarks.
-- [ ] `todo` P1 Phase 2, world sim: map geometry, player and bot spawns (offsets, blocked radius), hitboxes (spheroid, cylinder, cuboid), hitscan fire rate, damage and radius, health and regen, FOV lock, and KovaaK's score formula. Static benchmarks become playable.
+- [x] Phase 2a, still bots on JSON maps: a scenario can carry a world (`aimadapt-sim::world`: spawn points with offsets along each point's axes, blocked radius, accuracy multiplier, FOV lock, wall meshes), `aimadapt-sce::convert` builds one from a `.sce` (Unreal centimeters to meters, `MapScale` on map positions and walls only, `Cube` brushes), the trainer plays `--sce <file>` and draws the map, and a KovaaK's scenario's page has Play in AimAdapt. Runs are stored with their own mode and left out of Progress. 11 of the 34 Voltaic S5 Novice benchmarks play (1w4ts ×5, ww5t ×5, DotTS).
+- [ ] `todo` P1 Phase 2b, the rest of the world sim: Reflex maps (axes and units), the other JSON primitives (`Concave`, `Ramp`, `Cylinder`…) drawn, spawn volumes (now their center), cuboid hitboxes and stretched spheres, true cylinders (now capsules), health regen, hitscan radius, several kinds of bot in one scenario, `BlockSpawnFOV`/`BlockSpawnDistance`, and check that `MapScale` doesn't apply to character sizes.
 - [ ] `todo` P1 Phase 3, bot movement: Unreal-style character movement (max speed, acceleration, friction, gravity, air control, terminal velocity, jumps, flight, jetpack, wall bounce), dodge and rotation profiles, and the bot abilities benchmarks use to move: melee knockback that pushes bots apart (Pasu, Controlsphere, Raw Control) and dashes (Ground). Tracking and evasive benchmarks become playable.
 - [ ] `spike` P1 Phase 4, fidelity check: play each benchmark in both trainers, compare scores and check by eye, and tune. KovaaK's records no target positions, so scores are the measure. Dodge behavior is inferred from its setting names, so expect tuning here.
 - [ ] `todo` P2 Phase 5, adaptive: a speed or time-scale multiplier as the knob, 1.0 being the original scenario.
-- [ ] `todo` P2 Phase 6, app: imported scenarios in the Scenarios list, "Play in AimAdapt" on a KovaaK's scenario's page, both histories side by side. Each import is a snapshot with a hash of its source, so history stays tied to one version.
+- [ ] `todo` P2 Phase 6, app: imported scenarios in the Scenarios list (Browse), both histories side by side on the scenario's page (now a run count and best), Insights and replays for imported runs, and Play from Today. The file's hash is part of the scenario's fingerprint, so a changed file starts new bests; the page doesn't show versions yet. Done: Play in AimAdapt on a KovaaK's scenario's page, runs kept out of KovaaK's history.
 - [ ] `todo` P3 Projectile and explosive weapons, aim assist, recoil and spread, heads, third-person camera (used by other workshop scenarios, not the benchmarks).
 
 ## 10. Testing and releases

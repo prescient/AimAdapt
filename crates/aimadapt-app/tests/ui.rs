@@ -57,3 +57,18 @@ fn chart_ticks_are_formatted_from_their_exact_value() {
     );
     assert!(insights.contains("${yfmt(v)}"), "axes() passes the exact tick value");
 }
+
+/// Bug: with no scenario in the address, Scenarios showed the list's first item,
+/// so switching tabs or starring changed which scenario was open, and Favorite or
+/// Hide could act on a different one. The first item opens by its own address.
+#[test]
+fn scenarios_opens_the_first_item_by_its_address() {
+    let scenarios = include_str!("../ui/scenarios.js");
+    assert!(
+        scenarios.contains("if (!arg && item) {") && scenarios.contains("location.replace(scenarioHref(item.key));"),
+        "scenariosPage should location.replace to the first item's address"
+    );
+    // Favorite and Hide name the item they act on.
+    assert!(scenarios.contains("data-action=\"favorite\" data-key=\"${esc(key)}\""));
+    assert!(scenarios.contains("data-action=\"hide\" data-key=\"${esc(key)}\""));
+}

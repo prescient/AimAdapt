@@ -576,11 +576,16 @@ impl Sim {
     pub fn score(&self) -> f32 {
         let s = &self.scenario.scoring;
         let st = &self.stats;
-        s.per_kill * st.kills as f32
+        let points = s.per_kill * st.kills as f32
             + s.per_hit * st.hits as f32
             + s.per_miss * st.misses as f32
             + s.per_damage * st.damage_done
-            + s.per_timeout * st.timeouts as f32
+            + s.per_timeout * st.timeouts as f32;
+        // Imported scenarios can scale the score by accuracy, as KovaaK's does.
+        match &self.scenario.world {
+            Some(w) => points * w.accuracy_mult.factor(st.accuracy()),
+            None => points,
+        }
     }
 
     pub fn result(&self) -> RunResult {
@@ -1203,8 +1208,17 @@ impl Sim {
                 break;
             }
         }
-        let distance = self.rng.range(sp.distance);
-        let pos = self.fit_in_room(dir * distance);
+        let pos = match &self.current.world {
+            // Imported scenarios: the map's spawn points, kept apart by distance.
+            Some(w) => {
+                let others: Vec<Vec3> = self.targets.iter().map(|t| t.pos).collect();
+                w.spawn_pos(&mut self.rng, &others)
+            }
+            None => {
+                let distance = self.rng.range(sp.distance);
+                self.fit_in_room(dir * distance)
+            }
+        };
         let id = self.next_id;
         self.next_id += 1;
         let no = self.next_no;

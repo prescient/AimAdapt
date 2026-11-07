@@ -7,7 +7,10 @@
 use std::path::{Path, PathBuf};
 
 use aimadapt_sce::map::{MapFormat, Solid, Teams};
-use aimadapt_sce::{Sce, find_files, gaps};
+use aimadapt_sce::{Sce, find_files, gaps, import};
+use aimadapt_sim::scenario::{Shape, Trigger};
+use aimadapt_sim::world::AccuracyMult;
+use aimadapt_sim::{Input, Phase, Sim, Vec3};
 
 fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures")
@@ -20,7 +23,7 @@ fn read(name: &str) -> Sce {
 #[test]
 fn finds_every_fixture() {
     let files = find_files(&[fixtures()]);
-    assert_eq!(files.len(), 2);
+    assert_eq!(files.len(), 3);
     assert!(files.iter().all(|f| f.extension().unwrap() == "sce"));
 }
 
@@ -93,6 +96,71 @@ fn reflex_map_scenario_reads_and_lists_its_gaps() {
 
     let features: Vec<&str> = gaps(&sce).iter().map(|g| g.feature).collect();
     assert_eq!(features, vec!["map objects", "projectile weapon", "heads"]);
+}
+
+fn path(name: &str) -> PathBuf {
+    fixtures().join(format!("AimAdapt Test - {name}.sce"))
+}
+
+#[test]
+fn still_bots_on_a_json_map_import_with_kovaaks_rules() {
+    let i = import(&path("Still Wall")).unwrap();
+    let s = &i.scenario;
+    assert_eq!(s.name, "AimAdapt Test - Still Wall");
+    assert_eq!(s.timing.duration_s, 30.0);
+    assert_eq!((s.targets.count, s.targets.shape, s.targets.health), (3, Shape::Sphere, 1.0));
+    assert!((s.targets.radius - 0.3).abs() < 1e-6);
+    assert!((s.targets.respawn_delay_s - 0.2).abs() < 1e-6);
+    assert_eq!(s.targets.color, "#ff8000");
+    assert_eq!((s.weapon.trigger, s.weapon.fire_rate), (Trigger::Click, 5.0));
+    assert_eq!(s.scoring.per_kill, 10.0);
+    let w = s.world.as_ref().unwrap();
+    assert_eq!(w.source, "AimAdapt Test - Still Wall.sce");
+    assert_eq!(w.source_hash.len(), 16);
+    assert_eq!(w.accuracy_mult, AccuracyMult::Sqrt);
+    assert_eq!(w.fov_range, Some([100.0, 120.0]));
+    assert!((w.blocked_radius - 1.5).abs() < 1e-6);
+    // Unreal (250, -100, 0) × MapScale 4 is 10 m ahead and 4 m left.
+    let spawns: Vec<Vec3> = w.spawns.iter().map(|p| Vec3::from_array(p.pos)).collect();
+    assert!(spawns.iter().any(|p| (*p - Vec3::new(-4.0, 0.0, -10.0)).length() < 1e-4), "{spawns:?}");
+    // The wall is drawn: one cube, 12 triangles.
+    assert_eq!(w.meshes.len(), 1);
+    assert_eq!(w.meshes[0].triangles.len(), 12);
+    assert!(i.notes.is_empty(), "{:?}", i.notes);
+    assert!(s.problems().is_empty());
+}
+
+#[test]
+fn an_imported_scenario_plays_in_the_sim() {
+    let s = import(&path("Still Wall")).unwrap().scenario;
+    let mut sim = Sim::new(s, 11);
+    let idle = Input { aim: Vec3::NEG_Z, fire_pressed: false, fire_held: false };
+    while sim.phase() == Phase::Countdown {
+        sim.step(0.05, idle);
+    }
+    // Three bots, each near a spawn point on the wall and apart from the others.
+    let pos: Vec<Vec3> = sim.targets().iter().map(|t| t.pos).collect();
+    assert_eq!(pos.len(), 3);
+    for p in &pos {
+        assert!((p.z + 10.0).abs() < 1e-4 && p.y.abs() <= 0.5 + 1e-4, "{p}");
+    }
+    // A hit kills (1 damage, 1 health); then a miss. Sqrt accuracy: 10 × √0.5.
+    let aim = sim.targets()[0].pos.normalize();
+    sim.step(0.01, Input { aim, fire_pressed: true, fire_held: true });
+    assert_eq!(sim.stats().kills, 1);
+    sim.step(0.3, idle);
+    sim.step(0.01, Input { aim: Vec3::Y, fire_pressed: true, fire_held: true });
+    assert_eq!(sim.stats().misses, 1);
+    assert!((sim.score() - 10.0 * 0.5f32.sqrt()).abs() < 1e-4, "{}", sim.score());
+}
+
+#[test]
+fn scenarios_the_trainer_cant_play_yet_say_why() {
+    let moving = import(&path("Drifting Pair")).unwrap_err();
+    assert!(moving.iter().any(|r| r.starts_with("moving bots")), "{moving:?}");
+    let old = import(&path("Old Room")).unwrap_err();
+    assert!(old.iter().any(|r| r.starts_with("Reflex maps")), "{old:?}");
+    assert!(old.iter().any(|r| r.starts_with("projectile weapon")), "{old:?}");
 }
 
 /// Reads every `.sce` file in your KovaaK's folders. Run by hand with

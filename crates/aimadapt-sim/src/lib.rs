@@ -10,6 +10,7 @@
 //! - [`telemetry`]: per-target, per-shot and tracking records for analytics.
 //! - [`workout`]: lists of scenarios played back to back.
 //! - [`program`]: weekly plans that map weekdays to workouts.
+//! - [`world`]: the map, spawn points and scoring of a scenario imported from KovaaK's.
 
 pub mod adaptive;
 pub mod library;
@@ -21,6 +22,7 @@ pub mod sim;
 pub mod spec;
 pub mod telemetry;
 pub mod workout;
+pub mod world;
 
 pub use glam::Vec3;
 pub use scenario::Scenario;

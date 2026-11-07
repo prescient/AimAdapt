@@ -109,6 +109,11 @@ CREATE INDEX runs_source ON runs (source, scenario);
 /// engine. Stored in every run, so it keeps the app's old name (RustyAim).
 pub const SOURCE_ENGINE: &str = "rustyaim";
 
+/// `runs.mode` of trainer runs of a scenario imported from a KovaaK's `.sce` file.
+/// They're kept apart from KovaaK's own runs of the same name (Progress leaves them
+/// out). Named like the other stored values, with the app's old name.
+pub const MODE_IMPORTED: &str = "RustyAim Imported";
+
 /// The data folder and database file, and their names before the app was renamed
 /// from RustyAim.
 const DATA_DIR: &str = "AimAdapt";

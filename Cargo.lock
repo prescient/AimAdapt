@@ -98,6 +98,7 @@ version = "0.1.0"
 dependencies = [
  "aimadapt-core",
  "aimadapt-engine",
+ "aimadapt-sce",
  "aimadapt-sim",
  "chrono",
  "notify",
@@ -113,6 +114,7 @@ version = "0.1.0"
 dependencies = [
  "aimadapt-core",
  "aimadapt-sce",
+ "aimadapt-sim",
  "anyhow",
  "chrono",
  "clap",
@@ -135,6 +137,7 @@ name = "aimadapt-engine"
 version = "0.1.0"
 dependencies = [
  "aimadapt-core",
+ "aimadapt-sce",
  "aimadapt-sim",
  "bevy",
  "chrono",
@@ -146,6 +149,8 @@ name = "aimadapt-sce"
 version = "0.1.0"
 dependencies = [
  "aimadapt-core",
+ "aimadapt-sim",
+ "glam",
  "serde_json",
 ]
 

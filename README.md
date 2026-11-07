@@ -89,8 +89,8 @@ Saturday's drills are chosen from your weakest sub-skills.
 
 Four pages, in the sidebar:
 
-- **Today:** today's program workout with each drill's runs and 85% rating, and Start, Continue or Play again. Also the week at a glance, what you played last, and a couple of things worth knowing.
-- **Scenarios:** everything you can play or have played (the trainer's scenarios, your workouts and your KovaaK's scenarios) in one list, newest first and grouped by day, with a name search and Skill, Tag and Trainer filters. The selected one fills the rest of the page as one scrolling page: Play adaptive and Standard at the top, then its key figures, rating chart, what to work on, Insights and runs with replays.
+- **Today:** today's program workout with each drill's runs and 85% rating, and Start, Continue or Play again. Also the week at a glance, your favorites and what you played last (each with Play), and a couple of things worth knowing.
+- **Scenarios:** everything you can play or have played (the trainer's scenarios, your workouts and your KovaaK's scenarios) in four tabs: Recent (newest first, grouped by day), Browse (every playable scenario by skill, with tag chips and a sort), Workouts and Yours. Star favorites and hide what you don't want listed. The selected one fills the rest of the page as one scrolling page: Play adaptive and Standard at the top, then its key figures, rating chart, what to work on, Insights and runs with replays.
 - **Progress:** three tabs.
   - **Skills:** the skill profile (the change in each of the nine sub-skills, each group and overall, measured from the end of your first day on each drill), the week (each day done, partial or missed, its minutes and its main drills against the same day last week, with Play to make up a missed day), and reps and carry-over (rep 1 against the last rep of each drill, and how much of the previous session's rating carried over).
   - **Benchmarks:** your Voltaic Season 5 bests.
@@ -149,13 +149,14 @@ If KovaaK's is installed, AimAdapt imports its per-run stats files from your Ste
 
 The `aimadapt-cli` command line tool shows the same reports.
 
-Playing your own KovaaK's scenarios in the trainer is being built (Voltaic benchmarks first). So far AimAdapt can read `.sce` files. `aimadapt-cli sce` lists your local and Workshop scenarios, and for each one says whether the planned version will cover it or which features it uses beyond that. `aimadapt-cli sce "Novice S5"` lists only the matching ones. It only reads the files: nothing is changed or stored.
+Playing your own KovaaK's scenarios in the trainer is being built (Voltaic benchmarks first). Scenarios whose bots stand still, on KovaaK's newer JSON maps, already play: a KovaaK's scenario's page has **Play in AimAdapt**, which plays its `.sce` file on its own map with its bots, weapon and scoring (11 of the 34 Voltaic S5 Novice benchmarks so far). Those runs are kept apart from your KovaaK's runs. `aimadapt-cli sce` lists your local and Workshop scenarios and marks each one as playable now (`>>`), covered by the plan (`ok`) or using features beyond it, with the reasons. `aimadapt-cli sce "Novice S5"` lists only the matching ones. The trainer can also play a file directly: `aimadapt-engine --sce "<file>.sce"`. Your files are only read: nothing in them is changed.
 
 ## Data
 
 Everything is stored locally in `%APPDATA%\AimAdapt`:
 - `aimadapt.db`: SQLite.
 - `engine.toml`: settings profiles.
+- `list.json`: favorites and hidden items on the Scenarios page.
 - `scenarios\` and `workouts\`: your own files.
 
 Nothing is sent anywhere.
@@ -169,7 +170,7 @@ Needs Rust (stable, MSVC toolchain) and the Visual Studio C++ build tools.
 | Crate | Contents |
 |---|---|
 | `aimadapt-core` | KovaaK's parsing, SQLite storage, reports, Insights and program progress |
-| `aimadapt-sce` | Reads KovaaK's scenario files (`.sce`) and their maps, and lists the features each uses |
+| `aimadapt-sce` | Reads KovaaK's scenario files (`.sce`) and their maps, lists the features each uses, and converts the ones the trainer can play |
 | `aimadapt-sim` | Scenario format, field list, simulation, adaptive rating, workouts and programs. No graphics. |
 | `aimadapt-engine` | The Bevy trainer window and saving runs |
 | `aimadapt-app` | The Tauri desktop app. The UI is plain HTML/CSS/JS in `ui/`. |

@@ -404,5 +404,7 @@ if (tauri) {
     await load();
     await loadTrainer();
     if (typeof loadInsightsOverview === "function") loadInsightsOverview(true);
+    // Imported runs show on the KovaaK's scenario's page.
+    if (typeof ui.sceInfo !== "undefined") ui.sceInfo.clear();
   });
 }

@@ -9,6 +9,7 @@ license.workspace = true
 chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }
 aimadapt-core = { version = "0.1.0", path = "../aimadapt-core" }
 aimadapt-sim = { version = "0.1.0", path = "../aimadapt-sim" }
+aimadapt-sce = { version = "0.1.0", path = "../aimadapt-sce" }
 
 [dev-dependencies]
 tempfile = "3.27.0"

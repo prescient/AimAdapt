@@ -29,6 +29,7 @@ pub use game::{PlayOptions, PlayStep, run};
 /// - `--play <scenario id or .toml path> [--adaptive]`: one scenario.
 /// - `--workout <workout id or .toml path>`: every run of a workout in turn.
 /// - `--program <id> [--day mon…sun]`: a program day (today by default).
+/// - `--sce <file>`: a KovaaK's scenario file, on its own map (standard mode).
 ///
 /// Options: `--profile <name>` (default: the active settings profile), `--db <file>`, `--windowed`, `--no-save`, `--seed <n>`, and
 /// `--smoke <folder>`, which has a bot play short versions of the runs
@@ -53,6 +54,7 @@ pub fn run_from_args(args: &[String]) -> i32 {
 
 fn parse_and_run(args: &[String]) -> Result<(), String> {
     let mut id = None;
+    let mut sce_path: Option<PathBuf> = None;
     let mut workout_id = None;
     let mut program_id = None;
     let mut day_id = None;
@@ -69,6 +71,7 @@ fn parse_and_run(args: &[String]) -> Result<(), String> {
     while let Some(a) = it.next() {
         match a.as_str() {
             "--play" => id = it.next().cloned(),
+            "--sce" => sce_path = it.next().map(PathBuf::from),
             "--workout" => workout_id = it.next().cloned(),
             "--program" => program_id = it.next().cloned(),
             "--day" => day_id = it.next().cloned(),
@@ -110,6 +113,26 @@ fn parse_and_run(args: &[String]) -> Result<(), String> {
     };
     let mut program_day = None;
     let (mut steps, workout_name) = match (program_id, workout_id, id) {
+        // A KovaaK's scenario file, played on its own map (standard mode for now).
+        _ if sce_path.is_some() => {
+            let path = sce_path.as_deref().unwrap_or(std::path::Path::new(""));
+            if adaptive {
+                return Err("imported KovaaK's scenarios play in standard mode for now".into());
+            }
+            let imported = aimadapt_sce::import(path).map_err(|r| format!("can't play this yet: {}", r.join("; ")))?;
+            for n in &imported.notes {
+                eprintln!("aimadapt: note: {n}");
+            }
+            let step = PlayStep {
+                scenario: imported.scenario,
+                adaptive: false,
+                label: None,
+                rep: 1,
+                reps: 1,
+                block: workout::Block::None,
+            };
+            (vec![step], None)
+        }
         (Some(p), _, _) => {
             let prog = program::resolve(&p)?;
             let day = match day_id {
@@ -140,6 +163,10 @@ fn parse_and_run(args: &[String]) -> Result<(), String> {
     let db_handle = aimadapt_core::Db::open(&db_path).ok();
     let mut settings = load_settings(&data, db_handle.as_ref(), profile.as_deref())?;
     drop(db_handle);
+    // An imported scenario can keep the field of view within a range, as KovaaK's does.
+    if let Some([lo, hi]) = steps.first().and_then(|s| s.scenario.world.as_ref()).and_then(|w| w.fov_range) {
+        settings.fov = settings.fov.clamp(lo, hi);
+    }
     if windowed || smoke.is_some() {
         settings.display.mode = DisplayMode::Windowed;
         if smoke.is_some() {

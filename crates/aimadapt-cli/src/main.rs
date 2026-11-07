@@ -181,15 +181,24 @@ fn print_sce(filter: Option<&str>, from: &[PathBuf], summary_only: bool) -> Resu
                 if needle.as_ref().is_some_and(|n| !name.to_lowercase().contains(n)) {
                     continue;
                 }
-                rows.push((name, aimadapt_sce::gaps(&sce)));
+                let gaps = aimadapt_sce::gaps(&sce);
+                // Playable now: the trainer can run it (phase 2: still bots on JSON maps).
+                let plays = if gaps.is_empty() { aimadapt_sce::import(f).ok() } else { None };
+                rows.push((name, gaps, plays));
             }
             Err(e) => unreadable.push(format!("{}: {e}", f.display())),
         }
     }
-    rows.sort_by_key(|(n, _)| n.to_lowercase());
+    rows.sort_by_key(|(n, _, _)| n.to_lowercase());
     if !summary_only {
-        for (name, gaps) in &rows {
-            if gaps.is_empty() {
+        for (name, gaps, plays) in &rows {
+            if let Some(i) = plays {
+                println!("  >>  {name}");
+                println!("        {}", describe_import(&i.scenario));
+                for n in &i.notes {
+                    println!("        note: {n}");
+                }
+            } else if gaps.is_empty() {
                 println!("  ok  {name}");
             } else {
                 println!("  --  {name}");
@@ -200,14 +209,15 @@ fn print_sce(filter: Option<&str>, from: &[PathBuf], summary_only: bool) -> Resu
         }
         println!();
     }
-    let covered = rows.iter().filter(|(_, g)| g.is_empty()).count();
+    let covered = rows.iter().filter(|(_, g, _)| g.is_empty()).count();
+    let playable = rows.iter().filter(|(_, _, p)| p.is_some()).count();
     println!(
-        "{} scenarios: {covered} covered by the trainer's plan, {} use features it won't have yet",
+        "{} scenarios: {playable} play in the trainer now (>>), {covered} covered by the trainer's plan, {} use features it won't have yet",
         rows.len(),
         rows.len() - covered
     );
     let mut by_feature: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
-    for (_, gaps) in &rows {
+    for (_, gaps, _) in &rows {
         let mut seen: Vec<&str> = gaps.iter().map(|g| g.feature).collect();
         seen.dedup();
         for f in seen {
@@ -470,6 +480,34 @@ fn print_progress_list(p: &Progress, settings: &ProgressSettings, sort: SortBy, 
         }
         println!("  (Mixes in which scenarios you play when, so treat it as a rough signal.)");
     }
+}
+
+/// One line on an imported scenario: its bots, where they appear, and how it scores.
+fn describe_import(s: &aimadapt_sim::Scenario) -> String {
+    let t = &s.targets;
+    let Some(w) = &s.world else { return String::new() };
+    let dist: Vec<f32> = w.spawns.iter().map(|p| aimadapt_sim::Vec3::from_array(p.pos).length()).collect();
+    let (near, far) = dist.iter().fold((f32::MAX, 0.0f32), |(a, b), d| (a.min(*d), b.max(*d)));
+    let size = 2.0 * (t.radius / near.max(0.01)).atan().to_degrees();
+    format!(
+        "{} × {:?} r {:.2} m, {:.0} hp, {} spawn points {:.1}–{:.1} m away ({:.2}° wide at the nearest), offset {:?}–{:?}, apart {:.2} m; {:.0} shots/s {:?}; score {}/kill {}/hit × {:?}",
+        t.count,
+        t.shape,
+        t.radius,
+        t.health,
+        w.spawns.len(),
+        near,
+        far,
+        size,
+        w.offset_min,
+        w.offset_max,
+        w.blocked_radius,
+        s.weapon.fire_rate,
+        s.weapon.trigger,
+        s.scoring.per_kill,
+        s.scoring.per_hit,
+        w.accuracy_mult
+    )
 }
 
 fn print_scenario(p: &Progress, scenario: &str, settings: &ProgressSettings) {

@@ -142,7 +142,14 @@ pub fn to_run_file(info: &RunInfo) -> RunFile {
             info.finished_at.format("%Y-%m-%dT%H-%M-%S%.3f")
         ),
         scenario: history_name(s, adaptive.is_some()),
-        mode: if adaptive.is_some() { MODE_ADAPTIVE } else { MODE }.into(),
+        mode: if adaptive.is_some() {
+            MODE_ADAPTIVE
+        } else if s.world.is_some() {
+            aimadapt_core::db::MODE_IMPORTED
+        } else {
+            MODE
+        }
+        .into(),
         finished_at: info.finished_at,
         fields,
         kills,
@@ -392,6 +399,30 @@ mod tests {
         let mut harder = scenario.clone();
         harder.targets.radius = 0.2;
         assert_eq!(best_score(&db, &harder), None, "variants keep separate bests");
+    }
+
+    /// Imported KovaaK's scenarios keep their own history: a trainer run of
+    /// "VT 1w4ts Novice S5" must not join KovaaK's runs of that name in Progress
+    /// (its bests and benchmarks), while a built-in scenario's standard run does.
+    #[test]
+    fn imported_scenario_runs_stay_out_of_kovaaks_history() {
+        let builtin = Scenario { name: "Test Grid".into(), ..Default::default() };
+        let mut imported = Scenario { name: "Some KovaaK's Scenario".into(), ..Default::default() };
+        imported.world = Some(aimadapt_sim::world::World {
+            spawns: vec![aimadapt_sim::world::WorldSpawn { pos: [0.0, 0.0, -10.0], ..Default::default() }],
+            ..Default::default()
+        });
+        let settings = PlayerSettings::default();
+        let mut db = Db::open_in_memory().unwrap();
+        for (i, s) in [&builtin, &imported].into_iter().enumerate() {
+            let result = play(s, false, None);
+            let run = to_run_file(&info(s, &result, &settings, i as i64));
+            db.insert_runs(&[run], finished()).unwrap();
+        }
+        let p = aimadapt_core::progress::load(&db, &aimadapt_core::training::TimeSettings::default()).unwrap();
+        let names = p.scenarios();
+        assert!(names.contains(&"Test Grid".to_string()), "{names:?}");
+        assert!(!names.contains(&"Some KovaaK's Scenario".to_string()), "{names:?}");
     }
 
     /// Playtest: Stability Switch's rating fell to 4 deg/s under the old scoring

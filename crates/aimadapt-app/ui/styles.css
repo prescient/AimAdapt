@@ -333,3 +333,19 @@ svg text { font-family: var(--font); }
 .ws-day.missed .ws-cell { border-style: dashed; }
 .ws-day.is-today .ws-name { color: var(--rust-text); font-weight: 600; }
 .ws-day.is-today .ws-cell { border: 1.5px solid var(--rust); color: #ffe3d2; }
+
+/* Scenarios: the list's tabs, tag chips and favorites */
+.list-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-bottom: 1px solid var(--border); margin-top: -4px; }
+.list-tab { min-height: 40px; padding: 0 4px; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; background: transparent; color: var(--muted); font: 500 13px var(--font); cursor: pointer; }
+.list-tab:hover { color: #fff; }
+.list-tab.on { color: var(--text-strong); font-weight: 600; border-bottom-color: var(--rust); }
+.tag-chips { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.tag-chips .chip { min-height: 28px; padding: 0 10px; cursor: pointer; }
+.tag-chips .link-btn { min-height: 28px; font-size: 12px; margin-left: 4px; align-self: center; }
+.fav-mark { color: var(--gold); display: inline-flex; }
+.icon-btn { padding: 0 12px; }
+.icon-btn.on { color: var(--gold); border-color: #5a4a1c; }
+.list-row .play-btn { min-height: 34px; padding: 0 12px; font-size: 12px; }
+.link-btn.inline { min-height: 0; display: inline; font-size: inherit; text-decoration: underline; }
+.list-row a.main { display: block; }
+.sce-notes { margin: 6px 0 0; padding-left: 18px; }

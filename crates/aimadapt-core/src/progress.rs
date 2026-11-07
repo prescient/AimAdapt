@@ -341,10 +341,13 @@ pub fn load(db: &Db, time: &TimeSettings) -> Result<Progress, DbError> {
     }
     let timing: HashMap<i64, &training::RunTiming> = timings.iter().map(|t| (t.run_id, t)).collect();
 
-    let mut stmt = db.conn().prepare(
+    // Adaptive runs are rated, not scored; imported KovaaK's scenarios keep their
+    // own history, apart from KovaaK's runs of the same name.
+    let mut stmt = db.conn().prepare(&format!(
         "SELECT id, scenario, finished_at, score, accuracy, avg_ttk_s, sens_scale, horiz_sens, dpi, fov
-         FROM runs WHERE mode != 'RustyAim Adaptive' ORDER BY finished_at, id",
-    )?;
+         FROM runs WHERE mode NOT IN ('RustyAim Adaptive', '{}') ORDER BY finished_at, id",
+        crate::db::MODE_IMPORTED
+    ))?;
     let rows = stmt.query_map([], |r| {
         let finished: String = r.get(2)?;
         Ok((

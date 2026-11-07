@@ -16,6 +16,8 @@ const invoke = tauri
       if (cmd === "check_scenario") return [];
       if (cmd === "rescan") return d.snapshot.last_import;
       if (cmd === "replay") return d.replays?.[args.runId] ?? null;
+      if (cmd === "save_marks") return args.marks;
+      if (cmd === "sce_info") return d.sce_info?.[args.name] ?? { path: null, playable: false, reasons: [], notes: [], runs: 0, best: null, last_played: null };
       throw new Error("Only available in the app");
     };
 

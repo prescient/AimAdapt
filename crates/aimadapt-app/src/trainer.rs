@@ -18,6 +18,7 @@ use aimadapt_sim::{Scenario, library, spec};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
+use crate::marks::{self, Marks};
 use crate::{AppData, err};
 
 pub struct TrainerState {
@@ -84,6 +85,8 @@ pub struct Trainer {
     scenarios_dir: String,
     workouts_dir: String,
     playing: bool,
+    /// Favorites and hidden items on the Scenarios page.
+    marks: Marks,
 }
 
 #[tauri::command]
@@ -180,6 +183,7 @@ pub fn build_trainer(state: &AppData, t: &TrainerState) -> Result<Trainer, Strin
         scenarios_dir: t.scenarios_dir().display().to_string(),
         workouts_dir: t.workouts_dir().display().to_string(),
         playing: t.playing.load(Ordering::SeqCst),
+        marks: marks::load(&t.data_dir),
     })
 }
 
@@ -227,6 +231,12 @@ pub fn save_workout(
 #[tauri::command]
 pub fn delete_workout(t: State<'_, TrainerState>, id: String) -> Result<(), String> {
     workout::delete_user(&t.workouts_dir(), &id)
+}
+
+/// Saves the Scenarios page's favorites and hidden items, and returns them tidied.
+#[tauri::command]
+pub fn save_marks(t: State<'_, TrainerState>, marks: Marks) -> Result<Marks, String> {
+    marks::save(&t.data_dir, marks)
 }
 
 /// Saves every settings profile and which one is active.
@@ -277,6 +287,11 @@ pub(crate) fn play_args(id: &str, adaptive: bool) -> Vec<String> {
         a.push("--adaptive".into());
     }
     a
+}
+
+/// A KovaaK's scenario file, played on its own map.
+pub(crate) fn sce_args(path: &str) -> Vec<String> {
+    vec!["--sce".into(), path.into()]
 }
 
 pub(crate) fn workout_args(id: &str) -> Vec<String> {
@@ -334,6 +349,61 @@ pub fn play(
     // Check it loads first so a broken file shows an error here, not a silent exit.
     library::resolve(&id, &t.scenarios_dir())?;
     launch(app, &state, &t, &play_args(&id, adaptive))
+}
+
+/// A KovaaK's scenario's `.sce` file and whether the trainer can play it, with its
+/// runs in the trainer (kept apart from KovaaK's own runs).
+#[derive(Serialize)]
+pub struct SceInfo {
+    /// None when no file with the scenario's name is in the KovaaK's folders.
+    path: Option<String>,
+    playable: bool,
+    /// Why it can't be played yet, in plain words.
+    reasons: Vec<String>,
+    /// What plays differently from KovaaK's.
+    notes: Vec<String>,
+    runs: i64,
+    best: Option<f64>,
+    last_played: Option<String>,
+}
+
+/// The `.sce` file named after a scenario, among these files.
+pub(crate) fn sce_file_for(name: &str, files: &[PathBuf]) -> Option<PathBuf> {
+    let want = name.trim().to_lowercase();
+    files.iter().find(|f| f.file_stem().is_some_and(|s| s.to_string_lossy().trim().to_lowercase() == want)).cloned()
+}
+
+#[tauri::command]
+pub fn sce_info(state: State<'_, AppData>, name: String) -> Result<SceInfo, String> {
+    let files = aimadapt_sce::find_files(&aimadapt_core::discover::find_scenario_dirs());
+    let path = sce_file_for(&name, &files);
+    let (playable, reasons, notes) = match path.as_deref().map(aimadapt_sce::import) {
+        None => (false, Vec::new(), Vec::new()),
+        Some(Ok(i)) => (true, Vec::new(), i.notes),
+        Some(Err(r)) => (false, r, Vec::new()),
+    };
+    let db = state.db.lock().map_err(err)?;
+    let (runs, best, last_played) = db
+        .conn()
+        .query_row(
+            "SELECT COUNT(*), MAX(score), MAX(finished_at) FROM runs WHERE source = ?1 AND mode = ?2 AND scenario = ?3",
+            (SOURCE_ENGINE, aimadapt_core::db::MODE_IMPORTED, &name),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .map_err(err)?;
+    Ok(SceInfo { path: path.map(|p| p.display().to_string()), playable, reasons, notes, runs, best, last_played })
+}
+
+/// Starts the trainer on a KovaaK's scenario file.
+#[tauri::command]
+pub fn play_sce(
+    app: AppHandle,
+    state: State<'_, AppData>,
+    t: State<'_, TrainerState>,
+    path: String,
+) -> Result<(), String> {
+    aimadapt_sce::import(std::path::Path::new(&path)).map_err(|r| format!("Can't play this yet: {}", r.join("; ")))?;
+    launch(app, &state, &t, &sce_args(&path))
 }
 
 /// Starts the trainer on a workout.
@@ -440,4 +510,17 @@ pub fn play_program(
     aimadapt_sim::program::resolve(&id)?;
     let day = day.unwrap_or_else(|| aimadapt_engine::today().id().to_string());
     launch(app, &state, &t, &program_args(&id, &day))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_scenarios_file_is_found_by_its_name() {
+        let files = vec![PathBuf::from("C:/S/VT 1w4ts Novice S5.sce"), PathBuf::from("C:/S/vt ww5t novice s5.sce")];
+        assert_eq!(sce_file_for("VT 1w4ts Novice S5", &files), Some(files[0].clone()));
+        assert_eq!(sce_file_for("VT ww5t Novice S5", &files), Some(files[1].clone()));
+        assert_eq!(sce_file_for("VT 1w4ts Novice S5 Hard", &files), None);
+    }
 }

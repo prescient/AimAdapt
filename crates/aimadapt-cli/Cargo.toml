@@ -10,4 +10,5 @@ chrono = { version = "0.4.45", default-features = false, features = ["std", "clo
 clap = { version = "4.6.7", features = ["derive"] }
 notify = "8.2.1"
 aimadapt-core = { version = "0.1.0", path = "../aimadapt-core" }
+aimadapt-sim = { version = "0.1.0", path = "../aimadapt-sim" }
 aimadapt-sce = { version = "0.1.0", path = "../aimadapt-sce" }

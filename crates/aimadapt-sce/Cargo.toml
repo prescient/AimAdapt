@@ -6,6 +6,8 @@ version.workspace = true
 license.workspace = true
 
 [dependencies]
+aimadapt-sim = { version = "0.1.0", path = "../aimadapt-sim" }
+glam = "0.33"
 serde_json = "1.0.154"
 
 [dev-dependencies]

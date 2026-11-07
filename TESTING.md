@@ -85,13 +85,16 @@ These run the real pipeline (file → parse → SQLite → reports) on real Kova
 
 ### 2b. Scenario file tests (`crates/aimadapt-sce`)
 
-The `.sce` reader has 24 unit tests and 3 fixture tests:
+The `.sce` reader and converter have 29 unit tests and 6 fixture tests:
 - **Settings:** sections and the map split, a byte-order mark, keys in any case (last one wins), positional lists with empty slots, and `X= Y= Z=` vectors.
 - **Maps:** Reflex brushes and spawns (`teamA` and `TeamA`), faces that point at missing vertices, and JSON primitives, procedural triangles, spawn points and volumes, waypoints and props. Errors name the line or object.
 - **References:** bots through `.bot` and `.rot` (with weights), characters, dodge profiles and abilities, and each missing name listed once.
 - **Inventory:** what counts as covered by the plan and what's a gap.
+- **Converter:** Unreal axes and units to the sim's, team masks, colors, `Cube` brushes (100 units per scale step from a corner) and rotations. The Still Wall fixture imports with KovaaK's rules (spawn points, offsets, blocked radius, accuracy multiplier, FOV lock) and plays in the sim: three bots on the wall, and a hit then a miss scores 10 × √0.5. Files the trainer can't play yet return their reasons.
 
-The fixtures in `tests/fixtures/` are made up for the tests, one per map format. Unlike the stats fixtures they're never copies of real files, because a `.sce` file is someone's scenario design. Copy the quirk into a made-up file instead. They keep the quirks real files have: CRLF, a byte-order mark, comments, stray lines, extensions on references, cosmetic map objects.
+`aimadapt-sim` tests a world's spawning (weighted points, offsets along each point's own axes and in either order, as ww5t writes them, kept apart) and the accuracy multipliers. `aimadapt-engine` has a regression test that imported runs stay out of KovaaK's history (Progress and benchmarks) while built-in standard runs don't. The smoke test plays a file too: `aimadapt-engine --sce "<file>.sce" --smoke <folder> --db <file>`.
+
+The fixtures in `tests/fixtures/` are made up for the tests: one per map format, and Still Wall, which the trainer can play. Unlike the stats fixtures they're never copies of real files, because a `.sce` file is someone's scenario design. Copy the quirk into a made-up file instead. They keep the quirks real files have: CRLF, a byte-order mark, comments, stray lines, extensions on references, cosmetic map objects.
 
 Regression tests from the first run over 225 real files:
 - ability references carry a kind extension (`Approach.abilmov`);

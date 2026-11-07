@@ -22,6 +22,7 @@ use chrono::Local;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
+mod marks;
 mod trainer;
 
 pub(crate) struct AppData {
@@ -220,7 +221,7 @@ fn watch_stats(app: AppHandle, dir: PathBuf) {
 /// app launches the trainer must be listed here, or the launch opens a second app
 /// window instead of the game.
 fn is_trainer_launch(args: &[String]) -> bool {
-    args.iter().any(|a| matches!(a.as_str(), "--play" | "--workout" | "--program"))
+    args.iter().any(|a| matches!(a.as_str(), "--play" | "--workout" | "--program" | "--sce"))
 }
 
 /// Development options that must come with `--db`.
@@ -287,6 +288,7 @@ fn main() {
             trainer::save_scenario,
             trainer::delete_scenario,
             trainer::save_profiles,
+            trainer::save_marks,
             trainer::check_profiles,
             trainer::save_workout,
             trainer::delete_workout,
@@ -295,6 +297,8 @@ fn main() {
             trainer::replay,
             trainer::play,
             trainer::play_workout,
+            trainer::sce_info,
+            trainer::play_sce,
             trainer::program,
             trainer::play_program,
         ])
@@ -340,6 +344,7 @@ mod tests {
             trainer::play_args("builtin:timed-flicks", true),
             trainer::workout_args("builtin:quick-warmup"),
             trainer::program_args("builtin:core-week", "mon"),
+            trainer::sce_args("C:/Scenarios/VT 1w4ts Novice S5.sce"),
         ];
         for a in launches {
             let full: Vec<String> = std::iter::once("AimAdapt.exe".to_string()).chain(a.clone()).collect();

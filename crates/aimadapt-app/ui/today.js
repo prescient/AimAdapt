@@ -1,5 +1,6 @@
 // Today: the home page. Today's program workout with each drill's runs and rating,
-// the week at a glance, what you played last, and a couple of things worth knowing.
+// the week at a glance, your favorites and what you played last (each with Play),
+// and a couple of things worth knowing.
 // Loaded after program.js and scenarios.js and draws with their helpers.
 
 function today() {
@@ -24,7 +25,7 @@ function today() {
     ${trainerBanners()}
     <div class="row" style="align-items:flex-start">
       <div style="flex:3 1 520px;min-width:0;display:flex;flex-direction:column;gap:16px">${todayWorkout()}</div>
-      <div style="flex:2 1 300px;min-width:0;display:flex;flex-direction:column;gap:16px">${weekStrip()}${recentlyPlayed()}</div>
+      <div style="flex:2 1 300px;min-width:0;display:flex;flex-direction:column;gap:16px">${weekStrip()}${favoritesCard()}${recentlyPlayed()}</div>
     </div>
     ${worthKnowing()}
   </div>`;
@@ -36,7 +37,7 @@ function todayWorkout() {
   const playing = d.playing || ui.trainer.data.playing;
   if (!today.workout) {
     return `<section class="card today-card"><div class="eyebrow">${esc(d.name)} · ${esc(today.name)}</div><h2>Rest day</h2>
-      <div class="note-body">Next up: ${esc(next.name)}, ${esc(next.focus)}. If you want to play anyway, <a href="#scenarios">pick a scenario</a>.</div></section>`;
+      <div class="note-body">Next up: ${esc(next.name)}, ${esc(next.focus)}. If you want to play anyway, <button type="button" class="link-btn inline" data-action="list-tab-open" data-tab="browse">pick a scenario</button>.</div></section>`;
   }
   const done = stat?.status === "done";
   const started = stat && stat.done > 0;
@@ -46,7 +47,7 @@ function todayWorkout() {
     <div class="card-head" style="align-items:flex-start">
       <div><div class="eyebrow accent">${esc(d.name)} · ${esc(today.name)}</div><h2 class="detail-title">${esc(today.focus)}</h2>
         <div class="small muted">${today.workout.items.length} drills · ${today.runs} runs · about ${Math.round(today.minutes)} min</div></div>
-      <span class="chips"><a class="btn" href="#scenarios">Something else</a>
+      <span class="chips"><button class="btn" type="button" data-action="list-tab-open" data-tab="browse">Something else</button>
         <button class="btn primary" type="button" data-action="play-program" data-day="${today.day}" ${playing ? "disabled" : ""}>${playIcon}${done ? "Play again" : started ? "Continue" : "Start"}</button></span>
     </div>
     ${stat && stat.planned ? `<div class="day-progress"><div class="small muted"><span>${stat.done} of ${stat.planned} runs</span><span>${stat.minutes ? `${Math.round(stat.minutes)} min in` : ""}</span></div>
@@ -81,13 +82,35 @@ function weekStrip() {
   </section>`;
 }
 
+// A row that opens the item, with Play for what the trainer can play. KovaaK's
+// history has no Play: those runs happen in KovaaK's.
+function playRow(x, sub) {
+  const playing = ui.trainer.data.playing ? "disabled" : "";
+  const play = x.kind === "trainer"
+    ? `<button class="btn play-btn" type="button" data-action="play" data-id="${esc(x.key)}" data-adaptive="1" ${playing} aria-label="Play ${esc(x.name)}">${playIcon}Play</button>`
+    : x.kind === "workout"
+      ? `<button class="btn play-btn" type="button" data-action="play-workout" data-id="${esc(x.entry.id)}" ${playing} aria-label="Start ${esc(x.name)}">${playIcon}Start</button>`
+      : "";
+  return `<div class="list-row"><a class="main" href="${scenarioHref(x.key)}" style="color:inherit">
+      <div class="title">${esc(x.name)}</div><div class="sub">${esc(sub)}</div></a>
+    <div class="num">${esc(x.figure)}</div>${play}</div>`;
+}
+
+// Starred items, in the order they were starred.
+function favoritesCard() {
+  const order = marks().favorites;
+  const favs = scenarioItems().filter((x) => isFavorite(x.key) && !isHidden(x.key)).sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
+  if (!favs.length) return "";
+  return `<section class="card"><div class="card-head"><h2>Favorites</h2><button type="button" class="link-btn" data-action="list-tab-open" data-tab="browse">Browse</button></div>
+    <div>${favs.slice(0, 6).map((x) => playRow(x, [x.kind === "workout" ? "Workout" : x.skill || "KovaaK's", x.last ? dayLabel(x.last) : "Not played yet"].join(" · "))).join("")}</div>
+  </section>`;
+}
+
 function recentlyPlayed() {
-  const recent = scenarioItems().filter((x) => x.last).slice(0, 5);
+  const recent = scenarioItems().filter((x) => x.last && !isHidden(x.key)).slice(0, 5);
   if (!recent.length) return "";
-  return `<section class="card"><div class="card-head"><h2>Recently played</h2><a class="small" href="#scenarios">All scenarios</a></div>
-    <div>${recent.map((x) => `<a class="list-row" href="${scenarioHref(x.key)}" style="color:inherit">
-      <div class="main"><div class="title">${esc(x.name)}</div><div class="sub">${esc(dayLabel(x.last))}, ${esc(fmtTime(dt(x.last)))}${x.kind === "kovaaks" ? " · KovaaK's" : ""}</div></div>
-      <div class="num">${esc(x.figure)}</div></a>`).join("")}</div>
+  return `<section class="card"><div class="card-head"><h2>Recently played</h2><button type="button" class="link-btn" data-action="list-tab-open" data-tab="recent">All recent</button></div>
+    <div>${recent.map((x) => playRow(x, `${dayLabel(x.last)}, ${fmtTime(dt(x.last))}${x.kind === "kovaaks" ? " · KovaaK's" : ""}`)).join("")}</div>
   </section>`;
 }
 
@@ -95,10 +118,13 @@ function recentlyPlayed() {
 function worthKnowing() {
   const s = ui.program.data.progress.summary;
   const notes = [];
-  if (s.lagging) notes.push([`${SKILL_LABELS[s.lagging]} is furthest behind`, "Your smallest gain since you started. The program's weak-spots day leans on it.", "#progress/skills"]);
+  if (s.lagging) {
+    const skill = SKILL_LABELS[s.lagging];
+    notes.push([`${skill} is furthest behind`, `Your smallest gain since you started. The program's weak-spots day leans on it. <button type="button" class="link-btn inline" data-action="browse-skill" data-skill="${esc(skill)}">${esc(skill)} scenarios</button>`, "#progress/skills"]);
+  }
   const coach = ui.snap.training.runs.length ? coachNotes().filter((n) => n.title !== "Keep going") : [];
-  if (coach.length) notes.push([coach[0].title, coach[0].body, null]);
+  if (coach.length) notes.push([coach[0].title, esc(coach[0].body), null]);
   if (!notes.length) return "";
   return `<section class="card"><h2>Worth knowing</h2><div class="grid">${notes.slice(0, 2).map(([title, body, href]) => `<div class="note">
-    <div class="note-title">${href ? `<a href="${href}">${esc(title)}</a>` : esc(title)}</div><div class="note-body">${esc(body)}</div></div>`).join("")}</div></section>`;
+    <div class="note-title">${href ? `<a href="${href}">${esc(title)}</a>` : esc(title)}</div><div class="note-body">${body}</div></div>`).join("")}</div></section>`;
 }
