@@ -112,6 +112,7 @@ name = "aimadapt-cli"
 version = "0.1.0"
 dependencies = [
  "aimadapt-core",
+ "aimadapt-sce",
  "anyhow",
  "chrono",
  "clap",
@@ -138,6 +139,14 @@ dependencies = [
  "bevy",
  "chrono",
  "tempfile",
+]
+
+[[package]]
+name = "aimadapt-sce"
+version = "0.1.0"
+dependencies = [
+ "aimadapt-core",
+ "serde_json",
 ]
 
 [[package]]

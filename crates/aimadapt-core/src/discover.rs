@@ -54,6 +54,20 @@ pub fn find_stats_dir() -> Option<PathBuf> {
     steam_libraries().into_iter().map(|lib| stats_dir_in(&lib)).find(|p| p.is_dir())
 }
 
+/// Where a library keeps KovaaK's scenario files: your own (and downloaded) ones,
+/// and Steam Workshop subscriptions.
+pub fn scenario_dirs_in(library: &Path) -> [PathBuf; 2] {
+    [library.join(SCENARIOS_SUBDIR), library.join(WORKSHOP_SUBDIR)]
+}
+
+const SCENARIOS_SUBDIR: &str = r"steamapps\common\FPSAimTrainer\FPSAimTrainer\Saved\SaveGames\Scenarios";
+const WORKSHOP_SUBDIR: &str = r"steamapps\workshop\content\824270";
+
+/// Every KovaaK's scenario folder that exists, across all Steam libraries.
+pub fn find_scenario_dirs() -> Vec<PathBuf> {
+    steam_libraries().iter().flat_map(|lib| scenario_dirs_in(lib)).filter(|p| p.is_dir()).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

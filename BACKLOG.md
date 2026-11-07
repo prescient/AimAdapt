@@ -54,6 +54,7 @@ Last reviewed: Nov 4, 2026 (after the first playtest session).
   - **Switching:** speed, evasive, stability.
 
 ### To do
+- [ ] `todo` P2 Scenario and workout manager: one place to rename, edit, copy, delete (one or many) and hide or archive your scenarios and workouts, imported KovaaK's scenarios included. Create, edit and delete already work one at a time in the editor. Renaming needs care: history is stored by name, so a rename must carry the runs over (or scenarios get a stable id).
 - [ ] `todo` P3 Noise-based drift for control tracking (curve movement and acceleration already make smooth paths).
 - [ ] `todo` P3 Player movement (WASD strafing).
 - [ ] `todo` P3 Projectile weapons with travel time; spread and recoil.
@@ -107,7 +108,7 @@ Last reviewed: Nov 4, 2026 (after the first playtest session).
 ### To do
 - [ ] `todo` P1 Start Core Week from the real app window and play it by hand for a full week; fix whatever comes up.
 - [ ] `todo` P2 Pick the active program, and add more programs (e.g. a clicking-heavy or tracking-heavy week).
-- [ ] `todo` P2 Program editor.
+- [ ] `todo` P2 Program editor and weekly calendar: edit the plan in the app (each day's workout, drills, runs and blocks) and set your week (which days you train, which are rest days, which day is weak spots), instead of Core Week's fixed Mon–Sat. Goes with the scenario and workout manager (section 2).
 - [ ] `todo` P2 Weak-spots day from Insights detail, not just sub-skills: e.g. your weakest flick direction, distance band or tracking speed.
 - [ ] `todo` P3 Hide Core Week's day workouts from the general Workouts list, or group them under the program.
 
@@ -193,7 +194,22 @@ KovaaK's file locations, checked against a real install:
 | Active playlist | `Saved\SaveGames\PlaylistInProgress.json`, `PlaylistOrder.json` |
 | Local and workshop scenarios | `Saved\SaveGames\Scenarios\*.sce`, `steamapps\workshop\content\824270\<id>\` |
 
-## 9. Testing and releases
+## 9. KovaaK's scenarios in the trainer
+
+Play your own `.sce` files in AimAdapt, faithfully enough that scores compare with KovaaK's, then train them adaptively. Voltaic S5 benchmarks first. Imported runs are kept apart from KovaaK's runs of the same name (shown side by side, never merged into bests or benchmarks). Your files are only read; tests use made-up `.sce` files, never other people's scenarios.
+
+What a `.sce` holds (surveyed from 225 local and workshop files, Nov 2026): an INI-like settings part with repeated sections (`[Bot Profile]`, `[Character Profile]`, `[Dodge Profile]`, `[Weapon Profile]`, `[Bot Rotation Profile]`, ability profiles), then `[Map Data]`, which is either an older Reflex brush map (text) or a newer JSON map (boxes, procedural meshes, spawn points, waypoints). The 34 Voltaic S5 Novice files are hitscan only, with sphere or cylinder bots and JSON maps.
+
+### To do
+- [x] Phase 1, reader and inventory (`crates/aimadapt-sce`): settings, both map formats, and each scenario's player, weapon and bots resolved through `.bot`, `.rot` and ability references. `aimadapt-cli sce [name]` lists each file as covered by phases 2–3 or with the features it uses beyond them. On this machine: 118 of 225 files covered, including all 34 Voltaic S5 Novice benchmarks.
+- [ ] `todo` P1 Phase 2, world sim: map geometry, player and bot spawns (offsets, blocked radius), hitboxes (spheroid, cylinder, cuboid), hitscan fire rate, damage and radius, health and regen, FOV lock, and KovaaK's score formula. Static benchmarks become playable.
+- [ ] `todo` P1 Phase 3, bot movement: Unreal-style character movement (max speed, acceleration, friction, gravity, air control, terminal velocity, jumps, flight, jetpack, wall bounce), dodge and rotation profiles, and the bot abilities benchmarks use to move: melee knockback that pushes bots apart (Pasu, Controlsphere, Raw Control) and dashes (Ground). Tracking and evasive benchmarks become playable.
+- [ ] `spike` P1 Phase 4, fidelity check: play each benchmark in both trainers, compare scores and check by eye, and tune. KovaaK's records no target positions, so scores are the measure. Dodge behavior is inferred from its setting names, so expect tuning here.
+- [ ] `todo` P2 Phase 5, adaptive: a speed or time-scale multiplier as the knob, 1.0 being the original scenario.
+- [ ] `todo` P2 Phase 6, app: imported scenarios in the Scenarios list, "Play in AimAdapt" on a KovaaK's scenario's page, both histories side by side. Each import is a snapshot with a hash of its source, so history stays tied to one version.
+- [ ] `todo` P3 Projectile and explosive weapons, aim assist, recoil and spread, heads, third-person camera (used by other workshop scenarios, not the benchmarks).
+
+## 10. Testing and releases
 
 The plan is in [TESTING.md](TESTING.md).
 
@@ -212,7 +228,7 @@ The plan is in [TESTING.md](TESTING.md).
 - [ ] `todo` P3 Daylight-saving handling: cap run length and add fixtures that span a clock change.
 - [ ] `todo` P3 Ignored real-data test over the local stats folder; an import timing test with 10k files.
 
-## 10. Later
+## 11. Later
 
 - [ ] `todo` P3 Session notes (sleep, energy, hardware changes) linked to sessions.
 - [ ] `todo` P3 Export to CSV, and database backup and restore.

@@ -149,6 +149,8 @@ If KovaaK's is installed, AimAdapt imports its per-run stats files from your Ste
 
 The `aimadapt-cli` command line tool shows the same reports.
 
+Playing your own KovaaK's scenarios in the trainer is being built (Voltaic benchmarks first). So far AimAdapt can read `.sce` files. `aimadapt-cli sce` lists your local and Workshop scenarios, and for each one says whether the planned version will cover it or which features it uses beyond that. `aimadapt-cli sce "Novice S5"` lists only the matching ones. It only reads the files: nothing is changed or stored.
+
 ## Data
 
 Everything is stored locally in `%APPDATA%\AimAdapt`:
@@ -167,6 +169,7 @@ Needs Rust (stable, MSVC toolchain) and the Visual Studio C++ build tools.
 | Crate | Contents |
 |---|---|
 | `aimadapt-core` | KovaaK's parsing, SQLite storage, reports, Insights and program progress |
+| `aimadapt-sce` | Reads KovaaK's scenario files (`.sce`) and their maps, and lists the features each uses |
 | `aimadapt-sim` | Scenario format, field list, simulation, adaptive rating, workouts and programs. No graphics. |
 | `aimadapt-engine` | The Bevy trainer window and saving runs |
 | `aimadapt-app` | The Tauri desktop app. The UI is plain HTML/CSS/JS in `ui/`. |

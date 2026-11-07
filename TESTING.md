@@ -83,6 +83,23 @@ These run the real pipeline (file → parse → SQLite → reports) on real Kova
 - [ ] A different sensitivity scale (Valorant/CS), to confirm KovaaK's scale names for cm/360
 - [ ] A half-written or truncated file (see Known risks)
 
+### 2b. Scenario file tests (`crates/aimadapt-sce`)
+
+The `.sce` reader has 24 unit tests and 3 fixture tests:
+- **Settings:** sections and the map split, a byte-order mark, keys in any case (last one wins), positional lists with empty slots, and `X= Y= Z=` vectors.
+- **Maps:** Reflex brushes and spawns (`teamA` and `TeamA`), faces that point at missing vertices, and JSON primitives, procedural triangles, spawn points and volumes, waypoints and props. Errors name the line or object.
+- **References:** bots through `.bot` and `.rot` (with weights), characters, dodge profiles and abilities, and each missing name listed once.
+- **Inventory:** what counts as covered by the plan and what's a gap.
+
+The fixtures in `tests/fixtures/` are made up for the tests, one per map format. Unlike the stats fixtures they're never copies of real files, because a `.sce` file is someone's scenario design. Copy the quirk into a made-up file instead. They keep the quirks real files have: CRLF, a byte-order mark, comments, stray lines, extensions on references, cosmetic map objects.
+
+Regression tests from the first run over 225 real files:
+- ability references carry a kind extension (`Approach.abilmov`);
+- Reflex `Target` entities are only the end-of-game camera's look-at point;
+- some Workshop files sit in a binary container (magic number, version, length, text, trailer).
+
+**Real-data check:** `cargo test -p aimadapt-sce -- --ignored` reads every `.sce` file in your KovaaK's and Workshop folders and fails on any map that doesn't parse or file without a name. `aimadapt-cli sce --summary` gives the inventory totals.
+
 ### 3. Golden snapshot tests (planned)
 
 Serialize the reports (`TrainingReport`, `ScenarioStats` and the rest) for the fixture set to JSON and compare them with a saved copy, using the `insta` crate. Any change to a metric then shows up as a diff to accept or reject. This catches "I changed the trend window and the dashboard numbers moved" without writing an assertion for every field.

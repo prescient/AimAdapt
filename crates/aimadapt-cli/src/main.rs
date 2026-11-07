@@ -70,6 +70,19 @@ enum Command {
     Sens,
     /// List files that couldn't be imported
     Errors,
+    /// Read KovaaK's scenario files (.sce) and list which features each uses that the
+    /// trainer can't play yet. Only reads them; nothing is changed or stored.
+    Sce {
+        /// Only scenarios whose name contains this (any case), e.g. "Novice S5"
+        filter: Option<String>,
+        /// Folders or .sce files to read. Defaults to your KovaaK's scenario and
+        /// Workshop folders in every Steam library.
+        #[arg(long = "from")]
+        from: Vec<PathBuf>,
+        /// Only print the totals and the features most often missing
+        #[arg(long)]
+        summary: bool,
+    },
 }
 
 #[derive(Clone, Copy, clap::ValueEnum)]
@@ -82,6 +95,10 @@ enum SortBy {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    // Reading scenario files needs no database.
+    if let Command::Sce { filter, from, summary } = &cli.command {
+        return print_sce(filter.as_deref(), from, *summary);
+    }
     let db_path = match cli.db {
         Some(p) => p,
         None => aimadapt_core::db::default_path().context("finding the default database location; pass --db")?,
@@ -117,6 +134,7 @@ fn main() -> Result<()> {
             }
         }
         Command::Sens => print_sens(&progress::load(&db, &TimeSettings::default())?),
+        Command::Sce { .. } => unreachable!("handled before the database is opened"),
         Command::Errors => {
             let errors = db.import_errors()?;
             if errors.is_empty() {
@@ -138,6 +156,73 @@ fn stats_dir(given: Option<PathBuf>) -> Result<PathBuf> {
         return Ok(dir);
     }
     discover::find_stats_dir().context("couldn't find the KovaaK's stats folder in your Steam libraries; pass --stats")
+}
+
+fn print_sce(filter: Option<&str>, from: &[PathBuf], summary_only: bool) -> Result<()> {
+    let dirs = if from.is_empty() { discover::find_scenario_dirs() } else { from.to_vec() };
+    if dirs.is_empty() {
+        bail!("couldn't find KovaaK's scenario folders in your Steam libraries; pass --from");
+    }
+    let files: Vec<PathBuf> = dirs
+        .iter()
+        .flat_map(|d| if d.is_file() { vec![d.clone()] } else { aimadapt_sce::find_files(std::slice::from_ref(d)) })
+        .collect();
+    let needle = filter.map(str::to_lowercase);
+    let mut rows = Vec::new();
+    let mut unreadable = Vec::new();
+    for f in &files {
+        match aimadapt_sce::Sce::read(f) {
+            Ok(sce) => {
+                let name = if sce.name().is_empty() {
+                    f.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()
+                } else {
+                    sce.name().to_string()
+                };
+                if needle.as_ref().is_some_and(|n| !name.to_lowercase().contains(n)) {
+                    continue;
+                }
+                rows.push((name, aimadapt_sce::gaps(&sce)));
+            }
+            Err(e) => unreadable.push(format!("{}: {e}", f.display())),
+        }
+    }
+    rows.sort_by_key(|(n, _)| n.to_lowercase());
+    if !summary_only {
+        for (name, gaps) in &rows {
+            if gaps.is_empty() {
+                println!("  ok  {name}");
+            } else {
+                println!("  --  {name}");
+                for g in gaps {
+                    println!("        {}: {}", g.feature, g.detail);
+                }
+            }
+        }
+        println!();
+    }
+    let covered = rows.iter().filter(|(_, g)| g.is_empty()).count();
+    println!(
+        "{} scenarios: {covered} covered by the trainer's plan, {} use features it won't have yet",
+        rows.len(),
+        rows.len() - covered
+    );
+    let mut by_feature: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    for (_, gaps) in &rows {
+        let mut seen: Vec<&str> = gaps.iter().map(|g| g.feature).collect();
+        seen.dedup();
+        for f in seen {
+            *by_feature.entry(f).or_default() += 1;
+        }
+    }
+    let mut by_feature: Vec<_> = by_feature.into_iter().collect();
+    by_feature.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+    for (f, n) in by_feature {
+        println!("  {n:>4}  {f}");
+    }
+    for u in &unreadable {
+        println!("  ! {u}");
+    }
+    Ok(())
 }
 
 fn print_report(r: &ImportReport) {

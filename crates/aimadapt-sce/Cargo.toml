@@ -1,0 +1,12 @@
+[package]
+name = "aimadapt-sce"
+description = "Reads KovaaK's scenario files (.sce) and their maps"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+serde_json = "1.0.154"
+
+[dev-dependencies]
+aimadapt-core = { version = "0.1.0", path = "../aimadapt-core" }
