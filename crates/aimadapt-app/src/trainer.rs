@@ -394,6 +394,60 @@ pub fn sce_info(state: State<'_, AppData>, name: String) -> Result<SceInfo, Stri
     Ok(SceInfo { path: path.map(|p| p.display().to_string()), playable, reasons, notes, runs, best, last_played })
 }
 
+/// One of your KovaaK's scenario files, for Browse on Scenarios.
+#[derive(Debug, Serialize)]
+pub struct SceEntry {
+    /// The file's name without `.sce`: KovaaK's stats use it, so history matches.
+    name: String,
+    path: String,
+    /// `AimTypeTag`: Clicking, Tracking, Target Switching or Other; "" when unset.
+    aim_type: String,
+    description: String,
+    /// The file's game and weapon tags, lowercase.
+    tags: Vec<String>,
+    playable: bool,
+}
+
+/// Every KovaaK's scenario in your KovaaK's and Workshop folders, with whether the
+/// trainer can play it. Reading a few hundred files takes a second or two, so it
+/// runs off the main thread.
+#[tauri::command(async)]
+pub fn sce_library() -> Vec<SceEntry> {
+    sce_entries(&aimadapt_sce::find_files(&aimadapt_core::discover::find_scenario_dirs()))
+}
+
+/// One entry per name (the first file wins, as in [`sce_file_for`]), skipping files
+/// that can't be read. Files are only read.
+pub(crate) fn sce_entries(files: &[PathBuf]) -> Vec<SceEntry> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for path in files {
+        let Some(name) = path.file_stem().map(|s| s.to_string_lossy().trim().to_string()) else { continue };
+        if name.is_empty() || !seen.insert(name.to_lowercase()) {
+            continue;
+        }
+        let Ok(sce) = aimadapt_sce::Sce::read(path) else { continue };
+        let top = &sce.settings.top;
+        let mut tags: Vec<String> = Vec::new();
+        for key in ["GameTag", "WeaponHeroTag"] {
+            for t in top.str(key).split(',').map(|t| t.trim().to_lowercase()).filter(|t| !t.is_empty()) {
+                if !tags.contains(&t) {
+                    tags.push(t);
+                }
+            }
+        }
+        out.push(SceEntry {
+            name,
+            path: path.display().to_string(),
+            aim_type: top.str("AimTypeTag").trim().to_string(),
+            description: top.str("Description").replace("[nl]", " ").trim().to_string(),
+            tags,
+            playable: aimadapt_sce::import(path).is_ok(),
+        });
+    }
+    out
+}
+
 /// Starts the trainer on a KovaaK's scenario file.
 #[tauri::command]
 pub fn play_sce(
@@ -515,6 +569,23 @@ pub fn play_program(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn kovaaks_files_are_listed_once_each_with_whether_they_play() {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../aimadapt-sce/tests/fixtures");
+        let mut files = aimadapt_sce::find_files(std::slice::from_ref(&dir));
+        assert_eq!(files.len(), 3, "{files:?}");
+        // The same scenario in a second folder (the Workshop, say) is listed once.
+        files.push(files[0].clone());
+        let list = sce_entries(&files);
+        assert_eq!(list.len(), 3);
+        let wall = list.iter().find(|e| e.name == "AimAdapt Test - Still Wall").expect("the still-wall fixture");
+        assert!(wall.playable);
+        assert_eq!(wall.aim_type, "Clicking");
+        // [nl] is a line break in KovaaK's descriptions.
+        assert!(wall.description.contains("tests. Three"), "{}", wall.description);
+        assert!(list.iter().any(|e| !e.playable), "the moving-bot fixture can't play yet");
+    }
 
     #[test]
     fn a_scenarios_file_is_found_by_its_name() {

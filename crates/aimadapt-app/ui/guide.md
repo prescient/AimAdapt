@@ -27,18 +27,20 @@ Today is the home page: what to play now and how the week is going.
 
 ## Scenarios {#scenarios}
 
-Scenarios has the list on the left and the selected scenario or workout on the right. The list has four tabs:
+Scenarios has four lists, each a tab across the page: **Recent**, **Browse**, **Workouts** and **Yours**. Each scenario and workout opens on its own page; **Scenarios ·** and the list's name, at the top of that page, take you back to the list where you left it. The Scenarios link in the sidebar opens the list you were last on.
 
-- **Recent:** everything you've played, in the trainer or in KovaaK's, newest first and grouped by day (Today, Yesterday, then weekdays and dates). Filter by **Trainer** (AimAdapt or KovaaK's). Rows marked "KovaaK's history" are scenarios you played in KovaaK's: their page shows your scores, but you play them in KovaaK's.
-- **Browse:** every scenario you can play in the trainer, played or not, grouped by skill. Filter by **Skill**, or pick tags (for example *tracking* and *smooth*) to show only scenarios that have all of them. **More** shows the rest of the tags. **Sort** lists them by skill, by name, most played first, or longest since you played them (scenarios you've never played come first).
-- **Workouts:** the built-in workouts and yours, most recently played first. The program's own days are on Today and Progress.
+- **Recent:** everything you've played, in the trainer or in KovaaK's, newest first and grouped by day (Today, Yesterday, then weekdays and dates). Filter by **Type** (AimAdapt, KovaaK's or Workouts) and **Skill**. KovaaK's rows are scenarios you played in KovaaK's: their page shows your scores, but you play them in KovaaK's.
+- **Browse:** every scenario, played or not, grouped by skill: the trainer's, and your KovaaK's scenarios (every `.sce` file in your KovaaK's and Workshop folders, plus any you've played in KovaaK's). A KovaaK's scenario's skill is its aim type (Clicking, Tracking or Target switching) and its tags are the game and weapon tags in its file. Filter by **Type** (AimAdapt, KovaaK's, or KovaaK's that play here: the ones AimAdapt's trainer can play), **Skill**, **Played** (played or not played yet), or pick tags (for example *tracking* and *smooth*) to show only scenarios that have all of them. Each tag shows how many scenarios have it; **N more** shows the rest of the tags.
+- **Workouts:** the built-in workouts and yours, with how many scenarios and runs each has and about how long it takes. Filter by **Made by** (built-in or you). The program's own days are on Today and Progress.
 - **Yours:** the scenarios and workouts you made or copied with Copy & edit.
 
-Each row shows the skill, when you played it and your current figure: the 85% rating, a best score, or a workout's run count. Search by name works on every tab. **Clear filters** shows the whole tab again. Switching tabs keeps the open scenario open, and the list stays where you scrolled it while you pick scenarios.
+**Searching and sorting:** the search on each tab finds every word you type in a name, skill, tag or description, so *wide flick* finds Wide Flicks and anything tagged both. Click a column heading to sort by it, and again to reverse it. Sorting by Skill, Type, Made by, Rating or Last played puts a heading over each group. Ratings only compare within one kind (kill pace, speed, tracking speed or size), so Rating sorts by kind, then best first. Lists show 100 rows at a time: **Show more** or **Show all** at the bottom shows the rest. Each tab keeps its own search, filters and sort while the app is open. **Clear filters** shows the whole tab again.
 
-**Favorites and hiding:** the star at the top of any scenario's or workout's page adds it to your favorites. Favorites come first on Browse, Workouts and Yours, have a star on Recent, and show on Today. **Hide** keeps something off the lists, for example an old KovaaK's scenario you don't play any more. Its runs aren't deleted. The **hidden** link under the list shows what you've hidden, and **Show again** brings one back.
+Each row has the scenario's skill and tags, your 85% rating, your best standard score (or KovaaK's score), how many runs you've played, when you last played it, and **Play** (an adaptive run) or **Start** for a workout. A KovaaK's row marked *plays here* has **Play**, which plays its file in AimAdapt's trainer (see [Playing KovaaK's scenarios](#help/kovaaks-play)); other KovaaK's scenarios you play in KovaaK's. Reading your KovaaK's files takes a moment the first time Scenarios opens; the count line says so while it does.
 
-**Playing:** pick a scenario and use **Play adaptive** or **Standard** at the top of its page; **Copy & edit** (or **Edit** for your own) opens the [scenario editor](#help/edit). A workout's page lists its runs, with **Start** and **Copy & edit** (see [Workouts](#help/workout)). **New workout** and **New scenario** start empty ones. **Playing with** shows the settings profile the trainer will use; it opens Settings.
+**Favorites and hiding:** the star on a row, or at the top of a scenario's or workout's page, adds it to your favorites. **Favorites** next to the search shows only your favorites, and they show on Today. **Hide**, on an item's page, keeps something off the lists, for example an old KovaaK's scenario you don't play any more. Its runs aren't deleted. Once you've hidden something, a **Hidden** tab lists it, and **Show again** brings it back.
+
+**Playing:** **Play** on a row starts an adaptive run. On a scenario's page, use **Play adaptive** or **Standard** at the top; **Copy & edit** (or **Edit** for your own) opens the [scenario editor](#help/edit). A workout's page lists its runs, with **Start** and **Copy & edit** (see [Workouts](#help/workout)). **New workout** and **New scenario** start empty ones. **Playing with** shows the settings profile the trainer will use; it opens Settings.
 
 While the trainer is open, the page says so and the start buttons are disabled. Each run is saved when its timer ends, so quitting partway through a workout keeps the runs you finished.
 
@@ -199,7 +201,7 @@ Built-in workouts:
 - **Tracking Focus:** reactive strafes, smooth tracking and switching.
 - **Core Week: Monday** to **Core Week: Friday:** the program's days. They're played from Today and Progress › Skills, so they aren't in the Scenarios list.
 
-Workouts are in the Scenarios list with the scenarios, by when you last played them.
+Workouts have their own tab on Scenarios, and show on Recent once you've played them.
 
 **Editing a workout:** add scenarios, set runs and mode for each, and reorder them with the arrows. **Save & start** saves it and plays it straight away. Built-ins are copied before editing, so the originals stay as they are. **Cancel** goes back to the workout's page.
 
@@ -233,7 +235,7 @@ AimAdapt is learning to play your own KovaaK's scenarios (`.sce` files) in its t
 
 **What plays so far:** scenarios whose bots stand still, on KovaaK's newer (JSON) maps. That includes 11 of the 34 Voltaic S5 Novice benchmarks: the five 1w4ts and five ww5t scenarios, and DotTS. Moving bots, the older Reflex maps, projectiles, heads and the rest come later.
 
-**Playing one:** open a KovaaK's scenario on Scenarios (on Recent, or by searching). If AimAdapt can play it, its page has a **Play in AimAdapt** card with **Play**. If the file is there but uses something AimAdapt can't play yet, the page says what. Imported scenarios play in standard mode on the scenario's own map, with its bots, weapon, time limit and scoring, including the accuracy multiplier (some scenarios multiply the score by your accuracy or its square root). If the scenario locks the field of view to a range, your FOV is kept inside it for that run.
+**Playing one:** on Scenarios › Browse, pick **Type › KovaaK's that play here** and press **Play** on a row, or open a KovaaK's scenario. If AimAdapt can play it, its page has a **Play in AimAdapt** card with **Play**. If the file is there but uses something AimAdapt can't play yet, the page says what. Imported scenarios play in standard mode on the scenario's own map, with its bots, weapon, time limit and scoring, including the accuracy multiplier (some scenarios multiply the score by your accuracy or its square root). If the scenario locks the field of view to a range, your FOV is kept inside it for that run.
 
 **Your runs:** runs played in AimAdapt are kept apart from your KovaaK's runs of the same scenario. They don't change your KovaaK's bests, trends or benchmark ranks. The card shows how many you've played in AimAdapt and your best.
 
@@ -308,6 +310,8 @@ Nothing is sent anywhere. Deleting one of your scenarios or workouts removes the
 ## What's new {#whats-new}
 
 **November 2026**
+- Browse lists your KovaaK's scenarios too, played or not, with **Play** on the ones AimAdapt's trainer can play.
+- Scenarios' lists use the whole page: a table on each tab you can sort by any column, with a search that also finds skills, tags and descriptions, more filters (played or not, made by, favorites only), and a heading for each group. Each scenario and workout opens on its own page, and its back link returns to the list where you left it.
 - Play some KovaaK's scenarios in AimAdapt: scenarios with still bots on newer maps, including 11 Voltaic S5 Novice benchmarks. Their page on Scenarios has **Play in AimAdapt**, and those runs are kept apart from your KovaaK's runs.
 - Scenarios has four tabs: **Recent**, **Browse** (every scenario you can play, by skill, with tag chips and a sort), **Workouts** and **Yours**. Star favorites, and hide what you don't want on the lists.
 - Today shows your favorites, and its recently played list has Play buttons. The skill furthest behind links to its scenarios.

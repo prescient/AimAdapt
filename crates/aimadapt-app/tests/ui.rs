@@ -60,15 +60,22 @@ fn chart_ticks_are_formatted_from_their_exact_value() {
 
 /// Bug: with no scenario in the address, Scenarios showed the list's first item,
 /// so switching tabs or starring changed which scenario was open, and Favorite or
-/// Hide could act on a different one. The first item opens by its own address.
+/// Hide could act on a different one. Now the lists and each item have their own
+/// addresses (#scenarios/browse, #scenarios/builtin:static-grid), an item's page
+/// shows only the item its address names, and every Favorite and Hide button names
+/// its item.
 #[test]
-fn scenarios_opens_the_first_item_by_its_address() {
+fn favorite_and_hide_act_on_the_item_they_name() {
     let scenarios = include_str!("../ui/scenarios.js");
-    assert!(
-        scenarios.contains("if (!arg && item) {") && scenarios.contains("location.replace(scenarioHref(item.key));"),
-        "scenariosPage should location.replace to the first item's address"
-    );
-    // Favorite and Hide name the item they act on.
+    assert!(scenarios.contains("return itemPage(all.find((x) => x.key === arg) ?? null, all);"));
+    // With no address, Scenarios goes to a list, never to an item.
+    assert!(scenarios.contains("location.replace(`#scenarios/${defaultTab(all)}`);"));
+    // Item keys have a colon (builtin:, user:, workout:, kovaaks:); list names don't.
+    let tabs = scenarios.split("const LIST_TABS = [").nth(1).and_then(|s| s.split(';').next()).expect("LIST_TABS");
+    assert!(tabs.contains("[\"browse\", \"Browse\"]") && !tabs.contains(':'), "{tabs}");
+    // On the item's page and on each list row.
     assert!(scenarios.contains("data-action=\"favorite\" data-key=\"${esc(key)}\""));
     assert!(scenarios.contains("data-action=\"hide\" data-key=\"${esc(key)}\""));
+    assert!(scenarios.contains("data-action=\"favorite\" data-key=\"${esc(x.key)}\""));
+    assert!(scenarios.contains("data-action=\"hide\" data-key=\"${esc(x.key)}\""));
 }

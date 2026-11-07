@@ -90,7 +90,7 @@ Saturday's drills are chosen from your weakest sub-skills.
 Four pages, in the sidebar:
 
 - **Today:** today's program workout with each drill's runs and 85% rating, and Start, Continue or Play again. Also the week at a glance, your favorites and what you played last (each with Play), and a couple of things worth knowing.
-- **Scenarios:** everything you can play or have played (the trainer's scenarios, your workouts and your KovaaK's scenarios) in four tabs: Recent (newest first, grouped by day), Browse (every playable scenario by skill, with tag chips and a sort), Workouts and Yours. Star favorites and hide what you don't want listed. The selected one fills the rest of the page as one scrolling page: Play adaptive and Standard at the top, then its key figures, rating chart, what to work on, Insights and runs with replays.
+- **Scenarios:** everything you can play or have played (the trainer's scenarios, your workouts and your KovaaK's scenarios) in four tabs across the page: Recent (newest first, by day), Browse (every scenario, the trainer's and your KovaaK's files, by skill, with tag chips), Workouts and Yours. Each is a table you can sort by any column, with a search over names, skills, tags and descriptions and filters for skill, type, played or not, and favorites. Star favorites and hide what you don't want listed. Each scenario and workout has its own page: Play adaptive and Standard at the top, then its key figures, rating chart, what to work on, Insights and runs with replays.
 - **Progress:** three tabs.
   - **Skills:** the skill profile (the change in each of the nine sub-skills, each group and overall, measured from the end of your first day on each drill), the week (each day done, partial or missed, its minutes and its main drills against the same day last week, with Play to make up a missed day), and reps and carry-over (rep 1 against the last rep of each drill, and how much of the previous session's rating carried over).
   - **Benchmarks:** your Voltaic Season 5 bests.
@@ -141,7 +141,7 @@ Each run can also be **replayed** from your own view at any speed, with the targ
 
 ## KovaaK's import
 
-If KovaaK's is installed, AimAdapt imports its per-run stats files from your Steam libraries, and keeps importing new ones while it's open. KovaaK's scenarios are in the Scenarios list with the trainer's, and Progress counts their runs too:
+If KovaaK's is installed, AimAdapt imports its per-run stats files from your Steam libraries, and keeps importing new ones while it's open. KovaaK's scenarios are on Scenarios' Recent tab with the trainer's, and Progress counts their runs too:
 - Personal bests, trends and plateaus, on each scenario's page.
 - Sessions, active time, streaks and a daily goal, on Today and Progress › Time.
 - Voltaic Season 5 bests, on Progress › Benchmarks.
@@ -149,7 +149,7 @@ If KovaaK's is installed, AimAdapt imports its per-run stats files from your Ste
 
 The `aimadapt-cli` command line tool shows the same reports.
 
-Playing your own KovaaK's scenarios in the trainer is being built (Voltaic benchmarks first). Scenarios whose bots stand still, on KovaaK's newer JSON maps, already play: a KovaaK's scenario's page has **Play in AimAdapt**, which plays its `.sce` file on its own map with its bots, weapon and scoring (11 of the 34 Voltaic S5 Novice benchmarks so far). Those runs are kept apart from your KovaaK's runs. `aimadapt-cli sce` lists your local and Workshop scenarios and marks each one as playable now (`>>`), covered by the plan (`ok`) or using features beyond it, with the reasons. `aimadapt-cli sce "Novice S5"` lists only the matching ones. The trainer can also play a file directly: `aimadapt-engine --sce "<file>.sce"`. Your files are only read: nothing in them is changed.
+Playing your own KovaaK's scenarios in the trainer is being built (Voltaic benchmarks first). Scenarios whose bots stand still, on KovaaK's newer JSON maps, already play: Scenarios › Browse lists every KovaaK's scenario in your folders, and a playable one has **Play** on its row and **Play in AimAdapt** on its page, which plays its `.sce` file on its own map with its bots, weapon and scoring (11 of the 34 Voltaic S5 Novice benchmarks so far). Those runs are kept apart from your KovaaK's runs. `aimadapt-cli sce` lists your local and Workshop scenarios and marks each one as playable now (`>>`), covered by the plan (`ok`) or using features beyond it, with the reasons. `aimadapt-cli sce "Novice S5"` lists only the matching ones. The trainer can also play a file directly: `aimadapt-engine --sce "<file>.sce"`. Your files are only read: nothing in them is changed.
 
 ## Data
 

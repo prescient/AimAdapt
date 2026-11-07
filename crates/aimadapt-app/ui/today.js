@@ -82,15 +82,9 @@ function weekStrip() {
   </section>`;
 }
 
-// A row that opens the item, with Play for what the trainer can play. KovaaK's
-// history has no Play: those runs happen in KovaaK's.
+// A row that opens the item, with Play or Start (playButton, on Scenarios).
 function playRow(x, sub) {
-  const playing = ui.trainer.data.playing ? "disabled" : "";
-  const play = x.kind === "trainer"
-    ? `<button class="btn play-btn" type="button" data-action="play" data-id="${esc(x.key)}" data-adaptive="1" ${playing} aria-label="Play ${esc(x.name)}">${playIcon}Play</button>`
-    : x.kind === "workout"
-      ? `<button class="btn play-btn" type="button" data-action="play-workout" data-id="${esc(x.entry.id)}" ${playing} aria-label="Start ${esc(x.name)}">${playIcon}Start</button>`
-      : "";
+  const play = playButton(x);
   return `<div class="list-row"><a class="main" href="${scenarioHref(x.key)}" style="color:inherit">
       <div class="title">${esc(x.name)}</div><div class="sub">${esc(sub)}</div></a>
     <div class="num">${esc(x.figure)}</div>${play}</div>`;

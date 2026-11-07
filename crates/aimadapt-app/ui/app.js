@@ -17,6 +17,7 @@ const invoke = tauri
       if (cmd === "rescan") return d.snapshot.last_import;
       if (cmd === "replay") return d.replays?.[args.runId] ?? null;
       if (cmd === "save_marks") return args.marks;
+      if (cmd === "sce_library") return d.sce_library ?? [];
       if (cmd === "sce_info") return d.sce_info?.[args.name] ?? { path: null, playable: false, reasons: [], notes: [], runs: 0, best: null, last_played: null };
       throw new Error("Only available in the app");
     };
@@ -155,7 +156,6 @@ function render() {
   if (!ui.snap) return;
   const views = { today, scenarios: scenariosPage, edit, workout, progress: progressPage, settings: settingsPage, help: helpPage, replay: replayPage };
   main.innerHTML = (views[view] || today)(arg);
-  if (view === "scenarios") afterScenarios();
   if (view === "replay") afterReplay();
 }
 
@@ -628,6 +628,7 @@ window.addEventListener("hashchange", () => {
   render();
   window.scrollTo(0, 0);
   if (route().view === "help") scrollToHelp();
+  if (route().view === "scenarios") restoreListScroll();
 });
 
 if (tauri) tauri.event.listen("runs-imported", () => load());

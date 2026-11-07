@@ -1,19 +1,28 @@
 // Scenarios: everything you can play or have played (the trainer's scenarios, your
-// workouts and your KovaaK's scenarios) in four tabs (Recent, Browse, Workouts,
-// Yours, plus Hidden), beside the selected one. The selection is one scrolling page:
-// Play at the top, then key figures, the rating chart, what to work on, Insights
-// and the runs. Favorites and hidden items are saved with `save_marks`.
+// workouts and your KovaaK's scenarios).
 //
-// Loaded after app.js, trainer.js, insights.js and program.js; it draws with their
-// helpers and data (ui.trainer.data, ui.insights, ui.snap).
-
-// tab is null until the page first draws: Recent if you've played anything, else Browse.
-ui.list = { tab: null, query: "", skill: "", tags: [], source: "", sort: "skill", moreTags: false, scroll: 0 };
+// - #scenarios/<tab> is a list across the whole page, one tab each for Recent,
+//   Browse, Workouts and Yours (plus Hidden): a search, the tab's filters, and a
+//   table you can sort by any column, a hundred rows at a time.
+// - #scenarios/<key> is one item's own page: Play at the top, then key figures, the
+//   rating chart, what to work on, Insights and the runs.
+//
+// Favorites and hidden items are saved with `save_marks`. Loaded after app.js,
+// trainer.js, insights.js and program.js; it draws with their helpers and data
+// (ui.trainer.data, ui.insights, ui.snap).
 
 const LIST_TABS = [["recent", "Recent"], ["browse", "Browse"], ["workouts", "Workouts"], ["yours", "Yours"]];
-const LIST_SORTS = [["skill", "By skill"], ["name", "By name"], ["most", "Most played"], ["stale", "Longest since played"]];
-// Tags shown before "More tags".
-const TAGS_SHOWN = 8;
+const TAB_LABELS = Object.fromEntries([...LIST_TABS, ["hidden", "Hidden"]]);
+const isListTab = (arg) => Object.hasOwn(TAB_LABELS, arg ?? "");
+// Rows shown before "Show more", and tags before "N more".
+const PAGE_ROWS = 100;
+const TAGS_SHOWN = 10;
+
+// Each tab keeps its own filters, sort, rows shown and scroll position. tab is the
+// last list you were on: the sidebar link and an item's back link go to it.
+const NO_FILTERS = { query: "", skill: "", tags: [], kind: "", played: "", owner: "", favorites: false };
+ui.list = { tab: null, filters: {}, sort: {}, limit: {}, scroll: {}, moreTags: false };
+const listFilters = (tab) => (ui.list.filters[tab] ??= structuredClone(NO_FILTERS));
 
 // Built-in workouts for the program's days live on Today and Progress, not here.
 const isProgramDay = (e) => e.builtin && /^builtin:core-/.test(e.id);
@@ -22,8 +31,27 @@ const marks = () => ui.trainer.data?.marks ?? { favorites: [], hidden: [] };
 const isFavorite = (key) => marks().favorites.includes(key);
 const isHidden = (key) => marks().hidden.includes(key);
 
-// Everything in the list, newest first; never-played items last, by name.
+// Your KovaaK's scenario files (sce_library): null until asked for, then
+// "loading", then the list (empty if KovaaK's isn't installed).
+ui.sceLibrary = null;
+
+function loadSceLibrary() {
+  ui.sceLibrary = "loading";
+  invoke("sce_library")
+    .catch(() => [])
+    .then((list) => {
+      ui.sceLibrary = list;
+      if (["scenarios", "today"].includes(route().view)) render();
+    });
+}
+
+// KovaaK's AimTypeTag as a skill: "Target Switching" reads "Target switching".
+const aimTypeLabel = (t) => (t ? t[0].toUpperCase() + t.slice(1).toLowerCase() : "");
+
+// Everything in the lists, newest first; never-played items last, by name.
 function scenarioItems() {
+  if (ui.sceLibrary === null) loadSceLibrary();
+  const files = new Map((Array.isArray(ui.sceLibrary) ? ui.sceLibrary : []).map((f) => [f.name.toLowerCase(), f]));
   const d = ui.trainer.data;
   const overview = new Map((ui.insights.overview ?? []).map((s) => [s.scenario, s]));
   const later = (a, b) => (!a ? b : !b ? a : a > b ? a : b);
@@ -34,38 +62,59 @@ function scenarioItems() {
     const s = e.scenario;
     names.add(s.name);
     const o = overview.get(s.name);
+    const rated = e.rating !== null && e.rating !== undefined;
     items.push({
       key: e.id,
       kind: "trainer",
       name: s.name,
       skill: SKILL_LABELS[s.skill] ?? "",
       tags: s.tags ?? [],
+      description: s.description ?? "",
       last: later(e.last_played, o?.last_played ?? null),
       plays: (e.runs || 0) + (e.adaptive_runs || 0),
-      figure: e.rating !== null && e.rating !== undefined ? fmtKnob(e.knob, e.rating) : e.runs ? num(e.best) : "",
+      rating: rated ? e.rating : null,
+      knob: e.knob ?? null,
+      best: e.runs ? e.best ?? null : null,
+      figure: rated ? fmtKnob(e.knob, e.rating) : e.runs ? num(e.best) : "",
       mine: !e.builtin,
       entry: e,
     });
   }
   for (const e of d.workouts) {
     if (!e.workout || isProgramDay(e)) continue;
+    const runs = e.workout.items.reduce((a, i) => a + i.runs, 0);
     items.push({
       key: `workout:${e.id}`,
       kind: "workout",
       name: e.workout.name,
-      skill: "Workout",
+      skill: "",
       tags: [],
+      description: e.workout.description ?? "",
       last: e.last_played,
-      plays: 0,
-      figure: `${e.workout.items.reduce((a, i) => a + i.runs, 0)} runs`,
+      plays: null,
+      rating: null,
+      best: null,
+      steps: e.workout.items.length,
+      runs,
+      seconds: e.seconds,
+      figure: `${runs} runs`,
       mine: !e.builtin,
       entry: e,
     });
   }
+  // KovaaK's scenarios: the ones you've played (from its stats files) and the
+  // files in your KovaaK's and Workshop folders, once each.
+  const kovaaks = (name, sce, s) => ({
+    key: `kovaaks:${name}`, kind: "kovaaks", name, skill: aimTypeLabel(sce?.aim_type), tags: sce?.tags ?? [], description: sce?.description ?? "",
+    last: s?.last_played ?? null, plays: s?.runs ?? 0, rating: null, best: s?.best_score ?? null, figure: s ? num(s.best_score) : "", mine: false, sce, entry: s ?? null,
+  });
   for (const s of ui.snap.scenarios) {
     if (names.has(s.scenario)) continue;
-    items.push({ key: `kovaaks:${s.scenario}`, kind: "kovaaks", name: s.scenario, skill: "", tags: [], last: s.last_played, plays: s.runs ?? 0, figure: num(s.best_score), entry: s });
+    names.add(s.scenario);
+    items.push(kovaaks(s.scenario, files.get(s.scenario.toLowerCase()), s));
   }
+  const lower = new Set([...names].map((n) => n.toLowerCase()));
+  for (const f of files.values()) if (!lower.has(f.name.toLowerCase())) items.push(kovaaks(f.name, f, null));
   return items.sort((a, b) => (a.last && b.last ? (a.last < b.last ? 1 : -1) : a.last ? -1 : b.last ? 1 : a.name.localeCompare(b.name)));
 }
 
@@ -80,112 +129,155 @@ function dayLabel(last) {
   return fmtShort(d);
 }
 
-// The tab that shows first: Recent once you've played something.
-function listTab(all) {
-  if (!ui.list.tab) ui.list.tab = all.some((x) => x.last && !isHidden(x.key)) ? "recent" : "browse";
-  return ui.list.tab;
-}
+// The list Scenarios opens on: the last one you were on, else Recent once you've
+// played something, else Browse.
+const defaultTab = (all) => ui.list.tab ?? (all.some((x) => x.last && !isHidden(x.key)) ? "recent" : "browse");
 
 // What a tab holds before its filters. Hidden items only show on Hidden.
 function tabItems(all, tab) {
   if (tab === "hidden") return all.filter((x) => isHidden(x.key));
   const shown = all.filter((x) => !isHidden(x.key));
   if (tab === "recent") return shown.filter((x) => x.last);
-  if (tab === "browse") return shown.filter((x) => x.kind === "trainer");
+  if (tab === "browse") return shown.filter((x) => x.kind !== "workout");
   if (tab === "workouts") return shown.filter((x) => x.kind === "workout");
   return shown.filter((x) => x.mine);
 }
-
-// The filters each tab offers; the name search is on every tab.
-const tabFilters = (tab) => ({ skill: tab === "browse", tags: tab === "browse", sort: tab === "browse", source: tab === "recent" });
-
-function filteredItems(items, tab) {
-  const f = ui.list;
-  const on = tabFilters(tab);
-  const q = f.query.trim().toLowerCase();
-  return items.filter((x) =>
-    (!q || x.name.toLowerCase().includes(q)) &&
-    (!on.skill || !f.skill || x.skill === f.skill) &&
-    (!on.tags || f.tags.every((t) => x.tags.includes(t))) &&
-    (!on.source || !f.source || (f.source === "kovaaks" ? x.kind === "kovaaks" : x.kind !== "kovaaks")));
-}
-
-const isFiltering = (tab) => {
-  const f = ui.list;
-  const on = tabFilters(tab);
-  return Boolean(f.query.trim() || (on.skill && f.skill) || (on.tags && f.tags.length) || (on.source && f.source));
-};
 
 const skillOrder = (label) => {
   const i = Object.values(SKILL_LABELS).indexOf(label);
   return i < 0 ? 99 : i;
 };
 const byName = (a, b) => a.name.localeCompare(b.name);
-
-// The shown items in labelled groups, favorites first except on Recent (by day).
-function listGroups(items, tab) {
-  if (tab === "recent") {
-    const groups = [];
-    for (const x of items) {
-      const label = dayLabel(x.last);
-      let g = groups.find((y) => y.label === label);
-      if (!g) groups.push((g = { label, items: [] }));
-      g.items.push(x);
-    }
-    return groups;
-  }
-  const favorites = marks().favorites;
-  const fav = items.filter((x) => isFavorite(x.key)).sort((a, b) => favorites.indexOf(a.key) - favorites.indexOf(b.key));
-  const rest = items.filter((x) => !isFavorite(x.key));
-  const groups = fav.length && tab !== "hidden" ? [{ label: "Favorites", items: fav }] : [];
-  const others = tab === "hidden" ? items : rest;
-  if (tab === "browse") {
-    const sort = ui.list.sort;
-    if (sort === "skill") {
-      for (const x of [...others].sort((a, b) => skillOrder(a.skill) - skillOrder(b.skill) || byName(a, b))) {
-        const label = x.skill || "Other";
-        let g = groups.find((y) => y.label === label);
-        if (!g) groups.push((g = { label, items: [] }));
-        g.items.push(x);
-      }
-      return groups;
-    }
-    const cmp = sort === "most" ? (a, b) => b.plays - a.plays || byName(a, b)
-      : sort === "stale" ? (a, b) => (!a.last ? (b.last ? -1 : byName(a, b)) : !b.last ? 1 : a.last < b.last ? -1 : a.last > b.last ? 1 : byName(a, b))
-      : byName;
-    if (others.length) groups.push({ label: fav.length ? "Everything else" : "All scenarios", items: [...others].sort(cmp) });
-    return groups;
-  }
-  if (tab === "yours") {
-    const sc = others.filter((x) => x.kind !== "workout");
-    const wo = others.filter((x) => x.kind === "workout");
-    if (sc.length) groups.push({ label: "Scenarios", items: sc });
-    if (wo.length) groups.push({ label: "Workouts", items: wo });
-    return groups;
-  }
-  if (others.length) groups.push({ label: tab === "hidden" ? "Hidden" : fav.length ? "Everything else" : "", items: others });
-  return groups;
+const kindLabel = (x) => (x.kind === "workout" ? "Workout" : x.kind === "kovaaks" ? "KovaaK's" : "AimAdapt");
+const blank = (v) => v === null || v === undefined || v === "";
+// Ascending for d = 1, descending for d = -1; blanks always last.
+const byKey = (x, y, d) => (blank(x) ? (blank(y) ? 0 : 1) : blank(y) ? -1 : x < y ? -d : x > y ? d : 0);
+// Ratings only compare within one kind (seconds, meters, degrees a second), so
+// they sort by kind, then best first.
+function byRating(a, b, d) {
+  if (blank(a.rating) || blank(b.rating)) return byKey(a.rating, b.rating, d);
+  if (a.knob !== b.knob) return a.knob < b.knob ? -1 : 1;
+  const v = (x) => (higherIsHarder(x.knob) ? x.rating : -x.rating);
+  return (v(a) - v(b)) * d;
 }
 
-// The item a route argument names, or the first one the tab shows. "name:<scenario>"
-// (links from older pages and from Today) finds it by name.
-function findItem(items, arg, shown) {
-  if (!arg) return shown[0] ?? null;
-  if (arg.startsWith("name:")) {
-    const n = arg.slice(5);
-    return items.find((x) => x.name === n && x.kind !== "workout") ?? null;
-  }
-  return items.find((x) => x.key === arg) ?? null;
+// What a table row's last-played cell says: the day, with the time today and
+// yesterday.
+function lastText(x) {
+  const label = dayLabel(x.last);
+  return label === "Today" || label === "Yesterday" ? `${label}, ${fmtTime(dt(x.last))}` : label;
+}
+
+const starIcon = (filled) => `<svg width="14" height="14" viewBox="0 0 24 24" fill="${filled ? "currentColor" : "none"}" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"></path></svg>`;
+const playIcon = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l13 8-13 8z"></path></svg>`;
+const dash = `<span class="dim">–</span>`;
+
+// Play (an adaptive run) for trainer scenarios, Start for workouts, and Play (its
+// own file, in standard mode) for a KovaaK's scenario the trainer can play.
+function playButton(x) {
+  const playing = ui.trainer.data.playing ? "disabled" : "";
+  if (x.kind === "trainer") return `<button class="btn play-btn" type="button" data-action="play" data-id="${esc(x.key)}" data-adaptive="1" ${playing} aria-label="Play ${esc(x.name)}">${playIcon}Play</button>`;
+  if (x.kind === "workout") return `<button class="btn play-btn" type="button" data-action="play-workout" data-id="${esc(x.entry.id)}" ${playing} aria-label="Start ${esc(x.name)}">${playIcon}Start</button>`;
+  if (x.sce?.playable) return `<button class="btn play-btn" type="button" data-action="play-sce" data-path="${esc(x.sce.path)}" ${playing} aria-label="Play ${esc(x.name)} in AimAdapt" title="Plays this scenario's own file in AimAdapt's trainer">${playIcon}Play</button>`;
+  return "";
+}
+
+function starButton(x) {
+  const on = isFavorite(x.key);
+  return `<button type="button" class="star-btn ${on ? "on" : ""}" data-action="favorite" data-key="${esc(x.key)}" aria-pressed="${on}" aria-label="Favorite ${esc(x.name)}" title="${on ? "Remove from favorites" : "Add to favorites"}">${starIcon(on)}</button>`;
+}
+
+function nameCell(x, tab) {
+  const sub = x.kind === "workout" ? x.description : x.tags.join(" · ");
+  return `<a class="row-name" href="${scenarioHref(x.key)}">${esc(x.name)}</a>${x.mine && tab !== "yours" && x.kind === "trainer" ? ' <span class="tag gold">Yours</span>' : ""}
+    ${sub ? `<div class="row-sub" title="${esc(sub)}">${esc(sub)}</div>` : ""}`;
+}
+
+// Table columns. key (or cmp) makes a column sortable; dir is the order a first
+// click sorts in. Sorted by a column with group, the table has a heading row for
+// each group (each skill, say), so a long list is easier to scan.
+const COLUMNS = {
+  fav: { sr: "Favorite", cls: "star-col", cell: starButton },
+  name: { label: "Name", cls: "name-col", dir: 1, key: (x) => x.name.toLowerCase(), cell: nameCell },
+  kind: {
+    label: "Type", dir: 1, key: kindLabel, group: kindLabel,
+    cell: (x) => `<span class="tag ${x.kind === "kovaaks" ? "blue" : x.kind === "workout" ? "grey" : ""}">${kindLabel(x)}</span>${x.sce?.playable ? ' <span class="small muted" title="Its file plays in AimAdapt\'s trainer">plays here</span>' : ""}`,
+  },
+  skill: { label: "Skill", dir: 1, key: (x) => (x.skill ? `${String(skillOrder(x.skill)).padStart(2, "0")} ${x.skill}` : null), group: (x) => x.skill || "No skill", cell: (x) => esc(x.skill) },
+  rating: {
+    label: "Rating", cls: "r", dir: -1, cmp: byRating,
+    group: (x) => (blank(x.rating) ? "No rating yet" : `Rated on ${knobWord(x.knob)}`),
+    title: "Your 85% rating from adaptive runs. Sorts by kind of rating, then best first.",
+    cell: (x) => (blank(x.rating) ? dash : `<span class="num" title="85% ${esc(knobWord(x.knob))}">${esc(fmtKnob(x.knob, x.rating))}</span>`),
+  },
+  best: { label: "Best score", cls: "r", dir: -1, key: (x) => x.best, cell: (x) => (blank(x.best) ? dash : `<span class="mono">${num(x.best)}</span>`) },
+  plays: { label: "Runs", cls: "r", dir: -1, key: (x) => x.plays, cell: (x) => (x.plays ? `<span class="mono">${x.plays}</span>` : dash) },
+  last: { label: "Last played", dir: -1, key: (x) => x.last, group: (x) => (x.last ? dayLabel(x.last) : "Never played"), cell: (x) => (x.last ? `<span title="${esc(`${fmtShort(dt(x.last))}, ${fmtTime(dt(x.last))}`)}">${esc(lastText(x))}</span>` : `<span class="dim">Never</span>`) },
+  owner: { label: "Made by", dir: 1, key: (x) => (x.mine ? 0 : 1), group: (x) => (x.mine ? "Yours" : "Built-in"), cell: (x) => (x.mine ? '<span class="tag gold">Yours</span>' : '<span class="muted">Built-in</span>') },
+  steps: { label: "Scenarios", cls: "r", dir: -1, key: (x) => x.steps, cell: (x) => `<span class="mono">${x.steps}</span> <span class="dim">· ${x.runs} runs</span>` },
+  length: { label: "Length", cls: "r", dir: 1, key: (x) => x.seconds, cell: (x) => `About ${minutes(x.seconds)}` },
+  play: { sr: "Play", cls: "r", cell: playButton },
+  unhide: { sr: "Show again", cls: "r", cell: (x) => `<button class="btn play-btn" type="button" data-action="hide" data-key="${esc(x.key)}">Show again</button>` },
+};
+
+// What each tab shows: its columns, its first sort and its filters. The search is
+// on every tab, and Favorites on every tab but Hidden.
+const TAB_SETUP = {
+  recent: { cols: ["fav", "name", "kind", "skill", "rating", "best", "plays", "last", "play"], sort: ["last", -1], filters: ["kind", "skill"], note: "Everything you've played, here or in KovaaK's" },
+  browse: { cols: ["fav", "name", "kind", "skill", "rating", "best", "plays", "last", "play"], sort: ["skill", 1], filters: ["kind", "skill", "played", "tags"], note: "The trainer's scenarios and your KovaaK's scenarios" },
+  workouts: { cols: ["fav", "name", "owner", "steps", "length", "last", "play"], sort: ["name", 1], filters: ["owner"], note: "Built-in workouts and yours" },
+  yours: { cols: ["fav", "name", "kind", "skill", "rating", "best", "plays", "last", "play"], sort: ["last", -1], filters: ["kind", "skill"], note: "Scenarios and workouts you made or copied" },
+  hidden: { cols: ["name", "kind", "skill", "plays", "last", "unhide"], sort: ["name", 1], filters: ["kind"], note: "Kept off the other tabs. Their runs stay." },
+};
+
+const sortOf = (tab) => ui.list.sort[tab] ?? TAB_SETUP[tab].sort;
+
+// Every word of the search has to be in the name, skill, tags or description.
+function matches(x, words) {
+  if (!words.length) return true;
+  const text = `${x.name} ${x.skill} ${x.tags.join(" ")} ${x.description}`.toLowerCase();
+  return words.every((w) => text.includes(w));
+}
+
+function filterRows(items, tab) {
+  const f = listFilters(tab);
+  const on = new Set(TAB_SETUP[tab].filters);
+  const words = f.query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  return items.filter((x) =>
+    matches(x, words) &&
+    (!on.has("skill") || !f.skill || x.skill === f.skill) &&
+    (!on.has("kind") || !f.kind || (f.kind === "kovaaks-play" ? Boolean(x.sce?.playable) : x.kind === f.kind)) &&
+    (!on.has("played") || !f.played || (f.played === "yes" ? Boolean(x.last) : !x.last)) &&
+    (!on.has("owner") || !f.owner || (f.owner === "mine") === x.mine) &&
+    (!on.has("tags") || f.tags.every((t) => x.tags.includes(t))) &&
+    (tab === "hidden" || !f.favorites || isFavorite(x.key)));
+}
+
+function isFiltering(tab) {
+  const f = listFilters(tab);
+  const on = new Set(TAB_SETUP[tab].filters);
+  return Boolean(f.query.trim() || f.favorites || [...on].some((k) => (k === "tags" ? f.tags.length : f[k])));
+}
+
+function sortRows(rows, tab) {
+  const [id, dir] = sortOf(tab);
+  const c = COLUMNS[id];
+  const cmp = c.cmp ?? ((a, b, d) => byKey(c.key(a), c.key(b), d));
+  return [...rows].sort((a, b) => cmp(a, b, dir) || byName(a, b));
 }
 
 const scenarioHref = (key) => `#scenarios/${encodeURIComponent(key)}`;
 const scenarioHrefByName = (name) => scenarioHref(`name:${name}`);
 
-// Opens Scenarios on a tab, optionally filtered to one skill (Today's links).
+// Opens a Scenarios tab with its filters cleared, optionally to one skill (Today's
+// links).
 function openScenariosTab(tab, skill = "") {
-  Object.assign(ui.list, { tab, query: "", skill, tags: [], source: "", scroll: 0 });
-  if (location.hash === "#scenarios") render();
-  else location.hash = "#scenarios";
+  ui.list.filters[tab] = { ...structuredClone(NO_FILTERS), skill };
+  delete ui.list.limit[tab];
+  ui.list.scroll[tab] = 0;
+  const hash = `#scenarios/${tab}`;
+  if (location.hash === hash) render();
+  else location.hash = hash;
 }
 
 function playingWith() {
@@ -210,97 +302,147 @@ function scenariosPage(arg) {
     return `<div class="empty-state">Loading scenarios…</div>`;
   }
   const all = scenarioItems();
-  const tab = listTab(all);
-  const shown = filteredItems(tabItems(all, tab), tab);
-  const groups = listGroups(shown, tab);
-  const item = findItem(all, arg, groups.flatMap((g) => g.items));
   if (arg?.startsWith("name:")) {
-    // Swap to the item's own address, so Back skips this hop.
+    // Links from Today and older pages name a scenario. Swap to its own address,
+    // so Back skips this hop.
+    const n = arg.slice(5);
+    const item = all.find((x) => x.name === n && x.kind !== "workout");
     location.replace(item ? scenarioHref(item.key) : "#scenarios");
     return "";
   }
-  if (!arg && item) {
-    // Open the tab's first item by its address, so it stays open while the list
-    // changes beside it (Favorite and Hide act on it, not on whatever is first).
-    location.replace(scenarioHref(item.key));
+  if (!arg) {
+    location.replace(`#scenarios/${defaultTab(all)}`);
     return "";
   }
+  if (isListTab(arg)) {
+    ui.list.tab = arg;
+    return listPage(all, arg);
+  }
+  return itemPage(all.find((x) => x.key === arg) ?? null, all);
+}
+
+function emptyTab(tab) {
+  if (tab === "recent") return `Nothing played yet. <a href="#scenarios/browse">Browse</a> has every scenario you can play.`;
+  if (tab === "yours") return "Nothing of yours yet. Use Copy &amp; edit on any scenario or workout, or New scenario above.";
+  if (tab === "hidden") return `Nothing hidden. Hide something from its page to keep it off the lists.`;
+  return "Nothing here yet.";
+}
+
+const option = (v, label, sel) => `<option value="${esc(v)}" ${sel ? "selected" : ""}>${esc(label)}</option>`;
+const filterSelect = (key, label, options, value) =>
+  `<label class="lib-filter"><span>${label}</span><select class="select" data-list-filter="${key}">${options.map(([v, l]) => option(v, l, value === v)).join("")}</select></label>`;
+
+// The search and the tab's filters. A filter only shows when it would split the
+// tab: Skill with one skill, or Type with one kind, would do nothing.
+function listTools(tab, base) {
+  const f = listFilters(tab);
+  const on = TAB_SETUP[tab].filters;
+  const parts = [];
+  if (on.includes("kind")) {
+    const kinds = [["trainer", "AimAdapt"], ["kovaaks", "KovaaK's"], ["workout", "Workouts"]].filter(([k]) => base.some((x) => x.kind === k));
+    if (base.some((x) => x.sce?.playable)) kinds.push(["kovaaks-play", "KovaaK's that play here"]);
+    if (kinds.length > 1 || f.kind) parts.push(filterSelect("kind", "Type", [["", "All"], ...kinds], f.kind));
+  }
+  if (on.includes("skill")) {
+    const skills = [...new Set(base.map((x) => x.skill).filter(Boolean))].sort((a, b) => skillOrder(a) - skillOrder(b) || a.localeCompare(b));
+    if (skills.length > 1 || f.skill) parts.push(filterSelect("skill", "Skill", [["", "All skills"], ...skills.map((s) => [s, s])], f.skill));
+  }
+  if (on.includes("played")) parts.push(filterSelect("played", "Played", [["", "All"], ["yes", "Played"], ["no", "Not played yet"]], f.played));
+  if (on.includes("owner")) parts.push(filterSelect("owner", "Made by", [["", "Anyone"], ["builtin", "Built-in"], ["mine", "You"]], f.owner));
+  const favCount = tab === "hidden" ? 0 : base.filter((x) => isFavorite(x.key)).length;
+  if (favCount || f.favorites) {
+    parts.push(`<button type="button" class="chip fav-chip ${f.favorites ? "on" : ""}" data-action="fav-only" aria-pressed="${f.favorites}">${starIcon(f.favorites)}Favorites <span class="dim">${favCount}</span></button>`);
+  }
+  return `<div class="lib-tools">
+    <label for="list-q" class="sr-only">Search</label>
+    <div class="field lib-search"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9aa1ac" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg>
+      <input id="list-q" type="search" placeholder="${tab === "workouts" ? "Search names and descriptions" : "Search names, skills and tags"}" value="${esc(f.query)}" autocomplete="off"></div>
+    ${parts.join("")}
+  </div>`;
+}
+
+// Tag chips, most used first. Picking several shows only what has all of them.
+function tagChips(tab, base) {
+  if (!TAB_SETUP[tab].filters.includes("tags")) return "";
+  const f = listFilters(tab);
+  const count = new Map();
+  for (const x of base) for (const t of x.tags) count.set(t, (count.get(t) ?? 0) + 1);
+  const tags = [...count.keys()].sort((a, b) => count.get(b) - count.get(a) || a.localeCompare(b));
+  if (!tags.length) return "";
+  const visible = ui.list.moreTags ? tags : tags.filter((t, i) => i < TAGS_SHOWN || f.tags.includes(t));
+  return `<div class="tag-chips" role="group" aria-label="Tags"><span class="small muted">Tags</span>${visible.map((t) => `<button type="button" class="chip ${f.tags.includes(t) ? "on" : ""}" data-action="list-tag" data-tag="${esc(t)}" aria-pressed="${f.tags.includes(t)}">${esc(t)} <span class="dim">${count.get(t)}</span></button>`).join("")}
+    ${tags.length > TAGS_SHOWN ? `<button type="button" class="link-btn" data-action="more-tags">${ui.list.moreTags ? "Fewer tags" : `${tags.length - visible.length} more`}</button>` : ""}</div>`;
+}
+
+function listTable(tab, rows) {
+  const [sortCol, sortDir] = sortOf(tab);
+  const cols = TAB_SETUP[tab].cols.map((id) => [id, COLUMNS[id]]);
+  const limit = ui.list.limit[tab] ?? PAGE_ROWS;
+  const th = ([id, c]) => {
+    const sortable = Boolean(c.key || c.cmp);
+    const on = sortable && sortCol === id;
+    const inner = sortable
+      ? `<button type="button" class="sort-btn" data-action="sort" data-col="${id}" title="${esc(c.title ?? `Sort by ${c.label.toLowerCase()}`)}">${c.label}<span class="sort-arrow" aria-hidden="true">${on ? (sortDir > 0 ? "▲" : "▼") : ""}</span></button>`
+      : c.sr ? `<span class="sr-only">${c.sr}</span>` : c.label;
+    return `<th class="c-${id} ${c.cls ?? ""}" ${on ? `aria-sort="${sortDir > 0 ? "ascending" : "descending"}"` : ""} scope="col">${inner}</th>`;
+  };
+  const left = rows.length - limit;
+  const group = COLUMNS[sortCol].group;
+  const sizes = new Map();
+  if (group) for (const x of rows) sizes.set(group(x), (sizes.get(group(x)) ?? 0) + 1);
+  let lastGroup = null;
+  const body = rows.slice(0, limit).map((x) => {
+    let heading = "";
+    if (group && group(x) !== lastGroup) {
+      lastGroup = group(x);
+      heading = `<tr class="group-row"><th colspan="${cols.length}" scope="colgroup">${esc(lastGroup)} <span class="dim">${sizes.get(lastGroup)}</span></th></tr>`;
+    }
+    return `${heading}<tr>${cols.map(([id, c]) => `<td class="c-${id} ${c.cls ?? ""}">${c.cell(x, tab)}</td>`).join("")}</tr>`;
+  });
+  return `<div class="table-wrap"><table class="lib-table"><thead><tr>${cols.map(th).join("")}</tr></thead><tbody>
+      ${body.join("")}
+    </tbody></table></div>
+    ${left > 0 ? `<div class="lib-more"><span class="small muted">Showing ${limit} of ${rows.length}</span>
+      <button class="btn" type="button" data-action="more-rows">Show ${Math.min(PAGE_ROWS, left)} more</button>
+      <button class="link-btn" type="button" data-action="all-rows">Show all</button></div>` : ""}`;
+}
+
+function listPage(all, tab) {
+  const base = tabItems(all, tab);
+  const rows = sortRows(filterRows(base, tab), tab);
+  const filtering = isFiltering(tab);
+  const hidden = all.filter((x) => isHidden(x.key)).length;
+  const tabList = hidden || tab === "hidden" ? [...LIST_TABS, ["hidden", `Hidden <span class="tab-count">${hidden}</span>`]] : LIST_TABS;
+  const noun = tab === "workouts" ? "workout" : tab === "browse" ? "scenario" : "item";
+  const reading = ui.sceLibrary === "loading" && ["browse", "recent"].includes(tab) ? " · Reading your KovaaK's scenarios…" : "";
+  const count = (filtering ? `${rows.length} of ${base.length} match` : `${base.length} ${noun}${base.length === 1 ? "" : "s"} · ${TAB_SETUP[tab].note}`) + reading;
   return `<div class="page">
     ${head("Play, and see how you're doing", "Scenarios", `<span class="chips">${playingWith()}
       <button class="btn" type="button" data-action="new-workout">New workout</button>
       <button class="btn" type="button" data-action="new-scenario">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>New scenario</button></span>`)}
     ${trainerBanners()}
-    <div class="row" style="align-items:flex-start">
-      ${scenarioList(all, tab, shown, groups, item)}
-      <div class="detail" id="scenario-detail">${item ? itemDetail(item) : `<div class="card note-body">${tab === "browse" || tab === "recent" ? "Nothing here yet." : "Pick something from the list."}</div>`}</div>
-    </div>
+    ${tabs("scenarios", tabList, tab)}
+    <section class="card library" aria-label="${esc(TAB_LABELS[tab])}">
+      ${base.length ? `${listTools(tab, base)}${tagChips(tab, base)}
+        <div class="lib-count small muted"><span>${esc(count)}</span>${filtering ? `<button type="button" class="link-btn" data-action="clear-list">Clear filters</button>` : ""}</div>
+        ${rows.length ? listTable(tab, rows) : `<div class="note-body">Nothing matches these filters.</div>`}`
+        : `<div class="note-body">${emptyTab(tab)}</div>`}
+    </section>
   </div>`;
 }
 
-const starIcon = (filled) => `<svg width="14" height="14" viewBox="0 0 24 24" fill="${filled ? "currentColor" : "none"}" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"></path></svg>`;
-
-const TAB_NOTES = {
-  recent: "Newest first",
-  browse: "Everything you can play in the trainer",
-  workouts: "Built-in workouts and yours",
-  yours: "Scenarios and workouts you made or copied",
-  hidden: "Hidden from the other tabs",
-};
-
-function emptyTab(tab) {
-  if (tab === "recent") return `Nothing played yet. <button type="button" class="link-btn" data-action="list-tab" data-tab="browse">Browse</button> has every scenario you can play.`;
-  if (tab === "yours") return "Nothing of yours yet. Use Copy &amp; edit on any scenario or workout, or New scenario above.";
-  if (tab === "hidden") return "Nothing hidden.";
-  return "Nothing here yet.";
-}
-
-function scenarioList(all, tab, shown, groups, current) {
-  const f = ui.list;
-  const on = tabFilters(tab);
-  const base = tabItems(all, tab);
-  const filtering = isFiltering(tab);
-  const hidden = all.filter((x) => isHidden(x.key)).length;
-  const option = (v, label, sel) => `<option value="${esc(v)}" ${sel ? "selected" : ""}>${esc(label)}</option>`;
-  const sub = (x) => [x.kind === "workout" ? "Workout" : x.skill, x.kind === "kovaaks" ? "KovaaK's history" : x.mine ? "Yours" : "", x.last && tab === "recent" ? fmtTime(dt(x.last)) : ""].filter(Boolean).join(" · ");
-
-  let filters = "";
-  if (on.skill || on.sort || on.source) {
-    const skills = [...new Set(base.map((x) => x.skill).filter(Boolean))].sort((a, b) => skillOrder(a) - skillOrder(b));
-    filters = `<div class="list-filters">
-      ${on.skill ? `<label><span>Skill</span><select class="select" data-list-filter="skill">${option("", "All skills", !f.skill)}${skills.map((s) => option(s, s, f.skill === s)).join("")}</select></label>` : ""}
-      ${on.sort ? `<label><span>Sort</span><select class="select" data-list-filter="sort">${LIST_SORTS.map(([v, l]) => option(v, l, f.sort === v)).join("")}</select></label>` : ""}
-      ${on.source ? `<label><span>Trainer</span><select class="select" data-list-filter="source">${option("", "All", !f.source)}${option("aimadapt", "AimAdapt", f.source === "aimadapt")}${option("kovaaks", "KovaaK's", f.source === "kovaaks")}</select></label>` : ""}
-    </div>`;
-  }
-  let tagChips = "";
-  if (on.tags) {
-    const count = new Map();
-    for (const x of base) for (const t of x.tags) count.set(t, (count.get(t) ?? 0) + 1);
-    const tags = [...count.keys()].sort((a, b) => count.get(b) - count.get(a) || a.localeCompare(b));
-    const visible = f.moreTags ? tags : tags.filter((t, i) => i < TAGS_SHOWN || f.tags.includes(t));
-    if (tags.length) {
-      tagChips = `<div class="tag-chips" role="group" aria-label="Tags">${visible.map((t) => `<button type="button" class="chip ${f.tags.includes(t) ? "on" : ""}" data-action="list-tag" data-tag="${esc(t)}" aria-pressed="${f.tags.includes(t)}">${esc(t)}</button>`).join("")}
-        ${tags.length > TAGS_SHOWN ? `<button type="button" class="link-btn" data-action="more-tags">${f.moreTags ? "Fewer tags" : `${tags.length - visible.length} more`}</button>` : ""}</div>`;
-    }
-  }
-
-  return `<section class="card list-card" aria-label="Scenarios and workouts">
-    <div class="list-tabs" role="tablist" aria-label="Lists">${LIST_TABS.map(([id, label]) => `<button type="button" role="tab" class="list-tab ${tab === id ? "on" : ""}" aria-selected="${tab === id}" data-action="list-tab" data-tab="${id}">${label}</button>`).join("")}</div>
-    <label for="list-q" class="sr-only">Search by name</label>
-    <div class="field"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9aa1ac" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg>
-      <input id="list-q" type="search" placeholder="Search by name" value="${esc(f.query)}"></div>
-    ${filters}${tagChips}
-    <div class="list-count small muted"><span>${filtering ? `${shown.length} of ${base.length} match` : TAB_NOTES[tab]}</span>
-      ${filtering ? `<button type="button" class="link-btn" data-action="clear-list">Clear filters</button>` : ""}</div>
-    <div class="scenario-list" id="scenario-list">${groups.map((g) => `${g.label ? `<div class="list-day">${esc(g.label)}</div>` : ""}${g.items.map((x) => `
-      <a class="scenario-item ${x === current ? "on" : ""}" href="${scenarioHref(x.key)}" ${x === current ? 'aria-current="true"' : ""}>
-        <span class="main"><span class="name">${esc(x.name)}</span><span class="sub">${esc(sub(x))}</span></span>
-        ${isFavorite(x.key) && tab === "recent" ? `<span class="fav-mark" title="Favorite">${starIcon(true)}</span>` : ""}
-        <span class="figure">${esc(x.figure)}</span></a>`).join("")}`).join("") || `<div class="note-body">${filtering ? "Nothing matches these filters." : emptyTab(tab)}</div>`}</div>
-    ${tab === "hidden" ? `<button type="button" class="link-btn" data-action="list-tab" data-tab="recent">Back to the lists</button>`
-      : hidden ? `<button type="button" class="link-btn" data-action="list-tab" data-tab="hidden">${hidden} hidden</button>` : ""}
-  </section>`;
+// One scenario's or workout's own page, with a link back to the list you came from.
+function itemPage(item, all) {
+  const tab = defaultTab(all);
+  const link = typeof helpLink === "function" ? helpLink() : "";
+  return `<div class="page">
+    <div class="back-row"><a class="back-link" href="#scenarios/${tab}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg>Scenarios · ${esc(TAB_LABELS[tab])}</a>
+      <div class="head-actions">${playingWith()}${link}</div></div>
+    ${trainerBanners()}
+    ${item ? `<div class="detail" id="scenario-detail">${itemDetail(item)}</div>`
+      : `<div class="card note-body">This scenario or workout isn't here any more. <a href="#scenarios/${tab}">Back to ${esc(TAB_LABELS[tab])}</a></div>`}
+  </div>`;
 }
 
 // Favorite and Hide, at the top of every item's page.
@@ -330,12 +472,11 @@ async function toggleMark(list, key) {
 
 function itemDetail(x) {
   if (x.kind === "workout") return workoutDetail(x.entry);
-  if (x.kind === "kovaaks") return kovaaksDetail(x.name);
+  if (x.kind === "kovaaks") return kovaaksDetail(x);
   return trainerDetail(x.entry);
 }
 
 const jumpLinks = (ids) => `<nav class="jumps" aria-label="On this page">${ids.map(([id, label]) => `<button type="button" class="jump" data-action="jump" data-target="${id}">${label}</button>`).join("")}</nav>`;
-const playIcon = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l13 8-13 8z"></path></svg>`;
 
 function workoutDetail(e) {
   const w = e.workout;
@@ -441,27 +582,35 @@ function sceCard(name) {
     </div></section>`;
 }
 
-function kovaaksDetail(name) {
-  const cached = ui.scenarioCache.get(name);
-  if (cached === undefined) {
+// A KovaaK's scenario: its score history from KovaaK's stats files, if you've
+// played it there, and Play in AimAdapt if the trainer can play its file.
+function kovaaksDetail(x) {
+  const name = x.name;
+  const played = Boolean(x.entry);
+  const cached = played ? ui.scenarioCache.get(name) : null;
+  if (played && cached === undefined) {
     scenarioDetail(name).then(() => {
       if (route().view === "scenarios") render();
     });
     return `<div class="empty-state">Loading ${esc(name)}…</div>`;
   }
-  if (!cached) return `<div class="card note-body">No runs for ${esc(name)}.</div>`;
-  const key = `kovaaks:${name}`;
-  return `<section class="card detail-head">
+  const key = x.key;
+  const about = played
+    ? "Played in KovaaK's. Its stats files record score, accuracy and kill times; shot placement, reaction, tracking and replays come from runs in AimAdapt's trainer."
+    : "In your KovaaK's scenarios, not played there yet. Your scores show here once you play it in KovaaK's.";
+  return `<section class="card detail-head" id="overview">
       <div class="card-head" style="align-items:flex-start">
-        <div><div class="chips"><span class="tag blue">KovaaK's</span>${isHidden(key) ? '<span class="tag grey">Hidden</span>' : ""}</div>
-          <h2 class="detail-title">${esc(name)}</h2></div>
+        <div><div class="chips"><span class="tag blue">KovaaK's</span>${isHidden(key) ? '<span class="tag grey">Hidden</span>' : ""}${x.skill ? `<span class="small muted">${esc(x.skill)}</span>` : ""}</div>
+          <h2 class="detail-title">${esc(name)}</h2>
+          ${x.description ? `<div class="note-body">${esc(x.description)}</div>` : ""}
+          ${x.tags.length ? `<div class="small muted" style="margin-top:4px">${esc(x.tags.join(" · "))}</div>` : ""}</div>
         <span class="chips">${markButtons(key)}</span>
       </div>
-      <div class="small muted">Played in KovaaK's. Its stats files record score, accuracy and kill times; shot placement, reaction, tracking and replays come from runs in AimAdapt's trainer.</div>
-      ${jumpLinks([["overview", "Overview"], ["work-on", "What the data says"], ["runs", "Runs"]])}
+      <div class="small muted">${about}</div>
+      ${cached ? jumpLinks([["overview", "Overview"], ["work-on", "What the data says"], ["runs", "Runs"]]) : ""}
     </section>
     ${sceCard(name)}
-    ${scenarioView(cached)}`;
+    ${cached ? scenarioView(cached) : ""}`;
 }
 
 async function startSce(path) {
@@ -474,45 +623,78 @@ async function startSce(path) {
   await loadTrainer();
 }
 
-// Keeps the list where it was scrolled when the page redraws for a new selection.
-function afterScenarios() {
-  const el = document.getElementById("scenario-list");
-  if (!el) return;
-  el.scrollTop = ui.list.scroll;
-  el.addEventListener("scroll", () => (ui.list.scroll = el.scrollTop), { passive: true });
+// The list tab on screen, or null on an item's page.
+const shownTab = () => {
+  const { view, arg } = route();
+  return view === "scenarios" && isListTab(arg) ? arg : null;
+};
+
+// Each list remembers where it was scrolled, so Back from an item's page lands on
+// the row you opened. app.js scrolls to the top on every new address, then calls
+// this.
+function restoreListScroll() {
+  const tab = shownTab();
+  if (tab && ui.list.scroll[tab]) window.scrollTo(0, ui.list.scroll[tab]);
+}
+
+window.addEventListener("scroll", () => {
+  const tab = shownTab();
+  if (tab) ui.list.scroll[tab] = window.scrollY;
+}, { passive: true });
+
+// Redraws the list after a filter changes, from the first page of rows.
+function refilter(tab) {
+  delete ui.list.limit[tab];
+  render();
 }
 
 document.addEventListener("click", (e) => {
   const btn = e.target.closest("[data-action]");
   if (!btn) return;
   const a = btn.dataset.action;
+  const tab = shownTab();
   if (a === "jump") document.getElementById(btn.dataset.target)?.scrollIntoView({ behavior: "smooth", block: "start" });
-  else if (a === "clear-list") {
-    Object.assign(ui.list, { query: "", skill: "", tags: [], source: "" });
-    render();
-  } else if (a === "list-tab") {
-    // The open scenario stays open; the list changes beside it.
-    if (ui.list.tab !== btn.dataset.tab) Object.assign(ui.list, { tab: btn.dataset.tab, scroll: 0 });
-    render();
-  } else if (a === "list-tag") {
-    const t = btn.dataset.tag;
-    ui.list.tags = ui.list.tags.includes(t) ? ui.list.tags.filter((x) => x !== t) : [...ui.list.tags, t];
-    render();
-  } else if (a === "more-tags") {
-    ui.list.moreTags = !ui.list.moreTags;
-    render();
-  } else if (a === "favorite") toggleMark("favorites", btn.dataset.key);
+  else if (a === "favorite") toggleMark("favorites", btn.dataset.key);
   else if (a === "hide") toggleMark("hidden", btn.dataset.key);
   else if (a === "browse-skill") openScenariosTab("browse", btn.dataset.skill ?? "");
   else if (a === "list-tab-open") openScenariosTab(btn.dataset.tab);
   else if (a === "play-sce") startSce(btn.dataset.path);
+  else if (!tab) return;
+  else if (a === "clear-list") {
+    ui.list.filters[tab] = structuredClone(NO_FILTERS);
+    refilter(tab);
+  } else if (a === "sort") {
+    const col = btn.dataset.col;
+    const [now, dir] = sortOf(tab);
+    ui.list.sort[tab] = now === col ? [col, -dir] : [col, COLUMNS[col].dir ?? 1];
+    render();
+  } else if (a === "list-tag") {
+    const f = listFilters(tab);
+    const t = btn.dataset.tag;
+    f.tags = f.tags.includes(t) ? f.tags.filter((x) => x !== t) : [...f.tags, t];
+    refilter(tab);
+  } else if (a === "more-tags") {
+    ui.list.moreTags = !ui.list.moreTags;
+    render();
+  } else if (a === "fav-only") {
+    const f = listFilters(tab);
+    f.favorites = !f.favorites;
+    refilter(tab);
+  } else if (a === "more-rows") {
+    ui.list.limit[tab] = (ui.list.limit[tab] ?? PAGE_ROWS) + PAGE_ROWS;
+    render();
+  } else if (a === "all-rows") {
+    ui.list.limit[tab] = Infinity;
+    render();
+  }
 });
 
 document.addEventListener("input", (e) => {
-  if (e.target.id !== "list-q") return;
-  ui.list.query = e.target.value;
+  const tab = shownTab();
+  if (e.target.id !== "list-q" || !tab) return;
+  listFilters(tab).query = e.target.value;
   const pos = e.target.selectionStart;
-  render();
+  refilter(tab);
   const q = document.getElementById("list-q");
   q.focus();
   q.setSelectionRange(pos, pos);
@@ -520,8 +702,9 @@ document.addEventListener("input", (e) => {
 
 document.addEventListener("change", (e) => {
   const key = e.target.dataset.listFilter;
-  if (key) {
-    ui.list[key] = e.target.value;
-    render();
+  const tab = shownTab();
+  if (key && tab) {
+    listFilters(tab)[key] = e.target.value;
+    refilter(tab);
   }
 });

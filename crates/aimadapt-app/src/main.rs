@@ -298,6 +298,7 @@ fn main() {
             trainer::play,
             trainer::play_workout,
             trainer::sce_info,
+            trainer::sce_library,
             trainer::play_sce,
             trainer::program,
             trainer::play_program,
