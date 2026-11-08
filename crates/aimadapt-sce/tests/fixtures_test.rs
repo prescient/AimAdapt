@@ -120,9 +120,10 @@ fn still_bots_on_a_json_map_import_with_kovaaks_rules() {
     assert_eq!(w.accuracy_mult, AccuracyMult::Sqrt);
     assert_eq!(w.fov_range, Some([100.0, 120.0]));
     assert!((w.blocked_radius - 1.5).abs() < 1e-6);
-    // Unreal (250, -100, 0) × MapScale 4 is 10 m ahead and 4 m left.
+    // Unreal (250, -100, 0) × MapScale 4 is 10 m ahead and 4 m left, and a 0.6 m
+    // ball's middle starts its height above the spawn point, as in KovaaK's.
     let spawns: Vec<Vec3> = w.spawns.iter().map(|p| Vec3::from_array(p.pos)).collect();
-    assert!(spawns.iter().any(|p| (*p - Vec3::new(-4.0, 0.0, -10.0)).length() < 1e-4), "{spawns:?}");
+    assert!(spawns.iter().any(|p| (*p - Vec3::new(-4.0, 0.6, -10.0)).length() < 1e-4), "{spawns:?}");
     // The wall is drawn: one cube, 12 triangles.
     assert_eq!(w.meshes.len(), 1);
     assert_eq!(w.meshes[0].triangles.len(), 12);
@@ -138,11 +139,12 @@ fn an_imported_scenario_plays_in_the_sim() {
     while sim.phase() == Phase::Countdown {
         sim.step(0.05, idle);
     }
-    // Three bots, each near a spawn point on the wall and apart from the others.
+    // Three bots, each near a spawn point on the wall (0.6 m up, ± 0.5 m) and apart
+    // from the others.
     let pos: Vec<Vec3> = sim.targets().iter().map(|t| t.pos).collect();
     assert_eq!(pos.len(), 3);
     for p in &pos {
-        assert!((p.z + 10.0).abs() < 1e-4 && p.y.abs() <= 0.5 + 1e-4, "{p}");
+        assert!((p.z + 10.0).abs() < 1e-4 && (p.y - 0.6).abs() <= 0.5 + 1e-4, "{p}");
     }
     // A hit kills (1 damage, 1 health); then a miss. Sqrt accuracy: 10 × √0.5.
     let aim = sim.targets()[0].pos.normalize();

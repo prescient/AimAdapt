@@ -233,7 +233,41 @@ impl Collider {
         }
         self.push_out(center, half, radius).pos
     }
+
+    /// Where a walking character that appears at `center` comes to rest, as Unreal's
+    /// walking movement puts it: lifted onto a floor it overlaps, or pulled down onto
+    /// one whose top is at most `step_up` (plus [`FLOOR_REACH`]) below its feet; on a
+    /// floor it then stands [`FLOOR_GAP`] above it. Otherwise it stays where it is.
+    pub fn stand(&self, center: Vec3, half: f32, radius: f32, step_up: f32) -> Vec3 {
+        if self.touches(center, half, radius) {
+            let lifted = self.lift_out(center, half, radius);
+            return if lifted.y > center.y { lifted + Vec3::Y * FLOOR_GAP } else { lifted };
+        }
+        let reach = step_up.max(0.0) + FLOOR_REACH;
+        if !self.touches(center - Vec3::Y * reach, half, radius) {
+            return center;
+        }
+        // How far it can drop before it touches.
+        let (mut free, mut hit) = (0.0, reach);
+        for _ in 0..16 {
+            let mid = (free + hit) / 2.0;
+            if self.touches(center - Vec3::Y * mid, half, radius) {
+                hit = mid;
+            } else {
+                free = mid;
+            }
+        }
+        center - Vec3::Y * (free - FLOOR_GAP)
+    }
 }
+
+/// How high above its floor a walking character stands, in meters: Unreal keeps it
+/// 1.9 to 2.4 units up, and KovaaK's test maps measure about 2.
+pub const FLOOR_GAP: f32 = 0.02;
+
+/// How far below its feet a walking character still finds a floor beyond its step-up
+/// height, in meters: Unreal's `MAX_FLOOR_DIST`, 2.4 units.
+pub const FLOOR_REACH: f32 = 0.024;
 
 fn slab(origin: Vec3, inv: Vec3, min: Vec3, max: Vec3, max_t: f32) -> bool {
     let t1 = (min - origin) * inv;
@@ -393,6 +427,26 @@ mod tests {
         // One in the open stays put, and one against a wall is pushed away from it.
         assert_eq!(c.lift_out(Vec3::new(0.0, 1.0, 0.0), 0.6, 0.4), Vec3::new(0.0, 1.0, 0.0));
         assert!((c.lift_out(Vec3::new(2.8, 2.0, 0.0), 0.0, 0.4).x - 2.6).abs() < 1e-3);
+    }
+
+    /// KovaaK's (Unreal) walking characters stand 2 units above their floor, and
+    /// one whose feet are within its step-up height of a floor is pulled down onto it
+    /// (measured with KovaaK's test maps).
+    #[test]
+    fn walking_characters_stand_on_floors_within_their_step() {
+        let c = room();
+        let near = |p: Vec3, y: f32| assert!((p.y - y).abs() < 1e-3, "{p} not at y {y}");
+        // A 2 m capsule (middle 1 m above its feet) with its feet 0.7 m above the
+        // floor at y = -1: a 0.75 m step pulls it down, a 0.3 m one doesn't.
+        near(c.stand(Vec3::new(0.0, 0.7, 0.0), 0.6, 0.4, 0.75), 0.02);
+        near(c.stand(Vec3::new(0.0, 0.7, 0.0), 0.6, 0.4, 0.3), 0.7);
+        // 2.4 units of reach past the step: feet 2 cm up are pulled down even with no step.
+        near(c.stand(Vec3::new(0.0, 0.02, 0.0), 0.6, 0.4, 0.0), 0.02);
+        // Sunk into the floor, it's lifted onto it and stands 2 cm up too.
+        near(c.stand(Vec3::new(0.0, -1.2, 0.0), 0.6, 0.4, 0.0), 0.02);
+        // Against a wall it's only pushed away from it.
+        let p = c.stand(Vec3::new(2.8, 2.0, 0.0), 0.0, 0.4, 0.0);
+        assert!((p.x - 2.6).abs() < 1e-3 && (p.y - 2.0).abs() < 1e-3, "{p}");
     }
 
     #[test]

@@ -239,11 +239,11 @@ AimAdapt is learning to play your own KovaaK's scenarios (`.sce` files) in its t
 
 **How bots move:** as their dodge profiles say: they strafe left and right, come closer or back off to keep their distance from you, jump, fly up and down or use a jetpack, and change direction when hit or blocked, with their character's speed, acceleration, friction and gravity. Bots don't walk off ledges. Scenarios can mix several kinds of bot, each with its own size, health, color and movement, and bots can come in clusters. This is modelled on the settings and isn't checked against KovaaK's yet, so moving targets may feel a little different there.
 
-**Walls:** your shots stop at walls, and bots bump into them. Invisible walls (clips) keep bots in but let your shots through, as in KovaaK's. Cylinders and tubes (round arenas), ramps, wedges and curved walls are solid, shaped and placed as in KovaaK's (checked side by side on DriftTS, ww5t, ControlTS and Frogtagon). A few rarer shapes, such as spheres, cones and stairs, are drawn from their names, so they may look a little different from KovaaK's, and shots and bots pass through them. If you'd start inside the floor, you stand on it instead, as in KovaaK's.
+**Walls:** your shots stop at walls, and bots bump into them. Invisible walls (clips) keep bots in but let your shots through, as in KovaaK's. Cylinders and tubes (round arenas), ramps, wedges and curved walls are solid, shaped and placed as in KovaaK's (checked side by side on DriftTS, ww5t, ControlTS and Frogtagon). A few rarer shapes, such as spheres, cones and stairs, are drawn from their names, so they may look a little different from KovaaK's, and shots and bots pass through them. You see the map from the same height as in KovaaK's (measured there with test maps): you start a little above the scenario's spawn point, and stand on the floor if you'd start inside it or just above it. Bots start at the same height as there too.
 
 **Your runs:** runs played in AimAdapt are kept apart from your KovaaK's runs of the same scenario. They don't change your KovaaK's bests, trends or benchmark ranks. The card shows how many you've played in AimAdapt and your best.
 
-**What's still different:** the card lists what plays differently from KovaaK's, for example walls that are drawn from their names, or bots' jetpacks, whose timing is a guess. The sizes and distances still have to be checked against KovaaK's, so a score here may not match a score there yet. On older (Reflex) maps, KovaaK's puts a tall player's eye higher than AimAdapt does, so on those the card says you see from a little lower than there.
+**What's still different:** the card lists what plays differently from KovaaK's, for example walls that are drawn from their names, or bots' jetpacks, whose timing is a guess. The sizes and distances still have to be checked against KovaaK's, so a score here may not match a score there yet.
 
 ## Replay {#replay}
 
@@ -314,6 +314,7 @@ Nothing is sent anywhere. Deleting one of your scenarios or workouts removes the
 ## What's new {#whats-new}
 
 **November 2026**
+- Fixed: in KovaaK's scenarios played here you saw from lower than in KovaaK's, by up to 2.5 meters (inside tamTS's pit instead of looking down into it, and 1.5 to 2.5 meters lower on Pasu Smooth Regen, B180 and Controlsphere), and bots started lower too. You now see from where KovaaK's puts your eye, and bots start where they do there. AimAdapt runs of those scenarios from before were played from the wrong height.
 - KovaaK's scenarios played here: bots whose health drains on their own now go when it runs out and the next one comes (VT Aether, VT PGT), bots listed in a set order come in that order (VT Aether, B180), and invincible bots take hits but never go down (VT Snake Track, PGTI Voltaic). Before, VT Aether's first target stayed all run and Snake Track's bot could be killed.
 - Fixed: Air Pure and Air CELESTIAL showed as playable but scored nothing: they end when the bot runs out of lives and score the time left, which isn't played yet. They now say they can't be played yet.
 - Fixed: on KovaaK's maps with walls that are tilted sideways, those walls stood in the wrong place (VT Quadpulse's and 1w2ts Horizontal's rooms were below you, and DriftTS's walls that narrow your view cut across it). They now stand where KovaaK's puts them.

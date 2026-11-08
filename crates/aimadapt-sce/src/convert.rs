@@ -7,13 +7,12 @@
 //! Units and axes. KovaaK's (Unreal) uses centimeters with X forward, Y right and
 //! Z up. The sim uses meters with -Z forward, +X right and +Y up, with the player's
 //! eye at the origin facing -Z. Map positions and walls are multiplied by the
-//! scenario's `MapScale`; character sizes, speeds and spawn offsets are not. That
-//! reading of `MapScale` is still to be checked against KovaaK's (phase 4), so it
-//! lives in [`map_point`] alone.
+//! scenario's `MapScale`; character sizes, speeds and spawn offsets are not (for
+//! character heights that's checked against KovaaK's, at map scale 1 and 4).
 //!
 //! Reflex maps (the older format) are in centimeters too, with X right, Y up and Z
-//! forward, and their spawn points are where a character's feet go; JSON spawn
-//! points are its middle.
+//! forward, and KovaaK's puts a character's middle its whole height above their
+//! spawn points; JSON spawn points are its middle.
 
 use std::path::Path;
 
@@ -526,8 +525,7 @@ fn world(
     notes: &mut Vec<String>,
 ) -> Option<World> {
     let reflex = map.format == MapFormat::Reflex;
-    // Reflex maps mark where a character's feet go; the player's own start comes
-    // first if the map says which one it is.
+    // The player's own start comes first if the map says which one it is.
     let mut starts: Vec<_> = map.spawns.iter().filter(|s| team_can_use(s.teams, player_team)).collect();
     starts.sort_by_key(|s| !s.initial);
     let Some(start) = starts.first().copied() else {
@@ -535,7 +533,11 @@ fn world(
         return None;
     };
     let point = |v: [f32; 3]| if reflex { reflex_point(v, map_scale) } else { map_point(v, map_scale) };
-    let feet = |height: f32| if reflex { Vec3::Y * height / 2.0 } else { Vec3::ZERO };
+    // KovaaK's puts a character's middle its whole height above the point it appears
+    // at, on both map formats: measured with test maps for players 2 to 300 units
+    // tall, radius 1 to 55, map scale 1 and 4, standing or floating, and still bots
+    // on spawn points and volumes. So its feet are half its height above the point.
+    let rise = |height: f32| Vec3::Y * height;
 
     // The walls, first where the map has them: where the player stands depends on them.
     let mut meshes = Vec::new();
@@ -608,27 +610,29 @@ fn world(
         }
     }
 
-    // Where the player stands. A character that appears overlapping the floor is
-    // lifted onto it, as Unreal does; the eye is its camera offset above that.
+    // Where the player stands: lifted onto a floor it overlaps, or pulled down onto
+    // one within its step-up height, as Unreal's walking movement does (both measured
+    // in KovaaK's). The eye is the camera offset above its middle, or with a head, above
+    // the top of its body (and half the head's offset higher: one measurement).
     let mut body = point(start.position);
     let mut camera = Vec3::ZERO;
     if let Some(p) = player {
         let lo = axes(p.vec3("SpawnOffsetMin").unwrap_or_default());
         let hi = axes(p.vec3("SpawnOffsetMax").unwrap_or_default());
         let height = p.f32_or("MainBBHeight", 0.0).max(0.0) / UU_PER_M;
-        let radius = (p.f32_or("MainBBRadius", 0.0).max(0.0) / UU_PER_M).min(height / 2.0);
-        body += (lo + hi) / 2.0 / UU_PER_M + feet(height);
+        let head = p.is("MainBBHasHead");
+        // The capsule Unreal stands on floors: a head reaches its radius further each way.
+        let head_radius = if head { p.f32_or("MainBBHeadRadius", 0.0).max(0.0) / UU_PER_M } else { 0.0 };
+        let half = height / 2.0 + head_radius;
+        let radius = (p.f32_or("MainBBRadius", 0.0).max(0.0) / UU_PER_M).min(half);
+        let step_up = p.f32_or("StepUpHeight", 0.0).max(0.0) / UU_PER_M;
+        body += (lo + hi) / 2.0 / UU_PER_M + rise(height);
         if radius > 0.0 {
-            body = aimadapt_sim::collide::Collider::for_bots(&meshes).lift_out(body, height / 2.0 - radius, radius);
+            body = aimadapt_sim::collide::Collider::for_bots(&meshes).stand(body, half - radius, radius, step_up);
         }
         camera = axes(p.vec3("CameraOffset").unwrap_or_default()) / UU_PER_M;
-        // Checked against KovaaK's: short players (2 and 20 units) see from here, but
-        // tall ones (230, 300) see from 160–250 units higher, by a rule not worked out.
-        if reflex && p.f32_or("MainBBHeight", 0.0) > 100.0 {
-            notes.push(
-                "on older (Reflex) maps KovaaK's puts a tall player's eye higher than here, so you see from a little lower than there"
-                    .into(),
-            );
+        if head {
+            camera.y += height / 2.0 + p.f32_or("MainBBHeadOffset", 0.0) / 2.0 / UU_PER_M;
         }
     }
     let eye = body + camera;
@@ -666,11 +670,12 @@ fn world(
             a => a.unwrap_or_default(),
         });
         let axis = |v: [f32; 3]| (turn * axes((q * glam::Vec3::from_array(v)).to_array())).to_array();
-        let pos = place(point(s.position) + feet(bot_height));
+        let at = place(point(s.position));
+        let pos = at + rise(bot_height);
         // A volume is a box placed like a `Cube`: from its lowest corner, 100 units
-        // per scale step, turned by its rotation.
+        // per scale step, turned by its rotation. Bots rise from wherever in it they appear.
         let edges = s.volume.as_ref().map_or([[0.0; 3]; 3], |v| {
-            let corner = |c: [f32; 3]| place(map_point(transform(v, c), map_scale)) - pos;
+            let corner = |c: [f32; 3]| place(map_point(transform(v, c), map_scale)) - at;
             [corner([CUBE_UU, 0.0, 0.0]), corner([0.0, CUBE_UU, 0.0]), corner([0.0, 0.0, CUBE_UU])]
                 .map(|e| e.to_array())
         });
@@ -904,10 +909,11 @@ MainBBHeight=40.0
         let world = imported.scenario.world.unwrap();
         let mut rng = aimadapt_sim::sim::Rng::new(5);
         let points: Vec<Vec3> = (0..200).map(|_| world.spawn_pos(&mut rng, &[], 0.2, Vec3::NEG_Z)).collect();
-        // Unreal x 1000–1100, y −400–400, z −100–100 is sim z −10 to −11, x −4 to 4, y −1 to 1.
+        // Unreal x 1000–1100, y −400–400, z −100–100 is sim z −10 to −11, x −4 to 4, y −1
+        // to 1, and the 0.4 m balls' middles are their height above that: y −0.6 to 1.4.
         for p in &points {
             assert!(
-                (-4.0..=4.0).contains(&p.x) && (-1.0..=1.0).contains(&p.y) && (-11.0..=-10.0).contains(&p.z),
+                (-4.0..=4.0).contains(&p.x) && (-0.6..=1.4).contains(&p.y) && (-11.0..=-10.0).contains(&p.z),
                 "{p}"
             );
         }
@@ -1092,14 +1098,65 @@ MainBBHeight=40.0
         assert_eq!(w.meshes.len(), 3, "the weapon clip is left out");
         assert!(w.meshes[1].clip && !w.meshes[1].decor);
         assert!(w.meshes[2].decor && !w.meshes[2].clip);
-        // The floor's top is 1.6 m below the eye: the 2 m player stands on it (its
-        // middle 1 m up), and the camera is 0.6 m above its middle.
+        // The floor's top is 1.62 m below the eye: the 2 m player stands 2 cm above it
+        // (its middle 1.02 m up), and the camera is 0.6 m above its middle.
         let floor_top = w.meshes[0].positions.iter().map(|p| p[1]).fold(f32::MIN, f32::max);
-        assert!((floor_top - -1.6).abs() < 0.02, "{floor_top}");
+        assert!((floor_top - -1.62).abs() < 0.005, "{floor_top}");
         // Shots pass the clip wall but not the floor.
         let walls = aimadapt_sim::collide::Collider::new(&w.meshes);
         assert_eq!(walls.ray(Vec3::ZERO, Vec3::NEG_Z, 20.0), None);
         assert!(walls.ray(Vec3::ZERO, Vec3::NEG_Y, 20.0).is_some());
+    }
+
+    /// [`VOLUME_SCE`] with a 2.3 m player (plus `player` settings) appearing `spawn_z`
+    /// units above a floor whose top is at z = 0, and how far below the eye that floor
+    /// and the bots' spawn volume's lowest corner (100 units under the floor) are.
+    fn standing(player: &str, spawn_z: f32) -> (f32, f32) {
+        let text = VOLUME_SCE
+            .replace(
+                "MaxSpeed=0.0\nWeaponProfileNames",
+                &format!("MaxSpeed=0.0\nMainBBRadius=55.0\nMainBBHeight=230.0\n{player}WeaponProfileNames"),
+            )
+            .replace("\"location\": \"0, 0, 0\"", &format!("\"location\": \"0, 0, {spawn_z}\""))
+            .replace("\n]}", &format!("{}\n]}}", brush_json("Cube", "-2000, -2000, -16", "0, 0, 0", "40, 40, 0.16")));
+        let w = convert(&Sce::parse(&text), "box.sce", "0").unwrap().scenario.world.unwrap();
+        let floor = w.meshes[0].positions.iter().map(|p| p[1]).fold(f32::MIN, f32::max);
+        (-floor, -w.spawns[0].pos[1])
+    }
+
+    /// Bug: characters stood lower than in KovaaK's, by up to their whole height.
+    /// Measured there with test maps (`AimAdapt - Eye Test …`, 23 of them): on both map
+    /// formats a character's middle starts its whole height (`MainBBHeight`) above
+    /// the point it appears at, players, bots and spawn volumes alike, and the eye is
+    /// the camera offset above that. With a head (`MainBBHasHead`) the eye is at the
+    /// top of the body instead (and half the head's offset higher), and the capsule
+    /// Unreal stands on floors reaches the head's radius further each way. A
+    /// character whose feet are within `StepUpHeight` (and 2.4 units) above a floor is
+    /// pulled down onto it, and one on a floor stands 2 units above it.
+    #[test]
+    fn characters_start_their_height_above_where_they_appear() {
+        let near = |got: f32, want: f32| assert!((got - want).abs() < 0.005, "{got} != {want}");
+        // Floating 5 m up: the eye is 2.3 m above the spawn point (KovaaK's: 729.7
+        // units over a floor 500 below), and the 0.4 m ball's middle 0.4 m above its
+        // volume's corner, 1 m below the floor.
+        let (floor, volume) = standing("", 500.0);
+        near(floor, 7.3);
+        near(volume, 7.3 + 1.0 - 0.4);
+        // A camera offset adds to it.
+        near(standing("CameraOffset=X=0.000 Y=0.000 Z=50.000\n", 500.0).0, 7.8);
+        // With a head the eye is the top of the body: 1.15 m higher (844.9 units).
+        let head = "MainBBHasHead=true\nMainBBHeadRadius=45.0\nMainBBHeadOffset=0.0\n";
+        near(standing(head, 500.0).0, 8.45);
+        // Standing on the floor with a 75-unit step-up: the head's capsule (1.6 m
+        // each way from the middle) has its feet 0.7 m up, within the step, so it's
+        // pulled down to 2 cm above the floor and the eye is at 1.62 + 1.15 m (276.6
+        // units in KovaaK's). With a 30-unit step it stays up: 3.45 m (344.7).
+        near(standing(&format!("{head}StepUpHeight=75.0\n"), 0.0).0, 2.77);
+        near(standing(&format!("{head}StepUpHeight=30.0\n"), 0.0).0, 3.45);
+        // No head and a 120-unit step: the feet are 1.15 m up, so it's pulled down
+        // too, and sees from 1.17 m (116.5 units).
+        near(standing("StepUpHeight=120.0\n", 0.0).0, 1.17);
+        near(standing("StepUpHeight=75.0\n", 0.0).0, 2.3);
     }
 
     /// A made-up brush for [`VOLUME_SCE`]'s map, which has `MapScale=1`: 100 units a meter.
@@ -1250,32 +1307,40 @@ MainBBHeight=40.0
         \t\tfaces\n\
         \t\t\t0.000000 0.000000 1.000000 1.000000 0.000000 0 1 2 3 0x00000000 internal/editor/textures/editor_clip\n";
 
-    /// Reflex maps: centimeters with X right, Y up and Z forward, yaw first, and
-    /// spawn points where a character's feet go.
+    /// Reflex maps: centimeters with X right, Y up and Z forward, and yaw first.
+    ///
+    /// Bug: characters stood half their height too low on these maps, so tamTS's
+    /// 300-unit player saw from inside the pit KovaaK's has them look down into.
+    /// Measured in KovaaK's with test maps, a character's middle is its whole
+    /// height (`MainBBHeight`) above its spawn point, whatever its radius or the
+    /// map scale, standing or floating: the eye is the spawn plus the height plus
+    /// the camera offset, and a still 200-unit ball's middle is 200 units up.
     #[test]
     fn reflex_maps_play() {
+        let floor_top = |w: &World| w.meshes[0].positions.iter().map(|p| p[1]).fold(f32::MIN, f32::max);
         let imported = convert(&Sce::parse(REFLEX_SCE), "old.sce", "0").unwrap();
         let w = imported.scenario.world.unwrap();
         // The player faces +X at yaw 90, and the bot's spawn is 5 m that way, times
-        // MapScale 2: 10 m straight ahead. Spawn points are where feet go, and sizes
-        // aren't scaled: the 1 m player's eye (its middle) is 0.5 m above the floor,
-        // and the 0.4 m ball's middle 0.2 m above it.
+        // MapScale 2: 10 m straight ahead. Sizes aren't scaled: the 1 m player's eye
+        // is 1 m above the floor, and the 0.4 m ball's middle 0.4 m above it.
         let bot = Vec3::from_array(w.spawns[0].pos);
-        assert!((bot - Vec3::new(0.0, -0.3, -10.0)).length() < 1e-3, "{bot}");
+        assert!((bot - Vec3::new(0.0, -0.6, -10.0)).length() < 1e-3, "{bot}");
         // The floor's top face, and the clip wall, invisible.
         assert_eq!(w.meshes.len(), 2);
-        let top = w.meshes[0].positions.iter().map(|p| p[1]).fold(f32::MIN, f32::max);
-        assert!((top - -0.5).abs() < 1e-3, "{top}");
+        assert!((floor_top(&w) - -1.0).abs() < 1e-3, "{}", floor_top(&w));
         assert_eq!(w.meshes[0].triangles.len(), 4, "two quads, two triangles each");
         assert!(w.meshes[1].clip);
         assert!(!imported.notes.iter().any(|n| n.contains("Reflex")), "{:?}", imported.notes);
-        // KovaaK's puts a tall player's eye higher on these maps than the spawn and
-        // half their height (tamTS, Air Pure, Pasu Smooth Regen), by a rule not
-        // worked out yet: such scenarios say so.
-        let tall =
-            REFLEX_SCE.replace("MainBBHeight=100.0\nWeaponProfileNames", "MainBBHeight=300.0\nWeaponProfileNames");
-        let notes = convert(&Sce::parse(&tall), "old.sce", "0").unwrap().notes;
-        assert!(notes.iter().any(|n| n.starts_with("on older (Reflex) maps")), "{notes:?}");
+        // A camera offset adds to the height: 3 m tall with the camera 0.8 m up sees
+        // from 3.8 m (the test map in KovaaK's: 379.8 units).
+        let tall = REFLEX_SCE.replace(
+            "MainBBHeight=100.0\nWeaponProfileNames",
+            "MainBBHeight=300.0\nCameraOffset=X=0.000 Y=0.000 Z=80.000\nWeaponProfileNames",
+        );
+        let imported = convert(&Sce::parse(&tall), "old.sce", "0").unwrap();
+        let w = imported.scenario.world.unwrap();
+        assert!((floor_top(&w) - -3.8).abs() < 1e-3, "{}", floor_top(&w));
+        assert!(!imported.notes.iter().any(|n| n.contains("Reflex")), "{:?}", imported.notes);
     }
 
     /// Bugs: health regen was left out (Pokeball Small heals 4 hp/s), the player's
