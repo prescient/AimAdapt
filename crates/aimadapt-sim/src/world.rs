@@ -35,6 +35,10 @@ pub struct World {
     pub cluster: bool,
     /// The score is multiplied by accuracy, or by its square root.
     pub accuracy_mult: AccuracyMult,
+    /// Bots take hits, and their damage counts, but never go down (KovaaK's
+    /// `InvincibleBots`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub invincible: bool,
     /// The horizontal field of view is kept within this range, in degrees.
     pub fov_range: Option<[f32; 2]>,
     /// Map geometry to draw.
@@ -57,6 +61,11 @@ pub struct World {
     pub kinds: Vec<WorldKind>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub slots: Vec<Vec<(u32, f32)>>,
+    /// For each slot, the rotation it takes its kinds from in turn (KovaaK's
+    /// `Randomized=false`), or none to pick by weight. Slots that name the same
+    /// rotation take turns from it together. Empty when every slot picks by weight.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rotations: Vec<Option<u32>>,
 }
 
 /// One kind of bot in a scenario with several: its hitbox, health, look and
@@ -265,6 +274,9 @@ impl World {
         if self.slots.iter().flatten().any(|(k, _)| *k >= kinds) || self.slots.iter().any(Vec::is_empty) {
             p.push("a bot slot refers to a kind of bot the world doesn't have".into());
         }
+        if !self.rotations.is_empty() && self.rotations.len() != self.slots.len() {
+            p.push("bot slots and their rotations don't match up".into());
+        }
         let spawns = self.spawns.len() as u32;
         for k in &self.kinds {
             if k.radius.is_nan() || k.radius <= 0.0 || k.health.is_nan() || k.health <= 0.0 {
@@ -279,10 +291,20 @@ impl World {
         p
     }
 
-    /// The kind to fill bot slot `slot` with, picked by weight; none when the
-    /// world has one kind of bot.
-    pub fn pick_kind(&self, rng: &mut Rng, slot: usize) -> Option<u32> {
+    /// The kind to fill bot slot `slot` with: the next in turn when the slot takes
+    /// them in order (`turns` counts each rotation's picks so far), otherwise picked
+    /// by weight; none when the world has one kind of bot.
+    pub fn pick_kind(&self, rng: &mut Rng, slot: usize, turns: &mut Vec<u32>) -> Option<u32> {
         let choices = self.slots.get(slot)?;
+        if let Some(r) = self.rotations.get(slot).copied().flatten().filter(|_| !choices.is_empty()) {
+            let r = r as usize;
+            if turns.len() <= r {
+                turns.resize(r + 1, 0);
+            }
+            let k = choices[turns[r] as usize % choices.len()].0;
+            turns[r] += 1;
+            return Some(k);
+        }
         let total: f32 = choices.iter().map(|(_, w)| w.max(0.0)).sum();
         let mut x = rng.next_f32() * total;
         for (k, w) in choices {

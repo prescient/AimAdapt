@@ -104,10 +104,29 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
     let player_team = top.f32_or("PlayerTeam", 1.0).max(1.0) as u32;
     let other_team = if player_team == 1 { 2 } else { 1 };
 
+    // Rules that decide the score or when a run ends, not played yet: Air Pure ends
+    // when its bot runs out of lives and scores the time left.
+    if top.f32_or("BotMaxLives", 0.0) > 0.0 && !top.is("InvincibleBots") {
+        push_once(&mut reasons, "bots with a set number of lives (the run ends when they run out)");
+    }
+    if top.f32_or("ScorePerTime", 0.0) != 0.0 {
+        push_once(&mut reasons, "a score for time");
+    }
+    for (key, what) in
+        [("ScoreMultDamageEfficiency", "damage efficiency"), ("ScoreMultKillEfficiency", "kill efficiency")]
+    {
+        if top.is(key) {
+            reasons.push(format!("a score multiplied by {what}"));
+        }
+    }
+
     // The bots. Each bot that looks or moves differently is a kind of its own; each
-    // entry of `AddedBots` is a slot, filled by one of its kinds by weight.
+    // entry of `AddedBots` is a slot, filled by one of its kinds by weight, or in turn
+    // from a rotation that isn't randomized (slots naming the same one share turns).
     let mut kinds: Vec<(&Section, Option<Motion>)> = Vec::new();
     let mut slots: Vec<Vec<(u32, f32)>> = Vec::new();
+    let mut rotations: Vec<Option<u32>> = Vec::new();
+    let mut rotation_names: Vec<String> = Vec::new();
     let mut teams = Vec::new();
     for slot in &r.bots {
         // Team 0 (some Pasu files) plays as the player's opponents.
@@ -132,6 +151,15 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
             choices.push((k as u32, c.weight.max(0.0)));
         }
         if !choices.is_empty() {
+            let in_turn = (slot.in_order && choices.len() > 1).then(|| {
+                let name = slot.reference.trim().to_ascii_lowercase();
+                let at = rotation_names.iter().position(|n| *n == name).unwrap_or_else(|| {
+                    rotation_names.push(name);
+                    rotation_names.len() - 1
+                });
+                at as u32
+            });
+            rotations.push(in_turn);
             slots.push(choices);
         }
     }
@@ -213,7 +241,7 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
                 height,
                 health: ch.f32_or("MaxHealth", 100.0).max(0.001),
                 color: body_color(ch).unwrap_or_else(|| WorldKind::default().color),
-                regen_per_s: ch.f32_or("HealthRegenPerSec", 0.0).max(0.0),
+                regen_per_s: ch.f32_or("HealthRegenPerSec", 0.0),
                 regen_delay_s: ch.f32_or("HealthRegenDelay", 0.0).clamp(0.0, 10.0),
                 respawn_delay_s: respawn_delay(ch),
                 motion: m.clone(),
@@ -221,6 +249,9 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
             });
         }
         world.slots = slots;
+        if rotations.iter().any(Option::is_some) {
+            world.rotations = rotations;
+        }
     } else {
         world.motion = motion;
     }
@@ -231,6 +262,7 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
         (true, false) => AccuracyMult::Linear,
         _ => AccuracyMult::None,
     };
+    world.invincible = top.is("InvincibleBots");
     if top.is("LockFOVRange") {
         let lo = top.f32_or("LockedFOVMin", 0.0);
         let hi = top.f32_or("LockedFOVMax", 180.0);
@@ -285,13 +317,10 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
     if let Some(c) = body_color(bot) {
         t.color = c;
     }
-    // Regen counts from the last hit. Negative regen isn't played.
-    let regen = bot.f32_or("HealthRegenPerSec", 0.0);
-    t.regen_per_s = regen.max(0.0);
+    // Regen counts from the last hit. Negative regen drains the bot until it goes
+    // (VT Aether's last 19 s).
+    t.regen_per_s = bot.f32_or("HealthRegenPerSec", 0.0);
     t.regen_delay_s = bot.f32_or("HealthRegenDelay", 0.0).clamp(0.0, 10.0);
-    if characters.iter().any(|ch| ch.f32_or("HealthRegenPerSec", 0.0) < 0.0) {
-        notes.push("negative health regen is left out".into());
-    }
     if weapon.f32_or("HitscanRadius", 0.0) > 1.0 {
         notes.push("the weapon's hit radius is left out".into());
     }
@@ -593,6 +622,14 @@ fn world(
             body = aimadapt_sim::collide::Collider::for_bots(&meshes).lift_out(body, height / 2.0 - radius, radius);
         }
         camera = axes(p.vec3("CameraOffset").unwrap_or_default()) / UU_PER_M;
+        // Checked against KovaaK's: short players (2 and 20 units) see from here, but
+        // tall ones (230, 300) see from 160–250 units higher, by a rule not worked out.
+        if reflex && p.f32_or("MainBBHeight", 0.0) > 100.0 {
+            notes.push(
+                "on older (Reflex) maps KovaaK's puts a tall player's eye higher than here, so you see from a little lower than there"
+                    .into(),
+            );
+        }
     }
     let eye = body + camera;
     // JSON rotations are written roll, pitch, yaw, and Reflex ones yaw first; turn
@@ -713,10 +750,11 @@ fn player_block(p: &Section) -> Option<PlayerBlock> {
 }
 
 /// A JSON rotation (roll, pitch, yaw in degrees, as written) as a rotation of
-/// Unreal coordinates: yaw turns forward toward right, pitch raises it toward up.
+/// Unreal coordinates, as Unreal's `FRotator` turns them: yaw turns forward toward
+/// right, pitch raises it toward up, and roll lowers right toward down.
 fn ue_rotation(r: [f32; 3]) -> glam::Quat {
     let [roll, pitch, yaw] = r.map(f32::to_radians);
-    glam::Quat::from_rotation_z(yaw) * glam::Quat::from_rotation_y(-pitch) * glam::Quat::from_rotation_x(roll)
+    glam::Quat::from_rotation_z(yaw) * glam::Quat::from_rotation_y(-pitch) * glam::Quat::from_rotation_x(-roll)
 }
 
 /// A local point of a placed brush, in Unreal map units: scaled, rotated, then
@@ -767,6 +805,31 @@ mod tests {
         // Yaw 90: facing right. Pitch -15: looking down.
         assert!((ue_rotation([0.0, 0.0, 90.0]) * fwd - glam::Vec3::Y).length() < 1e-5);
         assert!((ue_rotation([0.0, -15.0, 0.0]) * fwd).z < 0.0);
+    }
+
+    /// Bug: roll turned the wrong way, so rolled walls stood in the wrong place: VT
+    /// Pulseshot's and horizontal map's rooms were all below the player, and DriftTS's
+    /// view-limiting ramps crossed the view. A rotation is Unreal's `FRotator`, whose
+    /// matrix has these rows (where forward, right and up end up).
+    #[test]
+    fn rotations_follow_unreals_rotator() {
+        for [roll, pitch, yaw] in [[30.0, 0.0, 0.0], [-45.0, -90.0, 0.0], [144.5, 90.0, 9.5], [20.0, 35.0, -70.0]] {
+            let [r, p, y] = [roll, pitch, yaw].map(|a: f32| a.to_radians());
+            let (cr, sr, cp, sp, cy, sy) = (r.cos(), r.sin(), p.cos(), p.sin(), y.cos(), y.sin());
+            let rows = [
+                glam::Vec3::new(cp * cy, cp * sy, sp),
+                glam::Vec3::new(sr * sp * cy - cr * sy, sr * sp * sy + cr * cy, -sr * cp),
+                glam::Vec3::new(-(cr * sp * cy + sr * sy), cy * sr - cr * sp * sy, cr * cp),
+            ];
+            let q = ue_rotation([roll, pitch, yaw]);
+            for (axis, row) in [glam::Vec3::X, glam::Vec3::Y, glam::Vec3::Z].into_iter().zip(rows) {
+                assert!(
+                    (q * axis - row).length() < 1e-4,
+                    "{roll} {pitch} {yaw}: {axis} went to {}, not {row}",
+                    q * axis
+                );
+            }
+        }
     }
 
     #[test]
@@ -1039,6 +1102,126 @@ MainBBHeight=40.0
         assert!(walls.ray(Vec3::ZERO, Vec3::NEG_Y, 20.0).is_some());
     }
 
+    /// A made-up brush for [`VOLUME_SCE`]'s map, which has `MapScale=1`: 100 units a meter.
+    fn brush_json(mesh: &str, loc: &str, rot: &str, scale: &str) -> String {
+        format!(
+            ",\n {{\"type\": \"brush\", \"name\": \"Default\", \"mesh\": \"{mesh}\", \"location\": \"{loc}\", \"rotation\": \"{rot}\", \"scale\": \"{scale}\"}}"
+        )
+    }
+
+    fn world_with(brushes: &[String]) -> World {
+        let text = VOLUME_SCE.replace("\n]}", &format!("{}\n]}}", brushes.concat()));
+        convert(&Sce::parse(&text), "box.sce", "0").unwrap().scenario.world.unwrap()
+    }
+
+    /// A level ray from the eye, `deg` degrees right of straight ahead.
+    fn level(deg: f32) -> Vec3 {
+        let a = deg.to_radians();
+        Vec3::new(a.sin(), 0.0, -a.cos())
+    }
+
+    /// Bug: DriftTS's two ramps that limit the view to 90° were drawn as slanted planes
+    /// across it, and passed shots through. A `Ramp` is placed from its corner like a
+    /// `Cube`, its slope runs across it (Y to Z), and roll turns as in Unreal: rolled
+    /// -45° and pitched -90°, this one stands with its side on the line 45° left of
+    /// straight ahead, its near end 6 m out.
+    #[test]
+    fn a_ramp_turned_to_limit_the_view_has_its_side_on_the_limit() {
+        let w = world_with(&[brush_json("Ramp", "282.843, -565.685, 200", "-45, -90, 0", "4, 2, 6")]);
+        assert!(!w.meshes[0].decor, "a ramp is solid");
+        let walls = aimadapt_sim::collide::Collider::new(&w.meshes);
+        // Just past the limit, the ramp's near end stops the shot about 6 m out.
+        let hit = walls.ray(Vec3::ZERO, level(-50.0), 20.0).expect("the ramp stops a shot past the limit");
+        assert!((hit - 6.0 / 5f32.to_radians().cos()).abs() < 0.02, "{hit}");
+        // Inside the limit, nothing does.
+        assert_eq!(walls.ray(Vec3::ZERO, level(-40.0), 20.0), None);
+    }
+
+    /// Bug: the curved wall of VT ww5t's map (and Aether's, PGT's, Snake Track's) was
+    /// drawn as four skate ramps off its corners, and passed shots. A `Concave` is a
+    /// block placed from its corner with a quarter circle cut from the far corner, seen
+    /// from above: four of them, turned to a square room's corners, make it round.
+    #[test]
+    fn four_concave_corners_make_a_round_room() {
+        // 15 m across, around the bots' spawn volume 10 m ahead.
+        let w = world_with(&[
+            brush_json("Concave", "-1500, -1500, -300", "0, 0, 0", "15, 15, 6"),
+            brush_json("Concave", "1500, -1500, -300", "0, 0, 90", "15, 15, 6"),
+            brush_json("Concave", "1500, 1500, -300", "0, 0, 180", "15, 15, 6"),
+            brush_json("Concave", "-1500, 1500, -300", "0, 0, -90", "15, 15, 6"),
+        ]);
+        let walls = aimadapt_sim::collide::Collider::new(&w.meshes);
+        for deg in [0.0, 20.0, 45.0, 70.0, 90.0, 135.0, 180.0, -100.0, -45.0] {
+            let hit = walls.ray(Vec3::ZERO, level(deg), 40.0).unwrap_or(f32::MAX);
+            assert!((hit - 15.0).abs() < 0.05, "{deg}°: {hit}");
+        }
+    }
+
+    /// Bug: VT ControlTS's floor, a `WedgeB`, was drawn as a narrow ramp to one side and
+    /// passed shots. Like a `Ramp`, its slope runs across it from its high corner: turned
+    /// 90°, this floor is 1 m higher at the far end, as ControlTS's is in KovaaK's.
+    #[test]
+    fn a_wedge_floor_rises_away_from_its_low_end() {
+        let w = world_with(&[brush_json("WedgeB", "800, -500, -300", "0, 0, 90", "10, 8, 1")]);
+        let walls = aimadapt_sim::collide::Collider::new(&w.meshes);
+        // Straight down from 1 m and 7 m ahead: the top is 3 m - x / 8 below the eye.
+        for x in [1.0, 7.0] {
+            let drop = walls.ray(Vec3::new(0.0, 0.0, -x), Vec3::NEG_Y, 10.0).expect("the wedge is solid");
+            assert!((drop - (3.0 - x / 8.0)).abs() < 0.01, "{x} m ahead: {drop}");
+        }
+    }
+
+    /// Bug: VT Aether's three targets (a rotation with `Randomized=false`, each losing
+    /// 100 health a second) were picked at random and never drained. Made up here: a
+    /// rotation of two bots that differ in health, taken in turn, both draining.
+    #[test]
+    fn rotations_in_order_and_draining_health_come_through() {
+        let text = VOLUME_SCE
+            .replace("AddedBots=Dot.bot;Dot.bot;Dot.bot", "AddedBots=Turns.rot")
+            .replace("BotTeams=2;2;2", "BotTeams=2")
+            .replace(
+                "[Bot Profile]",
+                "[Bot Rotation Profile]\nName=Turns\nProfileNames=Dot;Big Dot\nProfileWeights=1.0;1.0\nRandomized=false\n\
+                 [Bot Profile]\nName=Big Dot\nCharacterProfile=Big Ball\n\
+                 [Character Profile]\nName=Big Ball\nMaxHealth=50.0\nHealthRegenPerSec=-10.0\nMaxSpeed=0.0\nMainBBType=Spheroid\nMainBBRadius=20.0\nMainBBHeight=40.0\n\
+                 [Bot Profile]",
+            )
+            .replace("MaxHealth=1.0\nMaxSpeed=0.0\nMainBBType", "MaxHealth=1.0\nHealthRegenPerSec=-10.0\nMaxSpeed=0.0\nMainBBType");
+        let i = convert(&Sce::parse(&text), "box.sce", "0").unwrap();
+        let w = i.scenario.world.unwrap();
+        assert_eq!(w.kinds.len(), 2);
+        assert_eq!(w.slots, vec![vec![(0, 1.0), (1, 1.0)]]);
+        assert_eq!(w.rotations, vec![Some(0)]);
+        assert!(w.kinds.iter().all(|k| k.regen_per_s == -10.0), "{:?}", w.kinds);
+        assert!(!i.notes.iter().any(|n| n.contains("negative")), "{:?}", i.notes);
+        // Picked by weight when the rotation is randomized.
+        let random = text.replace("Randomized=false", "Randomized=true");
+        let w = convert(&Sce::parse(&random), "box.sce", "0").unwrap().scenario.world.unwrap();
+        assert!(w.rotations.is_empty(), "{:?}", w.rotations);
+    }
+
+    /// Bug: Air Pure and Air CELESTIAL end when the bot runs out of lives and score
+    /// the time left, which isn't played: they played 1000 s scoring nothing. Rules
+    /// that decide the score or when a run ends say they can't be played yet.
+    #[test]
+    fn bot_lives_and_unplayed_score_rules_cant_play_yet() {
+        let lives = VOLUME_SCE.replace("ScorePerKill=1.0", "ScorePerKill=0.0\nBotMaxLives=5\nScorePerTime=1.0");
+        let r = reasons(&lives);
+        assert!(r.iter().any(|x| x.starts_with("bots with a set number of lives")), "{r:?}");
+        assert!(r.iter().any(|x| x.starts_with("a score for time")), "{r:?}");
+        // Bots that can't die never run out of lives.
+        let invincible = VOLUME_SCE.replace("ScorePerKill=1.0", "ScorePerKill=1.0\nBotMaxLives=1\nInvincibleBots=true");
+        assert!(!reasons(&invincible).iter().any(|x| x.contains("lives")), "{:?}", reasons(&invincible));
+        // Bug: `InvincibleBots` was ignored (VT Snake Track), so its bot died.
+        assert!(convert(&Sce::parse(&invincible), "box.sce", "0").unwrap().scenario.world.unwrap().invincible);
+        let eff = VOLUME_SCE.replace("ScorePerKill=1.0", "ScorePerKill=1.0\nScoreMultDamageEfficiency=true");
+        assert!(
+            reasons(&eff).iter().any(|x| x.starts_with("a score multiplied by damage efficiency")),
+            "{:?}",
+            reasons(&eff)
+        );
+    }
+
     /// Skeet Tracking's targets stand behind its walls until something launches them,
     /// which isn't played: still targets that are all out of sight can't be played.
     #[test]
@@ -1086,6 +1269,13 @@ MainBBHeight=40.0
         assert_eq!(w.meshes[0].triangles.len(), 4, "two quads, two triangles each");
         assert!(w.meshes[1].clip);
         assert!(!imported.notes.iter().any(|n| n.contains("Reflex")), "{:?}", imported.notes);
+        // KovaaK's puts a tall player's eye higher on these maps than the spawn and
+        // half their height (tamTS, Air Pure, Pasu Smooth Regen), by a rule not
+        // worked out yet: such scenarios say so.
+        let tall =
+            REFLEX_SCE.replace("MainBBHeight=100.0\nWeaponProfileNames", "MainBBHeight=300.0\nWeaponProfileNames");
+        let notes = convert(&Sce::parse(&tall), "old.sce", "0").unwrap().notes;
+        assert!(notes.iter().any(|n| n.starts_with("on older (Reflex) maps")), "{notes:?}");
     }
 
     /// Bugs: health regen was left out (Pokeball Small heals 4 hp/s), the player's

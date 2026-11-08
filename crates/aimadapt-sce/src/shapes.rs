@@ -1,12 +1,21 @@
-//! Triangles for KovaaK's editor primitives other than `Cube`, made up from their
-//! names: KovaaK's own meshes aren't in the files, so these are our own versions.
+//! Triangles for KovaaK's editor primitives other than `Cube`. KovaaK's own meshes
+//! aren't in the files, so these are our own versions, fitted to how maps use them
+//! and to how those maps look in KovaaK's.
 //!
 //! Each shape fills a 100-unit box at scale 1, in Unreal axes (X forward, Y right,
-//! Z up). Unlike a `Cube`, which is placed from its lowest corner, these stand on
-//! their location and are centered on it sideways: a `Tube` arena has the player
-//! at its middle, and cylinders and tubes stand on floors at their location. Only
-//! cylinders and tubes, the shapes that evidence pins down, are solid; the rest
-//! are drawn so the map looks right, and shots and bots pass through them.
+//! Z up). Round shapes stand on their location and are centered on it sideways: a
+//! `Tube` arena has the player at its middle, and cylinders and tubes stand on
+//! floors at their location. Angular ones are placed from a corner, like a `Cube`:
+//! four `Concave`s at a square room's corners make it round (VT ww5t's map), and a
+//! `Ramp` turned to limit the view has its side on the limit (VT DriftTS's).
+//!
+//! The ramps' slopes run across them (Y to Z), high at the corner: so do the letters
+//! built from them on Clicking Static 5's wall, and VT ControlTS's floor, a `WedgeB`,
+//! rises toward its corner in KovaaK's. A `DoubleRamp` is the exception: centered on
+//! its peak, which runs along Y, as the middle of an M on that wall needs.
+//!
+//! Shapes these maps pin down are solid. The rest are drawn from their names so the
+//! map looks about right, and shots and bots pass through them.
 
 use std::f32::consts::{FRAC_PI_2, PI, TAU};
 
@@ -20,6 +29,18 @@ pub struct Shape {
 const R: f32 = 50.0;
 const H: f32 = 100.0;
 const SEGMENTS: usize = 32;
+
+/// Which local axes a prism's profile is drawn on; it's pushed along the third,
+/// from 0 to 100.
+#[derive(Clone, Copy)]
+enum Plane {
+    /// (Y, Z), pushed along X.
+    Across,
+    /// (X, Z), pushed along Y.
+    Side,
+    /// (X, Y), pushed up Z.
+    Plan,
+}
 
 /// The shape for a primitive's name, if there is one.
 pub fn primitive(mesh: &str) -> Option<Shape> {
@@ -46,43 +67,53 @@ pub fn primitive(mesh: &str) -> Option<Shape> {
             }
             s
         }
-        // Prisms: a side profile (x forward, z up) pushed across the width.
-        "ramp" => prism(&[(-R, 0.0), (R, 0.0), (R, H)]),
-        "halframp" => prism(&[(-R, 0.0), (R, 0.0), (R, H / 2.0)]),
-        "doubleramp" => prism(&[(-R, 0.0), (R, 0.0), (0.0, H)]),
-        "wedgea" => prism(&[(-R, 0.0), (R, 0.0), (R, H), (-R, H / 2.0)]),
-        "wedgeb" => prism(&[(-R, 0.0), (R, 0.0), (-R, H)]),
-        // A block with a quarter circle scooped out of its top, like a skate ramp. The
-        // profile starts at the corner that sees all of it, so a fan of triangles
-        // from there fills it.
-        "concave" | "rampconcave" => {
-            let mut p = vec![(R, 0.0), (R, H)];
-            p.extend(arc(-R, H, 2.0 * R, 0.0, -FRAC_PI_2, 12).into_iter().skip(1));
-            prism(&p)
-        }
-        // A quarter of a disk: the slope bulges out.
+        // The ramps: a profile across the shape, high at its corner.
+        "ramp" | "wedgeb" => prism(&[(0.0, 0.0), (H, 0.0), (0.0, H)], Plane::Across, true),
+        "halframp" => prism(&[(0.0, 0.0), (H, 0.0), (0.0, H / 2.0)], Plane::Across, false),
+        "wedgea" => prism(&[(0.0, 0.0), (H, 0.0), (H, H)], Plane::Across, false),
+        // The slope curves in (a quarter circle around the far corner) or bulges out
+        // (one around the near corner).
+        "rampconcave" => prism(&scooped(), Plane::Across, true),
         "rampconvex" => {
-            let mut p = vec![(-R, 0.0)];
-            p.extend(arc(-R, 0.0, 2.0 * R, 0.0, FRAC_PI_2, 12));
-            prism(&p)
+            let mut p = vec![(0.0, 0.0)];
+            p.extend(arc(0.0, 0.0, H, 0.0, FRAC_PI_2, 12));
+            prism(&p, Plane::Across, true)
         }
-        // Four steps up toward +X.
-        "stairsb" => {
-            let mut p = vec![(R, 0.0), (R, H)];
-            for k in 1..4 {
-                let x = R - k as f32 * R / 2.0;
-                p.push((x, H * (4 - k + 1) as f32 / 4.0));
-                p.push((x, H * (4 - k) as f32 / 4.0));
+        // The same scooped block standing up, curved as seen from above.
+        "concave" => prism(&scooped(), Plane::Plan, true),
+        // Two ramps back to back, peaking over its location.
+        "doubleramp" => {
+            let mut s = prism(&[(0.0, 0.0), (H, 0.0), (R, H)], Plane::Side, true);
+            for v in &mut s.vertices {
+                v[0] -= R;
             }
-            p.push((-R, H / 4.0));
-            p.push((-R, 0.0));
-            prism(&p)
+            s
+        }
+        // Four steps down from the corner, like the ramps.
+        "stairsb" => {
+            let mut p = vec![(0.0, 0.0), (H, 0.0)];
+            for k in (1..4).rev() {
+                let (y, z) = (H * k as f32 / 4.0, H * (4 - k) as f32 / 4.0);
+                p.push((y + H / 4.0, z));
+                p.push((y, z));
+            }
+            p.push((H / 4.0, H));
+            p.push((0.0, H));
+            prism(&p, Plane::Across, false)
         }
         "quadpyramid" => pyramid(&[(-R, -R), (R, -R), (R, R), (-R, R)], 0.0),
         "tripyramid" => pyramid(&[(-R, -R), (R, -R), (0.0, R)], 0.0),
         "truncatedpyramid" => pyramid(&[(-R, -R), (R, -R), (R, R), (-R, R)], 0.5),
         _ => return None,
     })
+}
+
+/// A square with a quarter circle around its far corner taken out, from its near
+/// corner: (0, 0), along the first axis, around the curve, and back.
+fn scooped() -> Vec<(f32, f32)> {
+    let mut p = vec![(0.0, 0.0)];
+    p.extend(arc(H, H, H, -FRAC_PI_2, -PI, 12));
+    p
 }
 
 /// Points along a circle around (cx, cz) from angle `a0` to `a1` (radians, 0 along
@@ -125,14 +156,19 @@ fn lathe(profile: &[(f32, f32)], sweep: f32, solid: bool) -> Shape {
     Shape { vertices, triangles, solid }
 }
 
-/// A side profile (x, z) pushed across the full width. Its ends are fans of
-/// triangles from the first point, which has to see the whole profile.
-fn prism(profile: &[(f32, f32)]) -> Shape {
+/// A profile on `plane`, pushed from 0 to 100 along the third axis. Its ends are
+/// fans of triangles from the first point, which has to see the whole profile.
+fn prism(profile: &[(f32, f32)], plane: Plane, solid: bool) -> Shape {
     let n = profile.len() as u32;
+    let place = |(u, v): (f32, f32), w: f32| match plane {
+        Plane::Across => [w, u, v],
+        Plane::Side => [u, w, v],
+        Plane::Plan => [u, v, w],
+    };
     let mut vertices: Vec<[f32; 3]> = Vec::new();
-    for y in [-R, R] {
-        for (x, z) in profile {
-            vertices.push([*x, y, *z]);
+    for w in [0.0, H] {
+        for p in profile {
+            vertices.push(place(*p, w));
         }
     }
     let mut triangles = Vec::new();
@@ -145,7 +181,7 @@ fn prism(profile: &[(f32, f32)]) -> Shape {
         triangles.push([k, j, n + j]);
         triangles.push([k, n + j, n + k]);
     }
-    Shape { vertices, triangles, solid: false }
+    Shape { vertices, triangles, solid }
 }
 
 /// A base polygon (x, y) at z = 0 rising to a point, or to a smaller copy of the
@@ -180,43 +216,83 @@ fn pyramid(base: &[(f32, f32)], top: f32) -> Shape {
 mod tests {
     use super::*;
 
+    const ROUND: [&str; 12] = [
+        "Cylinder",
+        "Tube",
+        "Pipe",
+        "Cone",
+        "Sphere",
+        "Dome",
+        "Torus",
+        "WideCapsule",
+        "NarrowCapsule",
+        "QuadPyramid",
+        "TriPyramid",
+        "TruncatedPyramid",
+    ];
+    const ANGULAR: [&str; 9] =
+        ["Ramp", "HalfRamp", "WedgeA", "WedgeB", "Concave", "RampConcave", "RampConvex", "StairsB", "DoubleRamp"];
+
+    fn bounds(s: &Shape, axis: usize) -> (f32, f32) {
+        let lo = s.vertices.iter().map(|v| v[axis]).fold(f32::MAX, f32::min);
+        let hi = s.vertices.iter().map(|v| v[axis]).fold(f32::MIN, f32::max);
+        (lo, hi)
+    }
+
     #[test]
-    fn shapes_fill_their_box_standing_on_their_location() {
-        for name in [
-            "Cylinder",
-            "Tube",
-            "Pipe",
-            "Cone",
-            "Sphere",
-            "Dome",
-            "Torus",
-            "WideCapsule",
-            "NarrowCapsule",
-            "Ramp",
-            "HalfRamp",
-            "DoubleRamp",
-            "WedgeA",
-            "WedgeB",
-            "Concave",
-            "RampConcave",
-            "RampConvex",
-            "StairsB",
-            "QuadPyramid",
-            "TriPyramid",
-            "TruncatedPyramid",
-        ] {
+    fn round_shapes_stand_centered_and_angular_ones_start_at_a_corner() {
+        for name in ROUND.iter().chain(&ANGULAR) {
             let s = primitive(name).unwrap_or_else(|| panic!("{name}"));
             let n = s.vertices.len() as u32;
             assert!(s.triangles.iter().flatten().all(|i| *i < n), "{name}");
             for k in 0..3 {
-                let lo = s.vertices.iter().map(|v| v[k]).fold(f32::MAX, f32::min);
-                let hi = s.vertices.iter().map(|v| v[k]).fold(f32::MIN, f32::max);
-                let (want_lo, want_hi) = if k == 2 { (0.0, H) } else { (-R, R) };
+                let (lo, hi) = bounds(&s, k);
+                let centered = ROUND.contains(name) || (*name == "DoubleRamp" && k == 0);
+                let (want_lo, want_hi) = if k == 2 || !centered { (0.0, H) } else { (-R, R) };
                 assert!(lo >= want_lo - 0.01 && hi <= want_hi + 0.01, "{name} axis {k}: {lo}..{hi}");
             }
         }
-        assert!(primitive("Cylinder").unwrap().solid && primitive("Tube").unwrap().solid);
-        assert!(!primitive("Ramp").unwrap().solid);
         assert!(primitive("Teapot").is_none());
+    }
+
+    #[test]
+    fn shapes_the_maps_pin_down_are_solid() {
+        for name in ["Cylinder", "Tube", "Ramp", "WedgeB", "Concave", "RampConcave", "RampConvex", "DoubleRamp"] {
+            assert!(primitive(name).unwrap().solid, "{name}");
+        }
+        for name in ["Sphere", "HalfRamp", "WedgeA", "StairsB", "QuadPyramid"] {
+            assert!(!primitive(name).unwrap().solid, "{name}");
+        }
+    }
+
+    /// A ramp's slope runs across it (Y to Z), high at its corner: its end is the
+    /// triangle (0, 0), (100, 0), (0, 100) and nothing is at the far top edge.
+    #[test]
+    fn ramps_slope_across_from_their_corner() {
+        for name in ["Ramp", "WedgeB"] {
+            let s = primitive(name).unwrap();
+            for c in [[0.0, 0.0, 0.0], [0.0, H, 0.0], [0.0, 0.0, H], [H, 0.0, H]] {
+                assert!(s.vertices.contains(&c), "{name} lacks {c:?}");
+            }
+            assert!(s.vertices.iter().all(|v| v[1] + v[2] <= H + 0.01), "{name}");
+        }
+    }
+
+    /// The scooped shapes keep away from their far corner by its width: around Z for a
+    /// `Concave`, seen from above, and around X for a `RampConcave`. A `RampConvex`
+    /// stays within that of its near corner.
+    #[test]
+    fn curved_ramps_curve_around_a_corner() {
+        let far = |s: &Shape, a: usize, b: usize| s.vertices.iter().all(|v| (v[a] - H).hypot(v[b] - H) >= H - 0.01);
+        assert!(far(&primitive("Concave").unwrap(), 0, 1));
+        assert!(far(&primitive("RampConcave").unwrap(), 1, 2));
+        assert!(primitive("RampConvex").unwrap().vertices.iter().all(|v| v[1].hypot(v[2]) <= H + 0.01));
+    }
+
+    #[test]
+    fn a_double_ramp_peaks_over_its_location() {
+        let s = primitive("DoubleRamp").unwrap();
+        let top = s.vertices.iter().filter(|v| v[2] > H - 0.01);
+        assert!(top.into_iter().all(|v| v[0].abs() < 0.01));
     }
 }

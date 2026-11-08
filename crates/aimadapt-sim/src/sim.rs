@@ -428,6 +428,8 @@ pub struct Sim {
     next_no: u32,
     /// Running-clock times at which a replacement target should appear.
     pending: Vec<f32>,
+    /// Picks so far from each of the world's in-order rotations.
+    turns: Vec<u32>,
     last_killed_dir: Option<Vec3>,
     /// Seconds into the run of the last kill.
     last_kill_at: f32,
@@ -502,6 +504,7 @@ impl Sim {
             next_id: 1,
             next_no: 1,
             pending: Vec::new(),
+            turns: Vec::new(),
             last_killed_dir: None,
             last_kill_at: 0.0,
             last_aim: Vec3::NEG_Z,
@@ -1003,9 +1006,13 @@ impl Sim {
 
     fn damage(&mut self, i: usize, amount: f32, events: &mut Vec<Event>) {
         let now = self.elapsed();
+        // Invincible bots (KovaaK's `InvincibleBots`) take the hit but lose no health.
+        let invincible = self.current.world.as_ref().is_some_and(|w| w.invincible);
         let t = &mut self.targets[i];
-        let dealt = amount.min(t.health);
-        t.health -= dealt;
+        let dealt = if invincible { amount } else { amount.min(t.health) };
+        if !invincible {
+            t.health -= dealt;
+        }
         t.last_hit_at = now;
         if let (Some(b), Some(m)) = (&mut t.bot, self.current.world.as_ref().and_then(|w| w.motion_of(t.kind))) {
             b.on_hit(m, &mut self.rng, dealt, now);
@@ -1090,8 +1097,14 @@ impl Sim {
         while i < self.targets.len() {
             let t = &mut self.targets[i];
             t.age += dt;
-            if t.lifetime > 0.0 {
-                if t.age >= t.lifetime {
+            // Negative regen drains a target, once its delay has passed since the last
+            // hit, until it goes as a timeout (VT Aether's targets last 19 s).
+            let drained = t.regen.0 < 0.0 && now - t.last_hit_at >= t.regen.1 && {
+                t.health += t.regen.0 * dt;
+                t.health <= 1e-4
+            };
+            if t.lifetime > 0.0 || drained {
+                if drained || t.age >= t.lifetime {
                     let t = self.targets.swap_remove(i);
                     self.stats.timeouts += 1;
                     self.telemetry.targets.push(t.record(now, Outcome::TimedOut));
@@ -1259,7 +1272,7 @@ impl Sim {
         let (slot, kind) = match &self.current.world {
             Some(w) if !w.slots.is_empty() => {
                 let free = (0..w.slots.len()).find(|s| self.targets.iter().all(|t| t.slot as usize != *s)).unwrap_or(0);
-                (free as u32, w.pick_kind(&mut self.rng, free))
+                (free as u32, w.pick_kind(&mut self.rng, free, &mut self.turns))
             }
             _ => (0, None),
         };
@@ -2122,6 +2135,95 @@ mod tests {
             assert!((p.y - -1.0).abs() < 0.02, "it stays on the floor: {p}");
         }
         assert!(hi - lo > 1.0, "it strafed: {lo}..{hi}");
+    }
+
+    /// Bug: VT Aether's and PGT's targets lose 100 health a second, so each goes
+    /// after 19 s and the next comes; without the drain the first stayed all run.
+    /// Negative regen drains a target until it goes, as a timeout (not a kill), and
+    /// it comes back after its respawn delay.
+    #[test]
+    fn negative_regen_drains_a_target_until_it_goes() {
+        let mut s = on_a_floor(Vec::new(), None);
+        s.targets.health = 100.0;
+        s.targets.regen_per_s = -50.0;
+        s.targets.respawn_delay_s = 0.5;
+        let mut sim = Sim::new(s, 1);
+        let first = sim.targets()[0].id;
+        // 1.9 s in: 5 health left.
+        for _ in 0..456 {
+            sim.step(FRAME, idle());
+        }
+        assert!((sim.targets()[0].health - 5.0).abs() < 1.0, "draining: {}", sim.targets()[0].health);
+        for _ in 0..48 {
+            sim.step(FRAME, idle());
+        }
+        assert!(sim.targets().is_empty(), "gone once drained");
+        assert_eq!((sim.stats().timeouts, sim.stats().kills), (1, 0));
+        for _ in 0..144 {
+            sim.step(FRAME, idle());
+        }
+        assert!(sim.targets().iter().any(|t| t.id != first), "a new one after the respawn delay");
+    }
+
+    /// Bug: KovaaK's `InvincibleBots` (VT Snake Track, PGTI Voltaic) was ignored, so
+    /// the bot died and came back elsewhere. Invincible bots take hits, and their
+    /// damage counts for the score, but they never go down.
+    #[test]
+    fn invincible_bots_take_hits_but_never_die() {
+        let mut s = on_a_floor(Vec::new(), None);
+        s.targets.health = 10.0;
+        s.weapon.damage = 4.0;
+        s.world.as_mut().unwrap().invincible = true;
+        let mut sim = Sim::new(s, 1);
+        let (first, at) = (sim.targets()[0].id, sim.targets()[0].pos.normalize());
+        for _ in 0..20 {
+            sim.step(FRAME, Input { aim: at, fire_pressed: true, fire_held: false });
+            sim.step(FRAME, idle());
+        }
+        let st = sim.stats();
+        assert!(st.hits >= 5 && st.kills == 0, "{st:?}");
+        assert_eq!(st.damage_done, 4.0 * st.hits as f32);
+        assert_eq!(sim.targets()[0].id, first);
+        assert_eq!(sim.targets()[0].health, 10.0);
+    }
+
+    /// Bug: KovaaK's rotations with `Randomized=false` (VT Aether's three targets,
+    /// B180's) fill a slot with their bots in turn; they were picked at random.
+    /// Slots that name the same rotation take turns from it together (FlyTS).
+    #[test]
+    fn rotations_in_order_take_turns() {
+        let mut s = on_a_floor(Vec::new(), None);
+        s.targets.count = 1;
+        s.targets.regen_per_s = -1000.0;
+        s.targets.respawn_delay_s = 0.0;
+        let w = s.world.as_mut().unwrap();
+        w.kinds = (0..3)
+            .map(|_| crate::world::WorldKind { health: 1.0, regen_per_s: -1000.0, ..Default::default() })
+            .collect();
+        w.slots = vec![vec![(0, 1.0), (1, 5.0), (2, 1.0)]];
+        w.rotations = vec![Some(0)];
+        let mut sim = Sim::new(s, 7);
+        let mut seen = Vec::new();
+        for _ in 0..200 {
+            let kind = sim.targets().first().and_then(|t| t.kind());
+            if kind.is_some() && seen.last() != Some(&kind) {
+                seen.push(kind);
+            }
+            sim.step(FRAME, idle());
+        }
+        let seen: Vec<u32> = seen.into_iter().flatten().take(5).collect();
+        assert_eq!(seen, vec![0, 1, 2, 0, 1]);
+        // Two slots sharing one rotation start on its first two entries.
+        let mut s = on_a_floor(Vec::new(), None);
+        s.targets.count = 2;
+        let w = s.world.as_mut().unwrap();
+        w.kinds = (0..2).map(|_| crate::world::WorldKind { health: 1.0, ..Default::default() }).collect();
+        w.slots = vec![vec![(0, 1.0), (1, 1.0)], vec![(0, 1.0), (1, 1.0)]];
+        w.rotations = vec![Some(0), Some(0)];
+        let sim = Sim::new(s, 7);
+        let mut kinds: Vec<Option<u32>> = sim.targets().iter().map(|t| t.kind()).collect();
+        kinds.sort();
+        assert_eq!(kinds, vec![Some(0), Some(1)]);
     }
 
     #[test]

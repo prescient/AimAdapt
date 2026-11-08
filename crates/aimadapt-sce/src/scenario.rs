@@ -37,6 +37,9 @@ pub struct BotSlot<'a> {
     pub reference: &'a str,
     pub team: Option<&'a str>,
     pub choices: Vec<BotChoice<'a>>,
+    /// A rotation with `Randomized=false`: its bots come in turn, in the order
+    /// listed, rather than by weight.
+    pub in_order: bool,
 }
 
 /// Everything the settings point at, and the names that point at nothing.
@@ -103,13 +106,14 @@ impl Sce {
             refs = top.list("BotCharacters");
         }
         for (i, reference) in refs.into_iter().filter(|x| !x.is_empty()).enumerate() {
-            let mut slot = BotSlot { reference, team: teams.get(i).copied(), choices: Vec::new() };
+            let mut slot = BotSlot { reference, team: teams.get(i).copied(), choices: Vec::new(), in_order: false };
             let base = strip_ext(reference);
             let rotation = if reference.to_ascii_lowercase().ends_with(".bot") {
                 None
             } else {
                 s.find("Bot Rotation Profile", base)
             };
+            slot.in_order = rotation.is_some_and(|rot| rot.str("Randomized").trim().eq_ignore_ascii_case("false"));
             let picks: Vec<(&str, f32)> = match rotation {
                 Some(rot) => {
                     let weights = rot.list("ProfileWeights");

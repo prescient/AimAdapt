@@ -280,6 +280,8 @@ pub struct Targets {
     pub health: f32,
     /// Health restored per second: with a beam while the crosshair is off the
     /// target, with hitscan once `regen_delay_s` has passed since the last hit.
+    /// Negative (imported KovaaK's scenarios) drains it once the delay has passed,
+    /// until the target goes as a timeout.
     pub regen_per_s: f32,
     /// Seconds after the last hit before regen starts. 0 heals straight away.
     #[serde(skip_serializing_if = "off_in_fingerprint")]
@@ -544,7 +546,7 @@ impl Scenario {
         check(t.radius >= 0.01 && t.radius <= 10.0, "target radius must be 0.01–10 m");
         check(t.shape != Shape::Capsule || t.height >= 2.0 * t.radius, "capsule height must be at least 2× radius");
         check(t.health > 0.0, "target health must be above 0");
-        check(t.regen_per_s >= 0.0, "regen can't be negative");
+        check(t.regen_per_s.is_finite(), "regen must be a number");
         check(t.respawn_delay_s >= 0.0, "respawn delay can't be negative");
         check(t.lifetime_s >= 0.0, "lifetime can't be negative");
         check(t.shrink_to > 0.0 && t.shrink_to <= 1.0, "shrink-to must be above 0 and at most 1");
