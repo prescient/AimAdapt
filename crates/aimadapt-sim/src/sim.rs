@@ -9,10 +9,13 @@
 use glam::Vec3;
 
 use crate::adaptive::{Knob, Mix, Pick, Prior, Rating};
+use crate::collide::Collider;
+use crate::motion::{BotState, separate};
 use crate::scenario::{Movement, MovementKind, Range, Scenario, Shape, Trigger, WeaponKind};
 use crate::telemetry::{
     Outcome, ShotRecord, TargetFrame, TargetPose, TargetRecord, Telemetry, TrackSample, angle_deg, screen_offset,
 };
+use crate::world::World;
 
 /// Beam damage and accuracy are sampled at this rate, independent of frame rate.
 pub const BEAM_TICK_HZ: f32 = 60.0;
@@ -92,6 +95,17 @@ pub struct Target {
     misses: u32,
     damage: f32,
     track: Track,
+    /// An imported scenario's moving bot: its velocity and dodge timers.
+    bot: Option<BotState>,
+    /// Imported scenarios with several kinds of bot: which kind this is, and the bot
+    /// slot it fills.
+    kind: Option<u32>,
+    slot: u32,
+    shape: Shape,
+    /// Health regenerated per second, and the seconds after a hit before it starts.
+    regen: (f32, f32),
+    /// Seconds before a replacement appears.
+    respawn_s: f32,
 }
 
 /// Telemetry for one target while it's alive.
@@ -182,10 +196,19 @@ impl Target {
     }
 
     /// Where it is now, as the player sees it, for replays.
-    fn pose(&self, shape: Shape) -> TargetPose {
+    /// Which kind of bot this is, in a scenario imported with several.
+    pub fn kind(&self) -> Option<u32> {
+        self.kind
+    }
+
+    pub fn shape(&self) -> Shape {
+        self.shape
+    }
+
+    fn pose(&self) -> TargetPose {
         let (yaw_deg, pitch_deg) = angles(self.pos);
         let distance = self.pos.length().max(0.1);
-        let height_deg = match shape {
+        let height_deg = match self.shape {
             Shape::Sphere => 0.0,
             Shape::Capsule => 2.0 * (self.height() / 2.0 / distance).atan().to_degrees(),
         };
@@ -199,9 +222,9 @@ impl Target {
         }
     }
 
-    fn hit_by(&self, aim: Vec3, shape: Shape) -> Option<f32> {
+    fn hit_by(&self, aim: Vec3) -> Option<f32> {
         let h = self.height * self.radius / self.base_radius.max(1e-6);
-        ray_hit(aim, self.pos, self.radius, shape, h)
+        ray_hit(aim, self.pos, self.radius, self.shape, h)
     }
 
     fn record(&self, ended_at: f32, outcome: Outcome) -> TargetRecord {
@@ -393,6 +416,10 @@ pub struct Sim {
     current: Scenario,
     adaptive: Option<AdaptiveRun>,
     rng: Rng,
+    /// An imported map's solid walls: shots stop at them. Bots bump into those and
+    /// the invisible clip walls too.
+    walls: Collider,
+    bot_walls: Collider,
     /// Seconds since the countdown began.
     clock: f32,
     phase: Phase,
@@ -460,11 +487,15 @@ impl Sim {
 
     fn build(base: Scenario, seed: u64, adaptive: Option<AdaptiveRun>) -> Sim {
         let current = base.clone();
+        let walls = base.world.as_ref().map(|w| Collider::new(&w.meshes)).unwrap_or_default();
+        let bot_walls = base.world.as_ref().map(|w| Collider::for_bots(&w.meshes)).unwrap_or_default();
         let mut sim = Sim {
             scenario: base,
             current,
             adaptive,
             rng: Rng::new(seed),
+            walls,
+            bot_walls,
             clock: 0.0,
             phase: Phase::Countdown,
             targets: Vec::new(),
@@ -792,9 +823,9 @@ impl Sim {
 
     /// Updates per-target flick telemetry, tracking samples and the aim trace.
     fn track_aim(&mut self, now: f32, aim: Vec3) {
-        let shape = self.scenario.targets.shape;
+        let walls = &self.walls;
         for t in &mut self.targets {
-            let on = t.hit_by(aim, shape).is_some();
+            let on = t.hit_by(aim).is_some_and(|d| !blocked(walls, aim, d));
             let k = &mut t.track;
             let since = now - k.start_at;
             if k.reaction_s.is_none() {
@@ -827,7 +858,7 @@ impl Sim {
             // Step on from the last frame's slot, not from now, so frames keep to
             // 60 Hz instead of slipping to every third game frame.
             self.next_frame = (self.next_frame + 1.0 / FRAME_HZ).max(now);
-            let targets = self.targets.iter().map(|t| t.pose(shape)).collect();
+            let targets = self.targets.iter().map(|t| t.pose()).collect();
             self.telemetry.frames.push(TargetFrame { t: now, targets });
         }
 
@@ -841,7 +872,7 @@ impl Sim {
                 let lead = if speed > 1e-3 { (x * motion.0 + y * motion.1) / speed } else { 0.0 };
                 self.telemetry.samples.push(TrackSample {
                     t: now,
-                    on_target: t.hit_by(aim, shape).is_some(),
+                    on_target: t.hit_by(aim).is_some_and(|d| !blocked(&self.walls, aim, d)),
                     error_deg: angle_deg(aim, t.pos),
                     target_speed_dps: speed,
                     lead_deg: lead,
@@ -862,13 +893,10 @@ impl Sim {
     }
 
     fn fire_hitscan(&mut self, dt: f32, aim: Vec3, input: Input, events: &mut Vec<Event>) {
-        // Regen: a target heals once `regen_delay_s` has passed since it was last hit.
-        let regen = self.current.targets.regen_per_s * dt;
-        if regen > 0.0 {
-            let (now, delay) = (self.elapsed(), self.current.targets.regen_delay_s);
-            for t in self.targets.iter_mut().filter(|t| now - t.last_hit_at >= delay) {
-                t.health = (t.health + regen).min(t.max_health);
-            }
+        // Regen: a target heals once its regen delay has passed since it was last hit.
+        let now = self.elapsed();
+        for t in self.targets.iter_mut().filter(|t| t.regen.0 > 0.0 && now - t.last_hit_at >= t.regen.1) {
+            t.health = (t.health + t.regen.0 * dt).min(t.max_health);
         }
         let w = &self.scenario.weapon;
         let interval = if w.fire_rate > 0.0 { 1.0 / w.fire_rate } else { 0.0 };
@@ -922,15 +950,11 @@ impl Sim {
         };
         let tick = 1.0 / BEAM_TICK_HZ;
         let per_tick = self.scenario.weapon.damage_per_s * tick;
-        let regen = self.current.targets.regen_per_s * dt;
-        let delay = self.current.targets.regen_delay_s;
         let now = self.elapsed();
         let on = self.pick(aim);
-        if regen > 0.0 {
-            for (i, t) in self.targets.iter_mut().enumerate() {
-                if (!firing || Some(i) != on) && now - t.last_hit_at >= delay {
-                    t.health = (t.health + regen).min(t.max_health);
-                }
+        for (i, t) in self.targets.iter_mut().enumerate() {
+            if t.regen.0 > 0.0 && (!firing || Some(i) != on) && now - t.last_hit_at >= t.regen.1 {
+                t.health = (t.health + t.regen.0 * dt).min(t.max_health);
             }
         }
         self.beam_acc += dt;
@@ -983,6 +1007,9 @@ impl Sim {
         let dealt = amount.min(t.health);
         t.health -= dealt;
         t.last_hit_at = now;
+        if let (Some(b), Some(m)) = (&mut t.bot, self.current.world.as_ref().and_then(|w| w.motion_of(t.kind))) {
+            b.on_hit(m, &mut self.rng, dealt, now);
+        }
         t.hits += 1;
         t.damage += dealt;
         self.stats.hits += 1;
@@ -1006,7 +1033,7 @@ impl Sim {
         self.telemetry.targets.push(t.record(now, Outcome::Killed));
         self.last_killed_dir = Some(t.pos.normalize());
         events.push(Event::Killed { id: t.id });
-        self.pending.push(now + self.current.targets.respawn_delay_s);
+        self.pending.push(now + t.respawn_s);
         self.next_target(now);
         self.pace_kill(now);
         if self.per_target()
@@ -1029,14 +1056,15 @@ impl Sim {
         }
     }
 
-    /// Index of the nearest target the ray along `aim` passes through.
+    /// Index of the nearest target the ray along `aim` passes through, unless a wall
+    /// is in the way.
     fn pick(&self, aim: Vec3) -> Option<usize> {
-        let shape = self.scenario.targets.shape;
         self.targets
             .iter()
             .enumerate()
-            .filter_map(|(i, t)| t.hit_by(aim, shape).map(|d| (i, d)))
+            .filter_map(|(i, t)| t.hit_by(aim).map(|d| (i, d)))
             .min_by(|a, b| a.1.total_cmp(&b.1))
+            .filter(|(_, d)| !blocked(&self.walls, aim, *d))
             .map(|(i, _)| i)
     }
 
@@ -1068,7 +1096,7 @@ impl Sim {
                     self.stats.timeouts += 1;
                     self.telemetry.targets.push(t.record(now, Outcome::TimedOut));
                     events.push(Event::TimedOut { id: t.id });
-                    self.pending.push(now + tc.respawn_delay_s);
+                    self.pending.push(now + t.respawn_s);
                     if let Some((value, _, _)) = t.track.value {
                         timed_out.push(value);
                     }
@@ -1079,6 +1107,21 @@ impl Sim {
                 }
                 let k = t.age / t.lifetime;
                 t.radius = t.base_radius * (1.0 + (shrink - 1.0) * k);
+            }
+            if let Some(b) = &mut t.bot
+                && let Some(m) = self.current.world.as_ref().and_then(|w| w.motion_of(t.kind))
+            {
+                // An imported scenario's bot: dodge profile and character movement.
+                let half = half_segment(t.shape, t.radius, t.height * t.radius / t.base_radius.max(1e-6));
+                let (yaw, pitch) = (t.yaw, t.pitch);
+                b.step(m, &mut self.rng, &self.bot_walls, &mut t.pos, t.radius, half, now, dt);
+                (t.yaw, t.pitch) = angles(t.pos);
+                t.distance = t.pos.length();
+                // Angular speed, for tracking telemetry.
+                let dyaw = (t.yaw - yaw + 540.0).rem_euclid(360.0) - 180.0;
+                t.rate = [dyaw / dt.max(1e-6), (t.pitch - pitch) / dt.max(1e-6)];
+                i += 1;
+                continue;
             }
             if mv.kind != MovementKind::Static || mv.approaches() || mv.jumps() {
                 if mv.kind != MovementKind::Static {
@@ -1188,6 +1231,19 @@ impl Sim {
             }
             i += 1;
         }
+        if self.current.world.as_ref().is_some_and(World::bots_bump) {
+            let mut bodies: Vec<(Vec3, f32, f32)> = self
+                .targets
+                .iter()
+                .map(|t| {
+                    (t.pos, t.radius, half_segment(t.shape, t.radius, t.height * t.radius / t.base_radius.max(1e-6)))
+                })
+                .collect();
+            separate(&mut bodies);
+            for (t, (p, _, _)) in self.targets.iter_mut().zip(bodies) {
+                t.pos = p;
+            }
+        }
         if !timed_out.is_empty() {
             self.next_target(now);
             if self.per_target() {
@@ -1199,6 +1255,15 @@ impl Sim {
     }
 
     fn spawn(&mut self, events: &mut Vec<Event>) {
+        // Several kinds of bot: fill the first empty slot with a kind it allows.
+        let (slot, kind) = match &self.current.world {
+            Some(w) if !w.slots.is_empty() => {
+                let free = (0..w.slots.len()).find(|s| self.targets.iter().all(|t| t.slot as usize != *s)).unwrap_or(0);
+                (free as u32, w.pick_kind(&mut self.rng, free))
+            }
+            _ => (0, None),
+        };
+        let chosen = kind.and_then(|k| self.current.world.as_ref().and_then(|w| w.kinds.get(k as usize)).cloned());
         let tc = &self.current.targets;
         let sp = &tc.spawn;
         let min_sep = sp.min_separation.to_radians().cos();
@@ -1216,16 +1281,26 @@ impl Sim {
                 break;
             }
         }
-        let pos = match &self.current.world {
+        let (pos, right) = match &self.current.world {
             // Imported scenarios: the map's spawn points, kept apart by distance, out
             // of walls and where the player's view allows.
             Some(w) => {
                 let others: Vec<Vec3> = self.targets.iter().map(|t| t.pos).collect();
-                w.spawn_pos(&mut self.rng, &others, tc.radius, self.last_aim)
+                let (shape, radius, height) = chosen
+                    .as_ref()
+                    .map_or((self.scenario.targets.shape, tc.radius, tc.height), |k| (k.shape, k.radius, k.height));
+                let allowed = chosen.as_ref().map_or(&[][..], |k| &k.spawns[..]);
+                let (pos, right) = w.spawn_point_in(&mut self.rng, &others, radius, self.last_aim, allowed);
+                if w.motion_of(kind).is_some() {
+                    // A moving bot also leaves any other wall it starts in.
+                    (self.bot_walls.lift_out(pos, half_segment(shape, radius, height), radius), right)
+                } else {
+                    (pos, right)
+                }
             }
             None => {
                 let distance = self.rng.range(sp.distance);
-                self.fit_in_room(dir * distance)
+                (self.fit_in_room(dir * distance), Vec3::X)
             }
         };
         let id = self.next_id;
@@ -1266,13 +1341,23 @@ impl Sim {
         };
         let next_jump = if mv.jumps() { self.rng.range(mv.jump_every_s) } else { 0.0 };
         let turn = new_turn(&mut self.rng, mv);
-        let height = tc.height * radius / self.scenario.targets.radius.max(1e-6);
+        let mut height = tc.height * radius / self.scenario.targets.radius.max(1e-6);
+        let (mut health, mut shape) = (tc.health, self.scenario.targets.shape);
+        let (mut regen, mut respawn_s) = ((tc.regen_per_s, tc.regen_delay_s), tc.respawn_delay_s);
+        if let Some(k) = &chosen {
+            (radius, height, health, shape) = (k.radius, k.height, k.health, k.shape);
+            (regen, respawn_s) = ((k.regen_per_s, k.regen_delay_s), k.respawn_delay_s);
+        }
+        let bot = match self.current.world.as_ref().and_then(|w| w.motion_of(kind)) {
+            Some(m) => Some(BotState::new(m, &mut self.rng, pos, right)),
+            None => None,
+        };
         self.targets.push(Target {
             id,
             pos,
             radius,
-            health: tc.health,
-            max_health: tc.health,
+            health,
+            max_health: health,
             yaw,
             pitch,
             distance,
@@ -1299,6 +1384,12 @@ impl Sim {
             misses: 0,
             damage: 0.0,
             track: Track::begin(no, now, self.last_aim, pos, radius, value),
+            bot,
+            kind,
+            slot,
+            shape,
+            regen,
+            respawn_s,
         });
         events.push(Event::Spawned { id });
     }
@@ -1312,6 +1403,19 @@ impl Sim {
             p.y.clamp(-a.eye_height + r, a.size[1] - a.eye_height - r),
             p.z.clamp(-half(a.size[2]), half(a.size[2])),
         )
+    }
+}
+
+/// Whether a wall is nearer than `d` along `aim` from the eye.
+fn blocked(walls: &Collider, aim: Vec3, d: f32) -> bool {
+    !walls.is_empty() && walls.ray(Vec3::ZERO, aim, d).is_some()
+}
+
+/// Half the length of a target's middle segment: 0 for a ball.
+fn half_segment(shape: Shape, radius: f32, height: f32) -> f32 {
+    match shape {
+        Shape::Sphere => 0.0,
+        Shape::Capsule => (height / 2.0 - radius).max(0.0),
     }
 }
 
@@ -1962,6 +2066,62 @@ mod tests {
             sim.step(FRAME, idle);
         }
         assert_eq!(sim.targets()[0].health, 3.0, "healed back to full");
+    }
+
+    /// An imported scenario: one target 10 m ahead on a floor 1.5 m below the eye,
+    /// with `walls` added.
+    fn on_a_floor(walls: Vec<crate::world::WorldMesh>, motion: Option<crate::motion::Motion>) -> Scenario {
+        let quad = |p: [[f32; 3]; 4]| crate::world::WorldMesh {
+            positions: p.to_vec(),
+            triangles: vec![[0, 1, 2], [0, 2, 3]],
+            ..Default::default()
+        };
+        let mut meshes = vec![quad([[-30.0, -1.5, -30.0], [30.0, -1.5, -30.0], [30.0, -1.5, 5.0], [-30.0, -1.5, 5.0]])];
+        meshes.extend(walls);
+        let mut s = no_countdown(builtin("builtin:static-grid"));
+        s.targets.count = 1;
+        s.targets.radius = 0.5;
+        s.targets.height = 1.0;
+        s.world = Some(crate::world::World {
+            spawns: vec![crate::world::WorldSpawn { pos: [0.0, -1.0, -10.0], ..Default::default() }],
+            meshes,
+            motion,
+            ..Default::default()
+        });
+        s
+    }
+
+    #[test]
+    fn walls_stop_shots_but_clip_walls_dont() {
+        let wall = |clip: bool| crate::world::WorldMesh {
+            positions: vec![[-5.0, -2.0, -5.0], [5.0, -2.0, -5.0], [5.0, 5.0, -5.0], [-5.0, 5.0, -5.0]],
+            triangles: vec![[0, 1, 2], [0, 2, 3]],
+            clip,
+            ..Default::default()
+        };
+        for (clip, kills) in [(false, 0), (true, 1)] {
+            let mut sim = Sim::new(on_a_floor(vec![wall(clip)], None), 1);
+            let at = sim.targets()[0].pos.normalize();
+            sim.step(FRAME, Input { aim: at, fire_pressed: true, fire_held: true });
+            assert_eq!(sim.stats().kills, kills, "clip {clip}");
+        }
+    }
+
+    #[test]
+    fn imported_bots_move_on_the_map() {
+        let strafe = crate::motion::Dodge { strafe_s: [0.5, 0.5], ..Default::default() };
+        let m = crate::motion::Motion { max_speed: 4.0, accel: 40.0, dodges: vec![strafe], ..Default::default() };
+        let mut sim = Sim::new(on_a_floor(Vec::new(), Some(m)), 1);
+        let idle = Input { aim: Vec3::Y, fire_pressed: false, fire_held: false };
+        let (mut lo, mut hi) = (f32::MAX, f32::MIN);
+        for _ in 0..480 {
+            sim.step(FRAME, idle);
+            let p = sim.targets()[0].pos;
+            lo = lo.min(p.x);
+            hi = hi.max(p.x);
+            assert!((p.y - -1.0).abs() < 0.02, "it stays on the floor: {p}");
+        }
+        assert!(hi - lo > 1.0, "it strafed: {lo}..{hi}");
     }
 
     #[test]

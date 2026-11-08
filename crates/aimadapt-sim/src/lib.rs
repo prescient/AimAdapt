@@ -11,9 +11,14 @@
 //! - [`workout`]: lists of scenarios played back to back.
 //! - [`program`]: weekly plans that map weekdays to workouts.
 //! - [`world`]: the map, spawn points and scoring of a scenario imported from KovaaK's.
+//! - [`collide`]: an imported map's walls as solid triangles, for shots and moving bots.
+//! - [`motion`]: how an imported scenario's bots move: KovaaK's dodge profiles on
+//!   Unreal-style character movement.
 
 pub mod adaptive;
+pub mod collide;
 pub mod library;
+pub mod motion;
 pub mod profiles;
 pub mod program;
 pub mod scenario;

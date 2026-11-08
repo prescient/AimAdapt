@@ -30,12 +30,16 @@ pub struct Placement {
 /// Solid level geometry.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Solid {
-    /// A Reflex brush: a convex solid. Each face lists vertex indices in order.
-    Polyhedron { vertices: Vec<[f32; 3]>, faces: Vec<Vec<usize>> },
+    /// A Reflex brush: a convex solid. Each face lists vertex indices in order, and
+    /// has a material (empty for none), e.g. `internal/editor/textures/editor_clip`
+    /// for an invisible wall.
+    Polyhedron { vertices: Vec<[f32; 3]>, faces: Vec<Vec<usize>>, materials: Vec<String> },
     /// A JSON brush made from a named editor primitive (`Cube`, `Cylinder`, `Ramp`…).
-    Primitive { mesh: String, place: Placement },
+    /// Its `name` says what it is: `Default` (a wall), `Clip` or `FullClip` (an
+    /// invisible wall), `DefaultNoCollision` (looks only) or `WeaponClip`.
+    Primitive { mesh: String, place: Placement, name: String },
     /// A JSON brush with its own triangles, in the brush's local space.
-    Mesh { place: Placement, vertices: Vec<[f32; 3]>, triangles: Vec<[u32; 3]> },
+    Mesh { place: Placement, vertices: Vec<[f32; 3]>, triangles: Vec<[u32; 3]>, name: String },
 }
 
 /// Which teams may use a spawn.
@@ -137,7 +141,7 @@ const REFLEX_COSMETIC: &[&str] = &["WorldSpawn", "CameraPath", "Effect", "PointL
 enum Block {
     None,
     Entity { kind: String, props: Vec<(String, Vec<String>)> },
-    Brush { vertices: Vec<[f32; 3]>, faces: Vec<Vec<usize>>, in_faces: bool },
+    Brush { vertices: Vec<[f32; 3]>, faces: Vec<Vec<usize>>, materials: Vec<String>, in_faces: bool },
 }
 
 fn parse_reflex(text: &str) -> Result<Map, MapError> {
@@ -178,7 +182,9 @@ fn parse_reflex(text: &str) -> Result<Map, MapError> {
             finish(&mut map, std::mem::replace(&mut block, Block::None), in_prefab);
             block = match first {
                 "entity" => Block::Entity { kind: String::new(), props: Vec::new() },
-                "brush" => Block::Brush { vertices: Vec::new(), faces: Vec::new(), in_faces: false },
+                "brush" => {
+                    Block::Brush { vertices: Vec::new(), faces: Vec::new(), materials: Vec::new(), in_faces: false }
+                }
                 other => return Err(err(line_no, format!("unexpected \"{other}\""))),
             };
             continue;
@@ -192,7 +198,7 @@ fn parse_reflex(text: &str) -> Result<Map, MapError> {
                     props.push((key.to_string(), tokens.map(String::from).collect()));
                 }
             }
-            Block::Brush { vertices, faces, in_faces } => match (depth, first) {
+            Block::Brush { vertices, faces, materials, in_faces } => match (depth, first) {
                 (2, "vertices") => *in_faces = false,
                 (2, "faces") => *in_faces = true,
                 (2, other) => return Err(err(line_no, format!("unexpected \"{other}\" in a brush"))),
@@ -223,6 +229,9 @@ fn parse_reflex(text: &str) -> Result<Map, MapError> {
                         ));
                     }
                     faces.push(idx);
+                    let mut rest = line.split_whitespace().skip_while(|t| !t.starts_with("0x"));
+                    rest.next();
+                    materials.push(rest.collect::<Vec<_>>().join(" "));
                 }
             },
         }
@@ -237,7 +246,9 @@ fn finish(map: &mut Map, block: Block, in_prefab: bool) {
     }
     match block {
         Block::None => {}
-        Block::Brush { vertices, faces, .. } => map.solids.push(Solid::Polyhedron { vertices, faces }),
+        Block::Brush { vertices, faces, materials, .. } => {
+            map.solids.push(Solid::Polyhedron { vertices, faces, materials })
+        }
         Block::Entity { kind, props } => {
             let get = |key: &str| props.iter().find(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| v);
             let vec3 = |key: &str| {
@@ -296,9 +307,9 @@ fn parse_json(text: &str) -> Result<Map, MapError> {
                 match o.get("procedural").and_then(Value::as_array) {
                     Some(parts) => {
                         let (vertices, triangles) = procedural(parts).map_err(|m| bad(&m))?;
-                        map.solids.push(Solid::Mesh { place, vertices, triangles });
+                        map.solids.push(Solid::Mesh { place, vertices, triangles, name });
                     }
-                    None => map.solids.push(Solid::Primitive { mesh, place }),
+                    None => map.solids.push(Solid::Primitive { mesh, place, name }),
                 }
             }
             "prop" => map.props.push(Prop { name, place, collides: prop_bool(o, "EnableCollision").unwrap_or(true) }),
@@ -418,7 +429,7 @@ mod tests {
         assert_eq!(m.format, MapFormat::Reflex);
         assert_eq!(m.version, "8");
         assert_eq!(m.solids.len(), 1);
-        let Solid::Polyhedron { vertices, faces } = &m.solids[0] else { panic!() };
+        let Solid::Polyhedron { vertices, faces, .. } = &m.solids[0] else { panic!() };
         assert_eq!(vertices.len(), 4);
         assert_eq!(faces, &vec![vec![0, 1, 2, 3]]);
         assert_eq!(m.spawns.len(), 1);
@@ -472,7 +483,7 @@ mod tests {
         assert_eq!(m.format, MapFormat::Json);
         assert_eq!(m.version, "1.0.0");
         assert_eq!(m.solids.len(), 2);
-        let Solid::Primitive { mesh, place } = &m.solids[0] else { panic!() };
+        let Solid::Primitive { mesh, place, .. } = &m.solids[0] else { panic!() };
         assert_eq!(mesh, "Cube");
         assert_eq!(place.scale, [20.0, 20.0, 0.16]);
         let Solid::Mesh { vertices, triangles, .. } = &m.solids[1] else { panic!() };

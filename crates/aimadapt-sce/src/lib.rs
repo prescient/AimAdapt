@@ -8,12 +8,14 @@
 //! - [`scenario`]: a whole file, with its player, weapon and bots resolved.
 //! - [`inventory`]: which features a scenario uses that the trainer doesn't model yet.
 //! - [`convert`]: a file as a trainer scenario, for the scenarios it can play.
+//! - [`shapes`]: triangles for the map editor's primitives (cylinders, ramps…).
 
 pub mod convert;
 pub mod inventory;
 pub mod map;
 pub mod scenario;
 pub mod settings;
+pub mod shapes;
 
 pub use convert::{Imported, import};
 pub use inventory::{Gap, gaps};

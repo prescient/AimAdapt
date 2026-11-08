@@ -285,6 +285,9 @@ struct TargetView {
 struct TargetAssets {
     mesh: Handle<Mesh>,
     base: Color,
+    /// An imported scenario's kinds of bot: each one's mesh, the radius it was made
+    /// at, and its color.
+    kinds: Vec<(Handle<Mesh>, f32, Color)>,
     /// The second color for timed targets, when colors alternate.
     alt: Option<Color>,
     /// Targets per wave: the scenario's target count.
@@ -438,7 +441,7 @@ fn rebuild_world(
 
     // Imported scenarios draw their own map instead of the room.
     if let Some(world) = &s.world {
-        for m in &world.meshes {
+        for m in world.meshes.iter().filter(|m| !m.clip) {
             let base = color(&m.color);
             let mesh = meshes.add(world_mesh(m));
             let solid = materials.add(StandardMaterial {
@@ -510,14 +513,22 @@ fn rebuild_world(
     ));
 
     let tc = &s.targets;
-    let mesh = match tc.shape {
-        Shape::Sphere => meshes.add(Sphere::new(tc.radius).mesh().uv(48, 24)),
-        Shape::Capsule => meshes.add(Capsule3d::new(tc.radius, (tc.height - 2.0 * tc.radius).max(0.0))),
+    let mut body = |shape: Shape, radius: f32, height: f32| match shape {
+        Shape::Sphere => meshes.add(Sphere::new(radius).mesh().uv(48, 24)),
+        Shape::Capsule => meshes.add(Capsule3d::new(radius, (height - 2.0 * radius).max(0.0))),
     };
+    let mesh = body(tc.shape, tc.radius, tc.height);
+    let kinds = s
+        .world
+        .iter()
+        .flat_map(|w| &w.kinds)
+        .map(|k| (body(k.shape, k.radius, k.height), k.radius, color(&k.color)))
+        .collect();
     let flat = |c: Color| StandardMaterial { base_color: c, unlit: true, ..default() };
     commands.insert_resource(TargetAssets {
         mesh,
         base: color(&tc.color),
+        kinds,
         alt: tc.alternate_colors.then(|| color(&tc.alt_color)),
         wave: tc.count.max(1),
         radius: tc.radius,
@@ -909,7 +920,7 @@ fn sync_targets(
         };
         shown.push(view.id);
         tf.translation = t.pos;
-        tf.scale = Vec3::splat(t.radius / assets.radius);
+        tf.scale = Vec3::splat(t.radius / body_of(&assets, t).1);
         if let Some(mut m) = materials.get_mut(&view.material) {
             m.base_color = target_color(base_color(&assets, t), t.health_fraction(), game.flashes.contains_key(&t.id));
         }
@@ -923,12 +934,21 @@ fn sync_targets(
             perceptual_roughness: 0.5,
             ..default()
         });
+        let (mesh, radius) = body_of(&assets, t);
         commands.spawn((
             TargetView { id: t.id, material: material.clone() },
-            Mesh3d(assets.mesh.clone()),
+            Mesh3d(mesh.clone()),
             MeshMaterial3d(material),
-            Transform::from_translation(t.pos).with_scale(Vec3::splat(t.radius / assets.radius)),
+            Transform::from_translation(t.pos).with_scale(Vec3::splat(t.radius / radius)),
         ));
+    }
+}
+
+/// A target's mesh and the radius it was made at: its kind's, or the scenario's.
+fn body_of<'a>(assets: &'a TargetAssets, t: &aimadapt_sim::sim::Target) -> (&'a Handle<Mesh>, f32) {
+    match t.kind().and_then(|k| assets.kinds.get(k as usize)) {
+        Some((mesh, radius, _)) => (mesh, *radius),
+        None => (&assets.mesh, assets.radius),
     }
 }
 
@@ -936,6 +956,9 @@ fn sync_targets(
 /// change color by wave: with three targets up, the first three are one color, the
 /// next three the other, and so on. A wave's color says how old its targets are.
 fn base_color(assets: &TargetAssets, t: &aimadapt_sim::sim::Target) -> Color {
+    if let Some((_, _, c)) = t.kind().and_then(|k| assets.kinds.get(k as usize)) {
+        return *c;
+    }
     let wave = (t.no().max(1) - 1) / assets.wave;
     match assets.alt {
         Some(alt) if t.time_left().is_some() && wave % 2 == 1 => alt,
@@ -944,8 +967,8 @@ fn base_color(assets: &TargetAssets, t: &aimadapt_sim::sim::Target) -> Color {
 }
 
 /// How far above a target's center its bars start: the top of the sphere or capsule.
-fn bar_base(s: &Scenario, t: &aimadapt_sim::sim::Target) -> f32 {
-    match s.targets.shape {
+fn bar_base(_s: &Scenario, t: &aimadapt_sim::sim::Target) -> f32 {
+    match t.shape() {
         Shape::Capsule => (t.height() / 2.0).max(t.radius),
         Shape::Sphere => t.radius,
     }
@@ -1247,6 +1270,7 @@ mod tests {
         TargetAssets {
             mesh: Handle::default(),
             base: color(&s.targets.color),
+            kinds: Vec::new(),
             alt: s.targets.alternate_colors.then(|| color(&s.targets.alt_color)),
             wave: s.targets.count.max(1),
             radius: s.targets.radius,

@@ -85,7 +85,7 @@ fn reflex_map_scenario_reads_and_lists_its_gaps() {
     let map = sce.map.as_ref().unwrap();
     assert_eq!(map.format, MapFormat::Reflex);
     assert_eq!(map.version, "8");
-    let Solid::Polyhedron { vertices, faces } = &map.solids[0] else { panic!("brush") };
+    let Solid::Polyhedron { vertices, faces, .. } = &map.solids[0] else { panic!("brush") };
     assert_eq!((vertices.len(), faces.len()), (8, 6));
     assert_eq!(map.spawns.len(), 3);
     assert!(map.spawns[0].initial);
@@ -156,10 +156,12 @@ fn an_imported_scenario_plays_in_the_sim() {
 
 #[test]
 fn scenarios_the_trainer_cant_play_yet_say_why() {
+    // The drifting pair move, which plays, but they nudge and dash, which doesn't yet.
     let moving = import(&path("Drifting Pair")).unwrap_err();
-    assert!(moving.iter().any(|r| r.starts_with("moving bots")), "{moving:?}");
+    assert_eq!(moving, vec!["bots that use abilities (dashes and knockbacks)".to_string()]);
+    // Reflex maps play; this one's projectile weapon doesn't.
     let old = import(&path("Old Room")).unwrap_err();
-    assert!(old.iter().any(|r| r.starts_with("Reflex maps")), "{old:?}");
+    assert!(!old.iter().any(|r| r.contains("Reflex")), "{old:?}");
     assert!(old.iter().any(|r| r.starts_with("projectile weapon")), "{old:?}");
 }
 

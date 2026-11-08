@@ -233,13 +233,17 @@ Progress shows how you're doing across all your scenarios, in three tabs.
 
 AimAdapt is learning to play your own KovaaK's scenarios (`.sce` files) in its trainer, closely enough that scores compare with KovaaK's. It reads the file from your KovaaK's or Workshop folder and never changes it.
 
-**What plays so far:** scenarios whose bots stand still, on KovaaK's newer (JSON) maps. That includes 11 of the 34 Voltaic S5 Novice benchmarks: the five 1w4ts and five ww5t scenarios, and DotTS. Bots that move in any way (running, flying up and down, or jumping), bots that appear in clusters, the older Reflex maps, projectiles, heads and the rest come later.
+**What plays so far:** most scenarios with hitscan weapons, on KovaaK's newer (JSON) and older (Reflex) maps, with bots that stand still or move. That includes 30 of the 34 Voltaic S5 Novice benchmarks. Bots that use abilities (dashes and knockbacks: Pasu, Raw Control, Controlsphere and Ground), projectiles, heads, bots that shoot back and the rest come later.
 
 **Playing one:** on Scenarios › Browse, pick **Type › KovaaK's that play here** and press **Play** on a row, or open a KovaaK's scenario. If AimAdapt can play it, its page has a **Play in AimAdapt** card with **Play**. If the file is there but uses something AimAdapt can't play yet, the page says what. Imported scenarios play in standard mode on the scenario's own map, with its bots, weapon, time limit and scoring, including the accuracy multiplier (some scenarios multiply the score by your accuracy or its square root). If the scenario locks the field of view to a range, your FOV is kept inside it for that run. Bots appear where the scenario's spawn points and areas put them, pushed out of any wall they'd overlap, as in KovaaK's. The scenario's rules on where bots may appear around your view apply too: on 1w4ts a new target never appears right under your crosshair, and on ww5t new targets appear near where you're looking. Bots heal if the scenario gives them health regen.
 
+**How bots move:** as their dodge profiles say: they strafe left and right, come closer or back off to keep their distance from you, jump, fly up and down or use a jetpack, and change direction when hit or blocked, with their character's speed, acceleration, friction and gravity. Bots don't walk off ledges. Scenarios can mix several kinds of bot, each with its own size, health, color and movement, and bots can come in clusters. This is modelled on the settings and isn't checked against KovaaK's yet, so moving targets may feel a little different there.
+
+**Walls:** your shots stop at walls, and bots bump into them. Invisible walls (clips) keep bots in but let your shots through, as in KovaaK's. Cylinders and tubes (round arenas) are solid; ramps, wedges, spheres and other shapes are drawn from their names, so they may look a little different from KovaaK's, and shots and bots pass through them. If you'd start inside the floor, you stand on it instead, as in KovaaK's.
+
 **Your runs:** runs played in AimAdapt are kept apart from your KovaaK's runs of the same scenario. They don't change your KovaaK's bests, trends or benchmark ranks. The card shows how many you've played in AimAdapt and your best.
 
-**What's still different:** the card lists what plays differently from KovaaK's, for example walls that aren't drawn yet. The sizes and distances still have to be checked against KovaaK's, so a score here may not match a score there yet.
+**What's still different:** the card lists what plays differently from KovaaK's, for example walls that are drawn from their names, or bots' jetpacks, whose timing is a guess. The sizes and distances still have to be checked against KovaaK's, so a score here may not match a score there yet.
 
 ## Replay {#replay}
 
@@ -310,9 +314,14 @@ Nothing is sent anywhere. Deleting one of your scenarios or workouts removes the
 ## What's new {#whats-new}
 
 **November 2026**
+- Many more KovaaK's scenarios play in AimAdapt: bots that move (strafe, keep their distance, jump, fly or use a jetpack), the older Reflex maps, several kinds of bot in one scenario, and bots that come in clusters. 30 of the 34 Voltaic S5 Novice benchmarks play now. Bots that use abilities (Pasu, Raw Control, Controlsphere, Ground) come next.
+- In KovaaK's scenarios played here, walls stop your shots and the bots, invisible walls let shots through, and round walls, ramps and other shapes are drawn.
+- Fixed: on some KovaaK's maps, walls were drawn far too small (a fraction of their size on maps with a map scale, like SYW's floor).
+- Fixed: on KovaaK's maps where you start inside the floor (Midrange Long Strafes), you saw from under it. You now stand on the floor, as in KovaaK's.
+- Fixed: KovaaK's scenarios that put you on team 2 (Pasu) had the bots appear around you instead of across the room.
 - KovaaK's scenarios played in AimAdapt follow more of their rules: where bots may appear around your view (so on 1w4ts a new target never appears under your crosshair, and on ww5t new ones appear near where you look), and bots' health regen (the Pokeball variants). Your AimAdapt runs of those scenarios from before were easier than the real thing.
 - Fixed: bots on some KovaaK's maps (Amare Microcluster) appeared buried in the wall behind them. They're now pushed out to the wall's surface, as in KovaaK's.
-- Fixed: KovaaK's scenarios whose bots fly up and down or jump (like SYV) played as still targets. They now say they can't be played yet, until bots move.
+- Fixed: KovaaK's scenarios whose bots fly up and down or jump (like SYV) played as still targets. They now fly and jump.
 - Fixed: KovaaK's scenarios whose map spawns bots in an area (a spawn volume) put every bot in one spot, so they sat on top of each other and came back in the same place. Bots now appear anywhere in the area, as in KovaaK's. Runs you played in AimAdapt before this fix were easier than the real scenario.
 - Browse lists your KovaaK's scenarios too, played or not, with **Play** on the ones AimAdapt's trainer can play.
 - Scenarios' lists use the whole page: a table on each tab you can sort by any column, with a search that also finds skills, tags and descriptions, more filters (played or not, made by, favorites only), and a heading for each group. Each scenario and workout opens on its own page, and its back link returns to the list where you left it.

@@ -10,6 +10,8 @@
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
 
+use crate::motion::Motion;
+use crate::scenario::Shape;
 use crate::sim::Rng;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -27,6 +29,10 @@ pub struct World {
     pub offset_max: [f32; 3],
     /// No target appears closer than this to another one, in meters.
     pub blocked_radius: f32,
+    /// Inverted (KovaaK's `InvertBlockedSpawn` on the bots): a new target appears
+    /// within `blocked_radius` of one already up, so they come in clusters.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub cluster: bool,
     /// The score is multiplied by accuracy, or by its square root.
     pub accuracy_mult: AccuracyMult,
     /// The horizontal field of view is kept within this range, in degrees.
@@ -41,6 +47,53 @@ pub struct World {
     /// view.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub player_block: Option<PlayerBlock>,
+    /// How the bots move; none for bots that stand still.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub motion: Option<Motion>,
+    /// More than one kind of bot: the kinds, and for each bot slot (one per target
+    /// up at a time) the kinds that can fill it, by weight. Empty when every target is
+    /// the scenario's own; then `motion` is how they move.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub kinds: Vec<WorldKind>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub slots: Vec<Vec<(u32, f32)>>,
+}
+
+/// One kind of bot in a scenario with several: its hitbox, health, look and
+/// movement, and the spawn points it may use.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct WorldKind {
+    pub shape: Shape,
+    pub radius: f32,
+    pub height: f32,
+    pub health: f32,
+    pub color: String,
+    pub regen_per_s: f32,
+    pub regen_delay_s: f32,
+    pub respawn_delay_s: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub motion: Option<Motion>,
+    /// The spawn points it may use, as indices into the world's; empty for any.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub spawns: Vec<u32>,
+}
+
+impl Default for WorldKind {
+    fn default() -> Self {
+        WorldKind {
+            shape: Shape::Sphere,
+            radius: 0.5,
+            height: 1.0,
+            health: 1.0,
+            color: "#e05050".into(),
+            regen_per_s: 0.0,
+            regen_delay_s: 0.0,
+            respawn_delay_s: 0.0,
+            motion: None,
+            spawns: Vec::new(),
+        }
+    }
 }
 
 /// A box: one corner and its three edges from there, in meters.
@@ -171,13 +224,21 @@ impl AccuracyMult {
     }
 }
 
-/// Triangles with one color, e.g. a wall.
+/// Triangles with one color, e.g. a wall. Walls are solid: shots stop at them and
+/// moving bots bump into them.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct WorldMesh {
     pub positions: Vec<[f32; 3]>,
     pub triangles: Vec<[u32; 3]>,
     pub color: String,
+    /// Drawn only: shots and bots pass through (a shape whose exact form is a guess).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub decor: bool,
+    /// An invisible wall that keeps characters in (a Reflex clip brush): not drawn,
+    /// and shots pass through, but bots bump into it.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub clip: bool,
 }
 
 impl World {
@@ -200,7 +261,50 @@ impl World {
                 break;
             }
         }
+        let kinds = self.kinds.len() as u32;
+        if self.slots.iter().flatten().any(|(k, _)| *k >= kinds) || self.slots.iter().any(Vec::is_empty) {
+            p.push("a bot slot refers to a kind of bot the world doesn't have".into());
+        }
+        let spawns = self.spawns.len() as u32;
+        for k in &self.kinds {
+            if k.radius.is_nan() || k.radius <= 0.0 || k.health.is_nan() || k.health <= 0.0 {
+                p.push("a kind of bot needs a size and health above 0".into());
+                break;
+            }
+            if k.spawns.iter().any(|s| *s >= spawns) {
+                p.push("a kind of bot refers to a spawn point the map doesn't have".into());
+                break;
+            }
+        }
         p
+    }
+
+    /// The kind to fill bot slot `slot` with, picked by weight; none when the
+    /// world has one kind of bot.
+    pub fn pick_kind(&self, rng: &mut Rng, slot: usize) -> Option<u32> {
+        let choices = self.slots.get(slot)?;
+        let total: f32 = choices.iter().map(|(_, w)| w.max(0.0)).sum();
+        let mut x = rng.next_f32() * total;
+        for (k, w) in choices {
+            if x < w.max(0.0) {
+                return Some(*k);
+            }
+            x -= w.max(0.0);
+        }
+        choices.last().map(|(k, _)| *k)
+    }
+
+    /// How a target of `kind` (none for the world's one kind) moves, if it does.
+    pub fn motion_of(&self, kind: Option<u32>) -> Option<&Motion> {
+        match kind {
+            Some(k) => self.kinds.get(k as usize).and_then(|k| k.motion.as_ref()),
+            None => self.motion.as_ref(),
+        }
+    }
+
+    /// Whether any of the bots bump into each other.
+    pub fn bots_bump(&self) -> bool {
+        self.motion.iter().chain(self.kinds.iter().filter_map(|k| k.motion.as_ref())).any(|m| m.bump_bots)
     }
 
     /// A spawn position for a target of `radius`: a weighted spawn point (or a
@@ -209,16 +313,40 @@ impl World {
     /// along `aim`. After 40 tries it takes the first one that was apart from the
     /// others, or else the last one, as a crowded map would.
     pub fn spawn_pos(&self, rng: &mut Rng, others: &[Vec3], radius: f32, aim: Vec3) -> Vec3 {
-        let total: f32 = self.spawns.iter().map(|s| s.weight.max(0.0)).sum();
+        self.spawn_point(rng, others, radius, aim).0
+    }
+
+    /// [`World::spawn_pos`], with the right-hand direction of the spawn point it
+    /// picked (where a bot that doesn't face the player strafes).
+    pub fn spawn_point(&self, rng: &mut Rng, others: &[Vec3], radius: f32, aim: Vec3) -> (Vec3, Vec3) {
+        self.spawn_point_in(rng, others, radius, aim, &[])
+    }
+
+    /// [`World::spawn_point`] among the spawn points `allowed` (indices; empty for all).
+    pub fn spawn_point_in(
+        &self,
+        rng: &mut Rng,
+        others: &[Vec3],
+        radius: f32,
+        aim: Vec3,
+        allowed: &[u32],
+    ) -> (Vec3, Vec3) {
+        let usable: Vec<&WorldSpawn> = if allowed.is_empty() {
+            self.spawns.iter().collect()
+        } else {
+            allowed.iter().filter_map(|i| self.spawns.get(*i as usize)).collect()
+        };
+        let total: f32 = usable.iter().map(|s| s.weight.max(0.0)).sum();
         let mut pos = Vec3::NEG_Z * 10.0;
-        if self.spawns.is_empty() {
-            return pos;
+        let mut right = Vec3::X;
+        if usable.is_empty() {
+            return (pos, right);
         }
         let mut apart_only = None;
         for _ in 0..40 {
             let mut pick = rng.next_f32() * total;
-            let mut point = &self.spawns[0];
-            for s in &self.spawns {
+            let mut point = usable[0];
+            for s in &usable {
                 let w = s.weight.max(0.0);
                 if pick < w {
                     point = s;
@@ -238,15 +366,22 @@ impl World {
                 offset += Vec3::from_array(point.axes[i]) * (lo + (hi - lo) * rng.next_f32());
             }
             pos = self.out_of_walls(Vec3::from_array(point.pos) + offset, radius);
-            let apart = others.iter().all(|o| o.distance(pos) >= self.blocked_radius);
+            right = Vec3::from_array(point.axes[0]);
+            let apart = if self.cluster {
+                // Near one that's up (the first can go anywhere), without overlapping.
+                (others.is_empty() || others.iter().any(|o| o.distance(pos) < self.blocked_radius))
+                    && others.iter().all(|o| o.distance(pos) >= 2.0 * radius)
+            } else {
+                others.iter().all(|o| o.distance(pos) >= self.blocked_radius)
+            };
             if apart && self.player_block.as_ref().is_none_or(|b| b.allows(pos, aim)) {
-                return pos;
+                return (pos, right);
             }
             if apart {
-                apart_only.get_or_insert(pos);
+                apart_only.get_or_insert((pos, right));
             }
         }
-        apart_only.unwrap_or(pos)
+        apart_only.unwrap_or((pos, right))
     }
 
     /// `pos` pushed out of every wall it overlaps, except walls around the player
@@ -389,6 +524,22 @@ mod tests {
         // (ww5t Clusters fits 12 targets in its 40 degree view only by overlapping).
         let crowded = World { blocked_radius: 2.0, ..w };
         assert!((0..50).all(|_| crowded.spawn_pos(&mut rng, &[side], 0.1, Vec3::NEG_Z) == ahead));
+    }
+
+    #[test]
+    fn clustered_targets_appear_near_one_already_up() {
+        // Spawn points spread along 20 m; clusters keep within 2 m of a target.
+        let spawns =
+            (0..21).map(|i| WorldSpawn { pos: [i as f32 - 10.0, 0.0, -10.0], ..WorldSpawn::default() }).collect();
+        let w = World { spawns, blocked_radius: 2.0, cluster: true, ..World::default() };
+        let mut rng = Rng::new(5);
+        let mut up = vec![w.spawn_pos(&mut rng, &[], 0.3, Vec3::NEG_Z)];
+        for _ in 0..5 {
+            let p = w.spawn_pos(&mut rng, &up, 0.3, Vec3::NEG_Z);
+            assert!(up.iter().any(|o| o.distance(p) < 2.0), "{p} isn't near {up:?}");
+            assert!(up.iter().all(|o| o.distance(p) >= 0.6), "{p} overlaps one of {up:?}");
+            up.push(p);
+        }
     }
 
     #[test]

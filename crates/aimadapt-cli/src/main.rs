@@ -182,7 +182,7 @@ fn print_sce(filter: Option<&str>, from: &[PathBuf], summary_only: bool) -> Resu
                     continue;
                 }
                 let gaps = aimadapt_sce::gaps(&sce);
-                // Playable now: the trainer can run it (phase 2: still bots on JSON maps).
+                // Playable now: the trainer can run it.
                 let plays = if gaps.is_empty() { aimadapt_sce::import(f).ok() } else { None };
                 rows.push((name, gaps, plays));
             }
@@ -495,8 +495,18 @@ fn describe_import(s: &aimadapt_sim::Scenario) -> String {
     let (near, far) = dist.iter().fold((f32::MAX, 0.0f32), |(a, b), d| (a.min(*d), b.max(*d)));
     let size = 2.0 * (t.radius / near.max(0.01)).atan().to_degrees();
     let volumes = w.spawns.iter().filter(|p| p.edges.iter().flatten().any(|v| *v != 0.0)).count();
+    let moves = match (&w.motion, w.kinds.len()) {
+        (_, k) if k > 1 => {
+            let moving = w.kinds.iter().filter(|k| k.motion.is_some()).count();
+            format!("{k} kinds of bot ({moving} moving)")
+        }
+        (Some(m), _) => {
+            format!("moving up to {:.1} m/s{}", m.max_speed, if m.flight.is_some() { ", flying" } else { "" })
+        }
+        (None, _) => "standing still".into(),
+    };
     format!(
-        "{} × {:?} r {:.2} m, {:.0} hp, {} spawn points ({volumes} volumes) {:.1}–{:.1} m away ({:.2}° wide at the nearest), offset {:?}–{:?}, apart {:.2} m; {:.0} shots/s {:?}; score {}/kill {}/hit × {:?}",
+        "{} × {:?} r {:.2} m, {:.0} hp, {moves}, {} spawn points ({volumes} volumes) {:.1}–{:.1} m away ({:.2}° wide at the nearest), offset {:?}–{:?}, apart {:.2} m; {:.0} shots/s {:?}; score {}/kill {}/hit × {:?}",
         t.count,
         t.shape,
         t.radius,
