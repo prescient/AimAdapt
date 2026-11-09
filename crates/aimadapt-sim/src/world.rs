@@ -11,8 +11,8 @@ use glam::Vec3;
 use serde::{Deserialize, Serialize};
 
 use crate::motion::Motion;
+use crate::rng::Rng;
 use crate::scenario::Shape;
-use crate::sim::Rng;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -277,6 +277,10 @@ impl World {
         if !self.rotations.is_empty() && self.rotations.len() != self.slots.len() {
             p.push("bot slots and their rotations don't match up".into());
         }
+        // Each rotation id indexes a counter, so a huge one would allocate gigabytes.
+        if self.rotations.iter().flatten().any(|r| *r as usize >= self.slots.len()) {
+            p.push("a bot slot names a rotation the world doesn't have".into());
+        }
         let spawns = self.spawns.len() as u32;
         for k in &self.kinds {
             if k.radius.is_nan() || k.radius <= 0.0 || k.health.is_nan() || k.health <= 0.0 {
@@ -425,6 +429,22 @@ impl World {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Bug: rotation ids weren't checked, and the sim sized a counter list by the
+    /// largest one, so `4000000000` tried to allocate 16 GB.
+    #[test]
+    fn rotation_ids_must_name_a_slot() {
+        let mut w = World {
+            spawns: vec![WorldSpawn { weight: 1.0, ..Default::default() }],
+            kinds: vec![WorldKind { radius: 0.3, health: 1.0, ..Default::default() }],
+            slots: vec![vec![(0, 1.0)]],
+            rotations: vec![Some(4_000_000_000)],
+            ..Default::default()
+        };
+        assert!(w.problems().iter().any(|p| p.contains("rotation")), "{:?}", w.problems());
+        w.rotations = vec![Some(0)];
+        assert!(w.problems().is_empty(), "{:?}", w.problems());
+    }
 
     fn world() -> World {
         World {

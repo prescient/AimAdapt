@@ -34,7 +34,7 @@ pub struct ScenarioTotal {
 }
 
 pub fn totals(db: &Db) -> Result<Totals, DbError> {
-    db.conn().query_row(
+    Ok(db.conn().query_row(
         "SELECT COUNT(*), COUNT(DISTINCT scenario), MIN(finished_at), MAX(finished_at),
                 COALESCE(SUM(duration_s), 0)
          FROM runs",
@@ -48,7 +48,7 @@ pub fn totals(db: &Db) -> Result<Totals, DbError> {
                 run_seconds: r.get(4)?,
             })
         },
-    )
+    )?)
 }
 
 pub fn by_day(db: &Db) -> Result<Vec<DayTotal>, DbError> {
@@ -56,7 +56,8 @@ pub fn by_day(db: &Db) -> Result<Vec<DayTotal>, DbError> {
         "SELECT substr(finished_at, 1, 10) AS day, COUNT(*), COALESCE(SUM(duration_s), 0)
          FROM runs GROUP BY day ORDER BY day",
     )?;
-    stmt.query_map([], |r| Ok(DayTotal { day: r.get(0)?, runs: r.get(1)?, run_seconds: r.get(2)? }))?.collect()
+    let rows = stmt.query_map([], |r| Ok(DayTotal { day: r.get(0)?, runs: r.get(1)?, run_seconds: r.get(2)? }))?;
+    Ok(rows.collect::<Result<_, _>>()?)
 }
 
 pub fn top_scenarios(db: &Db, limit: usize) -> Result<Vec<ScenarioTotal>, DbError> {
@@ -65,8 +66,8 @@ pub fn top_scenarios(db: &Db, limit: usize) -> Result<Vec<ScenarioTotal>, DbErro
                 (SELECT score FROM runs r2 WHERE r2.scenario = runs.scenario ORDER BY finished_at LIMIT 1)
          FROM runs GROUP BY scenario ORDER BY n DESC, scenario LIMIT ?1",
     )?;
-    stmt.query_map(params![limit as i64], |r| {
+    let rows = stmt.query_map(params![limit as i64], |r| {
         Ok(ScenarioTotal { scenario: r.get(0)?, runs: r.get(1)?, best: r.get(2)?, first_score: r.get(3)? })
-    })?
-    .collect()
+    })?;
+    Ok(rows.collect::<Result<_, _>>()?)
 }

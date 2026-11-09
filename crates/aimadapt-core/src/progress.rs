@@ -11,7 +11,7 @@ use chrono::{NaiveDate, NaiveDateTime};
 use crate::db::{Db, DbError};
 use crate::training::{self, TimeSettings};
 
-const TIME_FORMAT: &str = "%Y-%m-%dT%H:%M:%S%.3f";
+use crate::db::TIME_FORMAT;
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq)]
@@ -345,7 +345,8 @@ pub fn load(db: &Db, time: &TimeSettings) -> Result<Progress, DbError> {
     // own history, apart from KovaaK's runs of the same name.
     let mut stmt = db.conn().prepare(&format!(
         "SELECT id, scenario, finished_at, score, accuracy, avg_ttk_s, sens_scale, horiz_sens, dpi, fov
-         FROM runs WHERE mode NOT IN ('RustyAim Adaptive', '{}') ORDER BY finished_at, id",
+         FROM runs WHERE mode NOT IN ('{}', '{}') ORDER BY finished_at, id",
+        crate::db::MODE_ADAPTIVE,
         crate::db::MODE_IMPORTED
     ))?;
     let rows = stmt.query_map([], |r| {

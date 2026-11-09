@@ -4,5 +4,33 @@ members = ["crates/aimadapt-core", "crates/aimadapt-sce", "crates/aimadapt-sim",
 
 [workspace.package]
 edition = "2024"
+# The one version number: the app (tauri.conf.json has none, so it uses this) and
+# the user guide's version line, which tests/guide.rs checks against it.
 version = "0.1.0"
 license = "MIT"
+
+# Versions used by more than one crate, so they can't drift apart.
+[workspace.dependencies]
+aimadapt-core = { version = "0.1.0", path = "crates/aimadapt-core" }
+aimadapt-sce = { version = "0.1.0", path = "crates/aimadapt-sce" }
+aimadapt-sim = { version = "0.1.0", path = "crates/aimadapt-sim" }
+aimadapt-engine = { version = "0.1.0", path = "crates/aimadapt-engine" }
+chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }
+# Same major version as Bevy uses, so the engine shares one Vec3 type.
+glam = "0.33"
+notify = "8.2.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tempfile = "3.27.0"
+thiserror = "2.0.21"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+# Caps at today's longest and most tangled functions (clippy.toml), so none grows
+# past them. Lower them as the big ones are split up.
+too_many_lines = "warn"
+cognitive_complexity = "warn"
+dbg_macro = "warn"
+todo = "warn"

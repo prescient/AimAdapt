@@ -283,24 +283,23 @@ function openScenariosTab(tab, skill = "") {
 function playingWith() {
   const ps = ui.trainer.data.profiles;
   const p = ps.profiles.find((x) => x.name === ps.active) ?? ps.profiles[0];
-  return `<a class="chip-link" href="#settings/aim" title="${esc(sensText(p))} · FOV ${num(p.settings.fov)}. Change it in Settings."><span class="muted">Playing with</span> <strong>${esc(p.name)}</strong> <span>${profileCm(p).toFixed(1)} cm/360 · FOV ${num(p.settings.fov)}</span></a>`;
+  return `<a class="chip-link" href="#settings/aim" title="${esc(sensText(p))} · FOV ${num(p.settings.fov)}. Change it in Settings."><span class="muted">Playing with</span> <strong>${esc(p.name)}</strong> <span>${cmText(profileCm(p))} cm/360 · FOV ${num(p.settings.fov)}</span></a>`;
 }
 
-// Shown on Scenarios and Today: the trainer is open, or a message from the last action.
+// Shown on Scenarios and Today: the trainer is open or closed with an error, or a
+// message from the last action.
 function trainerBanners() {
   const tr = ui.trainer;
-  return `${tr.data?.playing ? `<section class="banner info"><div><div class="banner-title">The trainer is open</div><div class="banner-body">Finish or press Esc to come back. Each run is saved when its timer ends.</div></div></section>` : ""}
+  return `${trainerErrorBanner()}
+    ${tr.data?.playing ? `<section class="banner info"><div><div class="banner-title">The trainer is open</div><div class="banner-body">Finish or press Esc to come back. Each run is saved when its timer ends.</div></div></section>` : ""}
     ${tr.message ? `<section class="banner"><div class="banner-body">${esc(tr.message)}</div></section>` : ""}`;
 }
 
 function scenariosPage(arg) {
   const tr = ui.trainer;
   if (tr.error) return `<div class="page">${head("Play, and see how you're doing", "Scenarios")}<div class="card error">${esc(tr.error)}</div></div>`;
-  if (!tr.data || !ui.insights.overview) {
-    if (!tr.data) loadTrainer();
-    if (!ui.insights.overview) loadInsightsOverview();
-    return `<div class="empty-state">Loading scenarios…</div>`;
-  }
+  const wait = waitFor([trainerNeed(), overviewNeed()], "Loading scenarios…");
+  if (wait) return wait;
   const all = scenarioItems();
   if (arg?.startsWith("name:")) {
     // Links from Today and older pages name a scenario. Swap to its own address,
@@ -503,9 +502,8 @@ function workoutDetail(e) {
 function trainerDetail(e) {
   const s = e.scenario;
   const playing = ui.trainer.data.playing ? "disabled" : "";
-  const data = ui.insights.cache.get(s.name);
   const played = (e.runs || 0) + (e.adaptive_runs || 0) > 0 || ui.insights.overview.some((o) => o.scenario === s.name);
-  if (played && data === undefined) insightsFor(s.name);
+  const data = played ? insightsFor(s.name) : undefined;
   const d = data && !data.error ? data : null;
   const adaptive = d ? d.runs.filter((r) => r.adaptive && r.rating !== null && r.knob === d.knob) : [];
   const sections = d ? [
@@ -551,20 +549,9 @@ function trainerDetail(e) {
 // Each KovaaK's scenario's .sce file and whether the trainer can play it, by name.
 ui.sceInfo = new Map();
 
-function loadSceInfo(name) {
-  ui.sceInfo.set(name, null);
-  invoke("sce_info", { name })
-    .then((info) => ui.sceInfo.set(name, info))
-    .catch((e) => ui.sceInfo.set(name, { error: String(e) }))
-    .then(() => {
-      if (route().view === "scenarios") render();
-    });
-}
-
 // "Play in AimAdapt" for a KovaaK's scenario whose file the trainer can play.
 function sceCard(name) {
-  if (!ui.sceInfo.has(name)) loadSceInfo(name);
-  const s = ui.sceInfo.get(name);
+  const s = loadCached(ui.sceInfo, name, () => invoke("sce_info", { name }));
   if (!s || s.error || !s.path) return "";
   const playing = ui.trainer.data.playing ? "disabled" : "";
   const history = s.runs
@@ -587,13 +574,10 @@ function sceCard(name) {
 function kovaaksDetail(x) {
   const name = x.name;
   const played = Boolean(x.entry);
-  const cached = played ? ui.scenarioCache.get(name) : null;
-  if (played && cached === undefined) {
-    scenarioDetail(name).then(() => {
-      if (route().view === "scenarios") render();
-    });
-    return `<div class="empty-state">Loading ${esc(name)}…</div>`;
-  }
+  const detail = played ? scenarioDetail(name) : null;
+  if (detail === undefined) return `<div class="empty-state">Loading ${esc(name)}…</div>`;
+  // If its history couldn't be loaded, the page says so where the history would be.
+  const cached = detail?.error ? null : detail;
   const key = x.key;
   const about = played
     ? "Played in KovaaK's. Its stats files record score, accuracy and kill times; shot placement, reaction, tracking and replays come from runs in AimAdapt's trainer."
@@ -610,16 +594,12 @@ function kovaaksDetail(x) {
       ${cached ? jumpLinks([["overview", "Overview"], ["work-on", "What the data says"], ["runs", "Runs"]]) : ""}
     </section>
     ${sceCard(name)}
+    ${detail?.error ? `<div class="card error">Couldn't load its runs: ${esc(detail.error)}</div>` : ""}
     ${cached ? scenarioView(cached) : ""}`;
 }
 
 async function startSce(path) {
-  try {
-    await invoke("play_sce", { path });
-    ui.trainer.message = null;
-  } catch (e) {
-    ui.trainer.message = String(e);
-  }
+  await launchTrainer(() => invoke("play_sce", { path }));
   await loadTrainer();
 }
 
@@ -693,11 +673,7 @@ document.addEventListener("input", (e) => {
   const tab = shownTab();
   if (e.target.id !== "list-q" || !tab) return;
   listFilters(tab).query = e.target.value;
-  const pos = e.target.selectionStart;
-  refilter(tab);
-  const q = document.getElementById("list-q");
-  q.focus();
-  q.setSelectionRange(pos, pos);
+  refilter(tab); // render() keeps the focus and caret in the search box
 });
 
 document.addEventListener("change", (e) => {

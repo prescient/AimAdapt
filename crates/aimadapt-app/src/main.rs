@@ -27,19 +27,14 @@ mod trainer;
 
 pub(crate) struct AppData {
     db: Mutex<Db>,
+    /// Why the database couldn't be opened. The window still opens and shows it
+    /// (`snapshot` fails with it), where a panic would show nothing at all.
+    startup_error: Option<String>,
     db_path: PathBuf,
     stats_dir: Option<PathBuf>,
     last_import: Mutex<Option<ImportReport>>,
     time: TimeSettings,
     progress: ProgressSettings,
-}
-
-#[derive(Serialize)]
-struct GameInfo {
-    avg_fps: Option<f64>,
-    max_fps: Option<f64>,
-    resolution: Option<String>,
-    game_version: Option<String>,
 }
 
 /// Everything the screens need in one call.
@@ -56,7 +51,7 @@ struct Snapshot {
     sens_periods: Vec<SensPeriod>,
     cold_starts: Vec<ColdStart>,
     fatigue: Vec<FatigueBucket>,
-    game: Option<GameInfo>,
+    game: Option<aimadapt_core::trainer_runs::GameInfo>,
 }
 
 #[derive(Serialize)]
@@ -70,28 +65,24 @@ pub(crate) fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn snapshot(state: State<'_, AppData>) -> Result<Snapshot, String> {
     build_snapshot(&state)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn scenario(state: State<'_, AppData>, name: String) -> Result<Option<ScenarioDetail>, String> {
     build_scenario(&state, &name)
 }
 
 fn build_snapshot(state: &AppData) -> Result<Snapshot, String> {
+    if let Some(e) = &state.startup_error {
+        return Err(e.clone());
+    }
     let db = state.db.lock().map_err(err)?;
     let training = training::report(&db, &state.time, Local::now().naive_local()).map_err(err)?;
     let p = progress::load(&db, &state.time).map_err(err)?;
-    let game = db
-        .conn()
-        .query_row(
-            "SELECT avg_fps, max_fps, resolution, game_version FROM runs ORDER BY finished_at DESC LIMIT 1",
-            [],
-            |r| Ok(GameInfo { avg_fps: r.get(0)?, max_fps: r.get(1)?, resolution: r.get(2)?, game_version: r.get(3)? }),
-        )
-        .ok();
+    let game = db.latest_game_info().map_err(err)?;
     Ok(Snapshot {
         db_path: state.db_path.display().to_string(),
         stats_dir: state.stats_dir.as_ref().map(|d| d.display().to_string()),
@@ -124,7 +115,8 @@ fn scenario_detail(p: &progress::Progress, settings: &ProgressSettings, name: &s
 
 /// `aimadapt-app --dump-snapshot <file>` writes what the UI would receive (the snapshot
 /// plus every scenario's detail) as JSON and exits. Lets the UI be previewed in a
-/// browser against real data: `ui/app.js` loads `dev-snapshot.json` when not in Tauri.
+/// browser against real data: `ui/app.js` loads `dev/dev-snapshot.json` when not in
+/// Tauri. Never write it into `ui/`, which is built into the exe (`build.rs` refuses).
 fn dump_snapshot(state: &AppData, path: &std::path::Path) -> Result<(), String> {
     let snapshot = build_snapshot(state)?;
     let db = state.db.lock().map_err(err)?;
@@ -180,7 +172,7 @@ fn dump_snapshot(state: &AppData, path: &std::path::Path) -> Result<(), String> 
     std::fs::write(path, json).map_err(err)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn rescan(state: State<'_, AppData>) -> Result<ImportReport, String> {
     import_now(&state)
 }
@@ -227,7 +219,59 @@ fn is_trainer_launch(args: &[String]) -> bool {
 /// Development options that must come with `--db`.
 const DEV_FLAGS: &[&str] = &["--dump-snapshot"];
 
+/// The database to use: `--db <file>`, or the one in the data folder.
+fn open_database(args: &[String]) -> (PathBuf, Result<Db, String>) {
+    let path = match args.iter().position(|a| a == "--db").and_then(|i| args.get(i + 1)) {
+        Some(p) => PathBuf::from(p),
+        None => match aimadapt_core::db::default_path() {
+            Ok(p) => p,
+            Err(e) => return (PathBuf::new(), Err(format!("couldn't find a folder for AimAdapt's data: {e}"))),
+        },
+    };
+    let db = Db::open(&path).map_err(|e| format!("couldn't open {}: {e}", path.display()));
+    (path, db)
+}
+
+/// Writes panics to `crash.log` in the data folder (release builds have no
+/// console), and in the app, says so in a message box if the window never opened.
+fn log_panics() {
+    let default = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        default(info);
+        let dir = aimadapt_core::db::data_dir().unwrap_or_else(|_| std::env::temp_dir());
+        let path = dir.join("crash.log");
+        let text = format!("{} {info}\n", Local::now().format("%Y-%m-%d %H:%M:%S"));
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::fs::OpenOptions::new().create(true).append(true).open(&path).and_then(|mut f| {
+            use std::io::Write;
+            f.write_all(text.as_bytes())
+        });
+        #[cfg(all(windows, not(debug_assertions)))]
+        if !is_trainer_launch(&std::env::args().collect::<Vec<_>>()) {
+            show_crash(&format!("AimAdapt stopped: {info}\n\nDetails are in {}", path.display()));
+        }
+    }));
+}
+
+/// A message box without a console or another dependency: PowerShell's, with the
+/// text passed in an environment variable so nothing in it is run.
+#[cfg(all(windows, not(debug_assertions)))]
+fn show_crash(text: &str) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let _ = std::process::Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-Command",
+            "Add-Type -AssemblyName PresentationFramework; [System.Windows.MessageBox]::Show($env:AIMADAPT_CRASH, 'AimAdapt')",
+        ])
+        .env("AIMADAPT_CRASH", text)
+        .creation_flags(CREATE_NO_WINDOW)
+        .status();
+}
+
 fn main() {
+    log_panics();
     let args: Vec<String> = std::env::args().collect();
     // Trainer mode: no app window, no import, just the game.
     if is_trainer_launch(&args) {
@@ -240,16 +284,18 @@ fn main() {
     }
     let no_import = args.iter().any(|a| a == "--no-import");
     // `--db <file>` uses another database, e.g. a test one.
-    let db_path = match args.iter().position(|a| a == "--db").and_then(|i| args.get(i + 1)) {
-        Some(p) => std::path::PathBuf::from(p),
-        None => aimadapt_core::db::default_path().expect("couldn't find a folder for the database"),
+    let (db_path, opened) = open_database(&args);
+    let (db, startup_error) = match opened {
+        Ok(db) => (db, None),
+        Err(e) => (Db::open_in_memory().expect("an in-memory database"), Some(e)),
     };
-    let db = Db::open(&db_path).expect("couldn't open the database");
     let data = AppData {
         db: Mutex::new(db),
+        startup_error: startup_error.clone(),
         db_path,
-        // `--no-import` leaves KovaaK's out entirely (demo and test databases).
-        stats_dir: if no_import { None } else { discover::find_stats_dir() },
+        // `--no-import` leaves KovaaK's out entirely (demo and test databases), and
+        // nothing is imported into a database that didn't open.
+        stats_dir: if no_import || startup_error.is_some() { None } else { discover::find_stats_dir() },
         last_import: Mutex::new(None),
         time: TimeSettings::default(),
         progress: ProgressSettings::default(),
@@ -258,14 +304,22 @@ fn main() {
     let _ = import_now(&data);
 
     if let Some(i) = args.iter().position(|a| a == "--dump-snapshot") {
-        let path = args.get(i + 1).expect("--dump-snapshot needs a file path");
-        dump_snapshot(&data, std::path::Path::new(path)).expect("couldn't write the snapshot");
+        let result = match args.get(i + 1) {
+            Some(path) => dump_snapshot(&data, std::path::Path::new(path)),
+            None => Err("--dump-snapshot needs a file path".into()),
+        };
+        if let Err(e) = result {
+            eprintln!("aimadapt: {e}");
+            std::process::exit(1);
+        }
         return;
     }
 
     let watch_dir = data.stats_dir.clone();
     let trainer_state = trainer::TrainerState {
-        data_dir: aimadapt_core::db::data_dir().expect("couldn't find the data folder"),
+        // Without a data folder the database didn't open either, and the app only
+        // shows that.
+        data_dir: aimadapt_core::db::data_dir().unwrap_or_default(),
         playing: std::sync::atomic::AtomicBool::new(false),
     };
 
@@ -310,6 +364,20 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Bug: a database that failed to open panicked at startup, and release builds
+    /// have no console, so the app just didn't appear. Now the error is kept for
+    /// the window to show (a newer version's database is the likely case).
+    #[test]
+    fn a_database_that_wont_open_is_reported_not_panicked() {
+        // A folder isn't a database.
+        let dir = std::env::temp_dir();
+        let args = vec!["aimadapt".to_string(), "--db".to_string(), dir.display().to_string()];
+        let (path, db) = open_database(&args);
+        assert_eq!(path, dir);
+        let e = db.err().expect("an error");
+        assert!(e.starts_with("couldn't open"), "{e}");
+    }
 
     fn args(a: &[&str]) -> Vec<String> {
         std::iter::once("AimAdapt.exe").chain(a.iter().copied()).map(String::from).collect()

@@ -1,18 +1,23 @@
 [package]
 name = "aimadapt-core"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 license.workspace = true
 
 [dependencies]
-chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }
+chrono.workspace = true
 rusqlite = { version = "0.41.1", features = ["bundled"] }
-serde = { version = "1.0.229", features = ["derive"], optional = true }
-thiserror = "2.0.21"
+serde = { workspace = true, optional = true }
+thiserror.workspace = true
 
 [dev-dependencies]
-tempfile = "3.27.0"
+tempfile.workspace = true
 
 [features]
 # Serialize report types (used by the desktop app to send data to its UI).
 serde = ["dep:serde", "chrono/serde"]
+# Opens up `Db::conn()` for other crates' tests to check what was stored.
+test-util = []
+
+[lints]
+workspace = true

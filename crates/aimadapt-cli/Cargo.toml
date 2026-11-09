@@ -1,14 +1,17 @@
 [package]
 name = "aimadapt-cli"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 license.workspace = true
 
 [dependencies]
 anyhow = "1.0.104"
-chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }
+chrono.workspace = true
 clap = { version = "4.6.7", features = ["derive"] }
-notify = "8.2.1"
-aimadapt-core = { version = "0.1.0", path = "../aimadapt-core" }
-aimadapt-sim = { version = "0.1.0", path = "../aimadapt-sim" }
-aimadapt-sce = { version = "0.1.0", path = "../aimadapt-sce" }
+notify.workspace = true
+aimadapt-core.workspace = true
+aimadapt-sim.workspace = true
+aimadapt-sce.workspace = true
+
+[lints]
+workspace = true

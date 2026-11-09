@@ -35,7 +35,7 @@ pub const SKILLS: [(&str, &str); 9] = [
 ];
 
 const DAY_START_HOUR: i64 = 4;
-const TIME_FORMAT: &str = "%Y-%m-%dT%H:%M:%S%.3f";
+use crate::db::TIME_FORMAT;
 
 /// A day counts as done at this share of its planned runs.
 pub const DONE_SHARE: f64 = 0.75;

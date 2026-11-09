@@ -206,7 +206,7 @@ pub const FIELDS: &[Field] = &[
         "Targets",
         "Health",
         "Damage needed to destroy a target. Equal to weapon damage means one shot.",
-        num(0.1, 100_000.0, 10.0, ""),
+        num(0.1, 1_000_000.0, 10.0, ""),
     ),
     f(
         "targets.regen_per_s",

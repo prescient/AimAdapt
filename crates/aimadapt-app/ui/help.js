@@ -100,7 +100,7 @@ function blocks(md) {
 function helpPage() {
   if (help.error) return `<div class="page">${head("User guide", "Help")}<div class="card error">${esc(help.error)}</div></div>`;
   if (help.text === null) {
-    loadGuide();
+    startOnce("guide", loadGuide);
     return `<div class="empty-state">Loading the guide…</div>`;
   }
   const all = guideSections(help.text);
@@ -139,10 +139,6 @@ function helpLink() {
 document.addEventListener("input", (e) => {
   if (e.target.id === "help-q") {
     help.query = e.target.value;
-    const pos = e.target.selectionStart;
-    render();
-    const el = document.getElementById("help-q");
-    el.focus();
-    el.setSelectionRange(pos, pos);
+    render(); // keeps the focus and caret in the search box
   }
 });

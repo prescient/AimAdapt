@@ -600,7 +600,30 @@ impl Scenario {
                     && m.turn_deg_s.1 <= 720.0),
             "curve movement needs a turn rate of 0–720 °/s",
         );
-        p.extend(self.adaptive.problems());
+        // Targets must fit between floor and ceiling too.
+        let half_height = if t.shape == Shape::Capsule { t.radius.max(t.height / 2.0) } else { t.radius };
+        check(
+            2.0 * half_height < self.arena.size[1],
+            "targets must fit between floor and ceiling (the room is lower than a target is tall)",
+        );
+        let resolved = self.adaptive.resolve(self);
+        p.extend(self.adaptive.problems(&resolved));
+        if resolved.knob == crate::adaptive::Knob::TargetSpeed && m.kind == MovementKind::Static {
+            p.push("adaptive target speed needs moving targets".into());
+        }
+        // Every number must be a real number. TOML reads `inf` and `nan`, and not every
+        // check above catches them (scoring has no limits at all).
+        if let Ok(doc) = toml::Value::try_from(self) {
+            let mut bad = Vec::new();
+            non_finite(&doc, "", &mut bad);
+            let more = bad.len().saturating_sub(5);
+            for path in bad.into_iter().take(5) {
+                p.push(format!("{path} must be a number, not inf or nan"));
+            }
+            if more > 0 {
+                p.push(format!("and {more} more values that aren't numbers"));
+            }
+        }
         let knob = self.adaptive.knob;
         if self.weapon.kind == WeaponKind::Hitscan
             && matches!(knob, crate::adaptive::Knob::TargetSpeed | crate::adaptive::Knob::Radius)
@@ -612,6 +635,25 @@ impl Scenario {
             ));
         }
         p
+    }
+}
+
+/// Collects the dotted paths of every `inf` or `nan` in a TOML document.
+fn non_finite(v: &toml::Value, path: &str, out: &mut Vec<String>) {
+    match v {
+        toml::Value::Float(f) if !f.is_finite() => out.push(path.to_string()),
+        toml::Value::Table(t) => {
+            for (k, v) in t {
+                let p = if path.is_empty() { k.clone() } else { format!("{path}.{k}") };
+                non_finite(v, &p, out);
+            }
+        }
+        toml::Value::Array(a) => {
+            for (i, v) in a.iter().enumerate() {
+                non_finite(v, &format!("{path}[{i}]"), out);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -698,6 +740,161 @@ mod tests {
         assert_eq!(a.fingerprint(), b.fingerprint());
         assert_ne!(a.fingerprint(), c.fingerprint());
     }
+
+    /// Bug: easy and hard were only compared when both were written, so a file that
+    /// set one of them (or set both under the automatic knob) passed, and the rating
+    /// panicked in `clamp` once the defaults filled in the other.
+    #[test]
+    fn adaptive_limits_are_checked_after_defaults_fill_in() {
+        use crate::adaptive::Knob;
+        let mut s = Scenario::default();
+        // Automatic resolves to target lifetime here: 0.3 s is harder than 2 s.
+        s.adaptive.easy = 0.3;
+        s.adaptive.hard = 2.0;
+        assert!(s.problems().iter().any(|p| p.contains("easier than hard")), "{:?}", s.problems());
+        // Only easy written; the default hard is 0.25 s.
+        let mut s = Scenario::default();
+        s.adaptive.knob = Knob::Lifetime;
+        s.adaptive.easy = 0.2;
+        assert!(s.problems().iter().any(|p| p.contains("easier than hard")), "{:?}", s.problems());
+        // Only hard written on a beam scenario; the default easy is 3 °/s.
+        let mut s = Scenario::default();
+        s.weapon.kind = WeaponKind::Beam;
+        s.targets.movement.kind = MovementKind::Strafe;
+        s.adaptive.knob = Knob::TargetSpeed;
+        s.adaptive.hard = 2.0;
+        assert!(s.problems().iter().any(|p| p.contains("easier than hard")), "{:?}", s.problems());
+    }
+
+    /// Bug: only the horizontal fit was checked, so a target taller than the room
+    /// passed and the sim panicked placing it.
+    #[test]
+    fn targets_must_fit_between_floor_and_ceiling() {
+        let mut s = Scenario::default();
+        s.arena.size = [40.0, 2.0, 40.0];
+        s.arena.eye_height = 1.0;
+        s.targets.radius = 1.5;
+        assert!(s.problems().iter().any(|p| p.contains("floor and ceiling")), "{:?}", s.problems());
+        s.targets.radius = 0.5;
+        assert!(!s.problems().iter().any(|p| p.contains("floor and ceiling")), "{:?}", s.problems());
+    }
+
+    /// Bug: `inf` passed the checks for damage, health, delays and scoring, and NaN
+    /// passed scoring, which made every score NaN.
+    #[test]
+    fn non_finite_numbers_are_refused() {
+        type Set = fn(&mut Scenario);
+        let cases: [(&str, Set); 6] = [
+            ("damage", |s| s.weapon.damage = f32::INFINITY),
+            ("health", |s| s.targets.health = f32::INFINITY),
+            ("respawn", |s| s.targets.respawn_delay_s = f32::INFINITY),
+            ("lifetime", |s| s.targets.lifetime_s = f32::INFINITY),
+            ("per kill", |s| s.scoring.per_kill = f32::NAN),
+            ("per miss", |s| s.scoring.per_miss = f32::NEG_INFINITY),
+        ];
+        for (what, set) in cases {
+            let mut s = Scenario::default();
+            set(&mut s);
+            assert!(!s.problems().is_empty(), "{what} went through");
+        }
+    }
+
+    /// Every number field the editor offers, as `(path, min, max)`.
+    fn editor_limits() -> Vec<(&'static str, f64, f64)> {
+        use crate::spec::{FIELDS, Kind};
+        FIELDS
+            .iter()
+            .filter_map(|f| match f.kind {
+                Kind::Number { min, max, .. } | Kind::Range { min, max, .. } | Kind::Size3 { min, max, .. } => {
+                    Some((f.path, f64::from(min), f64::from(max)))
+                }
+                Kind::Integer { min, max } => Some((f.path, f64::from(min), f64::from(max))),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn numbers_at(s: &Scenario, path: &str) -> Vec<f64> {
+        let doc = toml::Value::try_from(s).unwrap();
+        let v = path.split('.').try_fold(&doc, |v, k| v.get(k)).unwrap_or_else(|| panic!("{path}"));
+        let num = |v: &toml::Value| v.as_float().or(v.as_integer().map(|i| i as f64)).unwrap();
+        match v {
+            toml::Value::Array(a) => a.iter().map(num).collect(),
+            v => vec![num(v)],
+        }
+    }
+
+    fn with_numbers(s: &Scenario, path: &str, n: &[f64]) -> Scenario {
+        let mut doc = toml::Value::try_from(s).unwrap();
+        let (parent, last) = path.rsplit_once('.').unwrap_or(("", path));
+        let table = parent.split('.').filter(|k| !k.is_empty()).fold(&mut doc, |v, k| v.get_mut(k).unwrap());
+        let is_int = table[last].is_integer();
+        let val = |x: f64| if is_int { toml::Value::Integer(x as i64) } else { toml::Value::Float(x) };
+        table[last] =
+            if table[last].is_array() { toml::Value::Array(n.iter().map(|&x| val(x)).collect()) } else { val(n[0]) };
+        doc.try_into().unwrap()
+    }
+
+    /// Bug: the editor's limits and the engine's were written separately and
+    /// disagreed. Any value the editor offers must load. (Adaptive easy, hard and
+    /// start, room size and eye height are left out: whether they fit depends on
+    /// the other values.)
+    #[test]
+    fn the_engine_accepts_every_value_the_editor_offers() {
+        let mut base = Scenario::default();
+        base.arena.size = [1000.0, 100.0, 1000.0];
+        // Room to move forward and back, and an airtime for any jump.
+        base.targets.movement.jump_air_s = 0.5;
+        base.targets.spawn.distance = Range(5.0, 20.0);
+        assert!(base.problems().is_empty(), "{:?}", base.problems());
+        for (path, min, max) in editor_limits() {
+            if matches!(path, "adaptive.easy" | "adaptive.hard" | "adaptive.start" | "arena.size" | "arena.eye_height")
+            {
+                continue;
+            }
+            let n = numbers_at(&base, path).len();
+            for v in [min, max] {
+                let s = with_numbers(&base, path, &vec![v; n]);
+                assert!(s.problems().is_empty(), "{path} = {v}: {:?}", s.problems());
+            }
+        }
+    }
+
+    /// Bug: eight built-in tracking scenarios set a health of 1,000,000, above the
+    /// editor's 100,000, so editing a copy showed a value the editor called invalid.
+    #[test]
+    fn built_in_scenarios_stay_inside_the_editor_limits() {
+        for e in crate::library::builtins() {
+            let s = e.scenario.unwrap();
+            for (path, min, max) in editor_limits() {
+                for v in numbers_at(&s, path) {
+                    assert!((min..=max).contains(&v), "{}: {path} = {v} is outside {min}–{max}", e.id);
+                }
+            }
+        }
+    }
+
+    /// Adaptive target speed scales how fast targets move, so still targets would
+    /// never change.
+    #[test]
+    fn adaptive_target_speed_needs_moving_targets() {
+        let mut s = Scenario::default();
+        s.weapon.kind = WeaponKind::Beam;
+        s.adaptive.knob = crate::adaptive::Knob::TargetSpeed;
+        assert!(s.problems().iter().any(|p| p.contains("moving targets")), "{:?}", s.problems());
+        s.targets.movement.kind = MovementKind::Strafe;
+        assert!(s.problems().is_empty(), "{:?}", s.problems());
+    }
+
+    /// Ratings are keyed on the fingerprint, so a change to it restarts every
+    /// rating. This pins the default scenario's value: if it changes, make sure
+    /// that's intended and say so in the guide.
+    #[test]
+    fn fingerprint_is_stable() {
+        assert_eq!(Scenario::default().fingerprint(), Scenario::default().fingerprint());
+        assert_eq!(Scenario::default().fingerprint(), PINNED_FINGERPRINT);
+    }
+    const PINNED_FINGERPRINT: &str = "2aab4223302f7e95";
 
     #[test]
     fn colors_parse() {

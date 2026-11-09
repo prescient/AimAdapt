@@ -6,6 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::scenario::Scenario;
+use crate::store;
 
 const BUILTIN: &[(&str, &str)] = &[
     ("static-grid", include_str!("../scenarios/static-grid.toml")),
@@ -63,16 +64,7 @@ pub fn builtins() -> Vec<Entry> {
 /// Built-in scenarios followed by every `.toml` file in `user_dir`, by file name.
 pub fn load_all(user_dir: &Path) -> Vec<Entry> {
     let mut entries = builtins();
-    let mut files: Vec<PathBuf> = std::fs::read_dir(user_dir)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("toml")))
-        .collect();
-    files.sort();
-    for path in files {
-        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else { continue };
+    for (stem, path) in store::user_files(user_dir) {
         let scenario = std::fs::read_to_string(&path)
             .map_err(|e| e.to_string())
             .and_then(|t| Scenario::from_toml(&t).map_err(|e| e.to_string()));
@@ -87,19 +79,8 @@ pub fn resolve(id: &str, user_dir: &Path) -> Result<Scenario, String> {
         let (_, text) = BUILTIN.iter().find(|(n, _)| *n == name).ok_or(format!("no built-in scenario {name}"))?;
         return Scenario::from_toml(text).map_err(|e| e.to_string());
     }
-    let path = match id.strip_prefix("user:") {
-        Some(stem) => user_path(user_dir, stem)?,
-        None => PathBuf::from(id),
-    };
-    let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let (path, text) = store::read_user(user_dir, id, "scenario")?;
     Scenario::from_toml(&text).map_err(|e| format!("{}: {e}", path.display()))
-}
-
-fn user_path(dir: &Path, stem: &str) -> Result<PathBuf, String> {
-    if stem.is_empty() || stem.contains(['/', '\\', ':']) || stem.starts_with('.') {
-        return Err(format!("bad scenario id {stem}"));
-    }
-    Ok(dir.join(format!("{stem}.toml")))
 }
 
 /// Writes a scenario to the user folder and returns its id. `replace` is the id of
@@ -110,47 +91,31 @@ pub fn save_user(dir: &Path, scenario: &Scenario, replace: Option<&str>) -> Resu
     if !problems.is_empty() {
         return Err(problems.join("; "));
     }
-    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    let stem = match replace.and_then(|id| id.strip_prefix("user:")) {
-        Some(stem) => stem.to_string(),
-        None => {
-            let base = slug(&scenario.name);
-            let mut stem = base.clone();
-            let mut n = 2;
-            while dir.join(format!("{stem}.toml")).exists() {
-                stem = format!("{base}-{n}");
-                n += 1;
-            }
-            stem
-        }
-    };
-    let path = user_path(dir, &stem)?;
-    std::fs::write(&path, scenario.to_toml()).map_err(|e| e.to_string())?;
-    Ok(format!("user:{stem}"))
+    store::save_user(dir, &scenario.name, &scenario.to_toml(), replace, "scenario")
 }
 
 pub fn delete_user(dir: &Path, id: &str) -> Result<(), String> {
-    let stem = id.strip_prefix("user:").ok_or("only your own scenarios can be deleted")?;
-    std::fs::remove_file(user_path(dir, stem)?).map_err(|e| e.to_string())
+    store::delete_user(dir, id, "scenario")
 }
 
-/// Lowercase words joined by dashes, safe as a file name.
-pub fn slug(name: &str) -> String {
-    let mut out = String::new();
-    for c in name.chars() {
-        if c.is_ascii_alphanumeric() {
-            out.push(c.to_ascii_lowercase());
-        } else if !out.ends_with('-') && !out.is_empty() {
-            out.push('-');
-        }
-    }
-    let out = out.trim_end_matches('-').to_string();
-    if out.is_empty() { "scenario".into() } else { out }
-}
+pub use crate::store::slug;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Built-ins are listed by hand, so a file left out of the table, or listed
+    /// under another file's id, would go unnoticed. Names must differ too: history
+    /// is kept by name.
+    #[test]
+    fn every_built_in_scenario_file_is_listed_once() {
+        crate::store::check_builtins("scenarios", BUILTIN);
+        let mut names: Vec<String> = builtins().into_iter().map(|e| e.scenario.unwrap().name).collect();
+        names.sort();
+        let n = names.len();
+        names.dedup();
+        assert_eq!(names.len(), n, "two built-in scenarios share a name");
+    }
 
     #[test]
     fn builtins_are_valid() {

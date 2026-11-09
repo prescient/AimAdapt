@@ -206,6 +206,12 @@ pub fn resolve(id: &str) -> Result<Program, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Built-in programs are listed by hand; see the scenarios' version of this test.
+    #[test]
+    fn every_built_in_program_file_is_listed_once() {
+        crate::store::check_builtins("programs", BUILTIN);
+    }
     use crate::library;
 
     #[test]

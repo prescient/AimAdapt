@@ -21,10 +21,7 @@ use aimadapt_sim::{PlayerSettings, RunResult, Scenario};
 use chrono::NaiveDateTime;
 
 /// Mode names stored with engine runs (KovaaK's uses "Challenge").
-// Stored in `runs.mode`. They keep the app's old name (RustyAim) so runs recorded
-// before the rename stay in the same history.
-pub const MODE: &str = "RustyAim";
-pub const MODE_ADAPTIVE: &str = "RustyAim Adaptive";
+pub use aimadapt_core::db::{MODE_ADAPTIVE, MODE_STANDARD as MODE};
 
 pub struct RunInfo<'a> {
     pub scenario: &'a Scenario,
@@ -271,14 +268,7 @@ pub fn to_engine_run(info: &RunInfo) -> EngineRun {
 
 /// Best earlier standard score for exactly this scenario (same name and settings).
 pub fn best_score(db: &Db, scenario: &Scenario) -> Option<f64> {
-    db.conn()
-        .query_row(
-            "SELECT MAX(score) FROM runs WHERE source = ?1 AND scenario = ?2 AND scenario_hash = ?3",
-            (SOURCE_ENGINE, &scenario.name, scenario.fingerprint()),
-            |r| r.get::<_, Option<f64>>(0),
-        )
-        .ok()
-        .flatten()
+    db.best_trainer_score(&scenario.name, &scenario.fingerprint()).ok().flatten()
 }
 
 pub fn knob_id(k: Knob) -> &'static str {
@@ -318,23 +308,14 @@ pub fn prior(db: &Db, scenario: &Scenario, now: chrono::NaiveDateTime) -> Option
 /// The best rating so far for a scenario's knob (lowest lifetime or size, highest speed).
 pub fn best_rating(db: &Db, scenario: &Scenario) -> Option<f64> {
     let knob = scenario.adaptive.resolve(scenario).knob;
-    let agg = if knob.higher_is_harder() { "MAX" } else { "MIN" };
-    db.conn()
-        .query_row(
-            &format!("SELECT {agg}(rating) FROM engine_runs WHERE base_scenario = ?1 AND knob = ?2"),
-            [&scenario.name, knob_id(knob)],
-            |r| r.get::<_, Option<f64>>(0),
-        )
-        .ok()
-        .flatten()
+    db.best_trainer_rating(&scenario.name, knob_id(knob), knob.higher_is_harder()).ok().flatten()
 }
 
 pub fn save(db_path: &Path, info: &RunInfo) -> Result<(), String> {
     let mut db = Db::open(db_path).map_err(|e| e.to_string())?;
     let now = chrono::Local::now().naive_local();
     let run = to_run_file(info);
-    db.insert_runs(std::slice::from_ref(&run), now).map_err(|e| e.to_string())?;
-    db.save_engine_run(&run.file_name, &to_engine_run(info)).map_err(|e| e.to_string())?;
+    db.save_trainer_run(&run, &to_engine_run(info), now).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -377,6 +358,23 @@ mod tests {
             reps: Some(5),
             block: Some(aimadapt_sim::workout::Block::Main),
         }
+    }
+
+    /// Bug: the run and its details were saved in two transactions, so a failure
+    /// in the second left a run with no details (no rating, no insights).
+    #[test]
+    fn a_run_is_saved_whole_or_not_at_all() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.db");
+        let scenario = Scenario { name: "Test Grid".into(), ..Default::default() };
+        let settings = PlayerSettings::default();
+        let result = play(&scenario, false, None);
+        // Make the second half fail.
+        Db::open(&path).unwrap().conn().execute_batch("DROP TABLE engine_shots").unwrap();
+        assert!(save(&path, &info(&scenario, &result, &settings, 0)).is_err());
+        let runs: i64 =
+            Db::open(&path).unwrap().conn().query_row("SELECT COUNT(*) FROM runs", [], |r| r.get(0)).unwrap();
+        assert_eq!(runs, 0, "half a run was saved");
     }
 
     #[test]

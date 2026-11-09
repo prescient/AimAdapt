@@ -5,5 +5,7 @@
 *.db-wal
 *.db-shm
 /crates/aimadapt-app/ui/dev-snapshot.json
+# Browser-preview data (a real history). Kept out of ui/, which is built into the exe.
+/crates/aimadapt-app/dev/
 /.cargo/config.toml
 /dist

@@ -4,13 +4,8 @@
 // Loaded after program.js and scenarios.js and draws with their helpers.
 
 function today() {
-  const tr = ui.trainer;
-  if (!ui.program.data || !tr.data || !ui.insights.overview) {
-    if (!ui.program.data) loadProgram();
-    if (!tr.data) loadTrainer();
-    if (!ui.insights.overview) loadInsightsOverview();
-    return `<div class="empty-state">Loading today…</div>`;
-  }
+  const wait = waitFor([programNeed(), trainerNeed(), overviewNeed()], "Loading today…");
+  if (wait) return wait;
   const s = ui.snap;
   const t = s.training;
   const date = day(t.today);

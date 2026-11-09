@@ -11,6 +11,7 @@ pub mod progress;
 pub mod replay;
 pub mod summary;
 pub mod telemetry;
+pub mod trainer_runs;
 pub mod training;
 
 pub use db::Db;

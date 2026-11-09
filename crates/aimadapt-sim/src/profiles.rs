@@ -200,6 +200,13 @@ impl Profiles {
                 Err(_) => return Err(e.to_string()),
             },
         };
+        // A file whose active profile is gone still loads, on its first profile.
+        let mut parsed = parsed;
+        if parsed.get(&parsed.active).is_none()
+            && let Some(first) = parsed.profiles.first()
+        {
+            parsed.active = first.name.clone();
+        }
         let p = parsed.problems();
         if p.is_empty() { Ok(parsed) } else { Err(p.join("; ")) }
     }
@@ -212,6 +219,15 @@ impl Profiles {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Bug: a file naming an active profile that isn't in it was refused whole, and
+    /// the trainer started on defaults.
+    #[test]
+    fn a_missing_active_profile_falls_back_to_the_first() {
+        let ps = Profiles { active: "Gone".into(), ..Default::default() };
+        let loaded = Profiles::from_toml(&ps.to_toml()).unwrap();
+        assert_eq!(loaded.active, loaded.profiles[0].name);
+    }
 
     fn profile(name: &str, game: &str, sens: f32, dpi: u32) -> Profile {
         Profile {

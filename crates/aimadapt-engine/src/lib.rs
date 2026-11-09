@@ -19,8 +19,8 @@ use aimadapt_sim::workout::{self, Mode, Workout};
 use chrono::Datelike;
 
 pub use config::{
-    from_kovaaks, kovaaks_profile, load as load_settings, load_profiles, save_profiles, scenarios_dir, settings_path,
-    workouts_dir,
+    from_kovaaks, kovaaks_profile, load as load_settings, load_profiles, profiles_note, save_profiles, scenarios_dir,
+    settings_path, workouts_dir,
 };
 pub use game::{PlayOptions, PlayStep, run};
 
@@ -301,5 +301,36 @@ mod tests {
         assert_eq!(run_from_args(&a(&["--play", "builtin:timed-flicks", "--smoke", "shots"])), 2);
         assert!(aimadapt_core::db::require_test_db(&a(&["--smoke", "shots", "--db", "t.db"]), DEV_FLAGS).is_ok());
         assert!(aimadapt_core::db::require_test_db(&a(&["--play", "builtin:timed-flicks"]), DEV_FLAGS).is_ok());
+    }
+}
+
+/// aimadapt-core can't depend on the sim, so it keeps copies of a few of its numbers
+/// and lists. This crate has both, so it checks they still agree.
+#[cfg(test)]
+mod core_copies {
+    /// Insights rebuild success chances with the sim's lapse rate and read tracking
+    /// samples at its rate; wrong copies would quietly skew both.
+    #[test]
+    fn core_copies_of_sim_values_match() {
+        assert!((aimadapt_core::insights::LAPSE - f64::from(aimadapt_sim::adaptive::LAPSE)).abs() < 1e-6);
+        let sample_s = 1.0 / f64::from(aimadapt_sim::sim::SAMPLE_HZ);
+        assert!((aimadapt_core::insights::SAMPLE_S - sample_s).abs() < 1e-9);
+    }
+
+    /// The Skills page groups scenarios with core's list of sub-skills.
+    #[test]
+    fn core_skills_are_the_sims_skills() {
+        let field = aimadapt_sim::spec::FIELDS.iter().find(|f| f.path == "skill").unwrap();
+        let aimadapt_sim::spec::Kind::Choice { options } = field.kind else { panic!("skill is a choice") };
+        let mut sim: Vec<&str> = options.iter().map(|o| o.value).filter(|v| !v.is_empty() && *v != "none").collect();
+        let mut core: Vec<&str> = aimadapt_core::programs::SKILLS.iter().map(|(id, _)| *id).collect();
+        sim.sort_unstable();
+        core.sort_unstable();
+        assert_eq!(core, sim);
+        // Each skill's group is its category: the scenario check refuses a mismatch.
+        for (id, group) in aimadapt_core::programs::SKILLS {
+            let text = format!("name = \"x\"\ncategory = \"{group}\"\nskill = \"{id}\"\n");
+            aimadapt_sim::Scenario::from_toml(&text).unwrap_or_else(|e| panic!("{id} in {group}: {e}"));
+        }
     }
 }

@@ -5,9 +5,12 @@
 
 ui.settings = {
   draft: null, // a copy of trainer.profiles being edited
-  selected: null, // name of the profile shown in the editor
+  // Indexes in draft.profiles of the profile shown in the editor, which every edit
+  // goes to, and of the active one. Not names: two profiles can share one while you
+  // type. draft.active, which is saved, keeps the active one's name.
+  selected: 0,
+  active: 0,
   problems: [],
-  cms: [], // cm/360 of each draft profile, from the backend
   sizeHelper: { monitor: 32, target: 24 },
 };
 
@@ -22,27 +25,39 @@ const screenPx = () => [Math.round(window.screen.width * devicePixelRatio), Math
 const gameOf = (id) => ui.trainer.data?.games.find((g) => g.id === id);
 const modeLabel = { borderless: "Borderless", exclusive: "Exclusive full screen", windowed: "Window" };
 
-// cm/360 for a profile, matching Profile::cm_per_360 in Rust.
+// cm/360 for a profile, matching Profile::cm_per_360 in Rust, or null while a field
+// it needs is empty (an emptied field stores null).
 function profileCm(p) {
   const g = gameOf(p.game);
-  if (g && g.yaw > 0 && p.game_sens > 0) return ((360 / (g.yaw * p.game_sens)) / Math.max(1, p.settings.dpi)) * 2.54;
-  return p.settings.cm_per_360;
+  const cm = g && g.yaw > 0 && p.game_sens > 0 ? ((360 / (g.yaw * p.game_sens)) / Math.max(1, p.settings.dpi)) * 2.54 : p.settings.cm_per_360;
+  return Number.isFinite(cm) && cm > 0 ? cm : null;
 }
+
+const cmText = (cm, digits = 1) => (cm === null ? "–" : cm.toFixed(digits));
+
+// A game's sensitivity for a cm/360 at a DPI.
+const gameSens = (g, cm, dpi) => Math.round(((360 / ((cm / 2.54) * Math.max(1, dpi))) / g.yaw) * 1000) / 1000;
 
 function sensText(p) {
   const g = gameOf(p.game);
-  const cm = profileCm(p);
-  return g && g.yaw > 0 ? `${g.name} ${num(p.game_sens)} · ${p.settings.dpi} DPI · ${cm.toFixed(1)} cm/360` : `${cm.toFixed(1)} cm/360 · ${p.settings.dpi} DPI`;
+  const cm = cmText(profileCm(p));
+  return g && g.yaw > 0 ? `${g.name} ${num(p.game_sens)} · ${num(p.settings.dpi)} DPI · ${cm} cm/360` : `${cm} cm/360 · ${num(p.settings.dpi)} DPI`;
 }
 
 // Called by loadTrainer: start a fresh draft unless one is being edited.
 function settingsLoaded() {
+  if (!ui.settings.draft || !settingsDirty()) useDraft(ui.trainer.data.profiles);
+}
+
+// Edits a copy of these saved profiles, still showing the profile that was shown.
+// Saved names are unique (saving refuses two the same), so its name finds it.
+function useDraft(profiles) {
   const s = ui.settings;
-  const saved = ui.trainer.data.profiles;
-  if (!s.draft || !settingsDirty()) {
-    s.draft = structuredClone(saved);
-    if (!s.selected || !s.draft.profiles.some((p) => p.name === s.selected)) s.selected = s.draft.active;
-  }
+  const shown = s.draft ? selectedProfile()?.name : null;
+  s.draft = structuredClone(profiles);
+  s.active = Math.max(0, findProfile(s.draft.active));
+  const i = findProfile(shown);
+  s.selected = i >= 0 ? i : s.active;
 }
 
 function settingsDirty() {
@@ -50,9 +65,17 @@ function settingsDirty() {
   return !d.settings_saved || JSON.stringify(ui.settings.draft) !== JSON.stringify(d.profiles);
 }
 
-function selectedProfile() {
+// Index of the first draft profile with this name, or -1.
+const findProfile = (name) => ui.settings.draft.profiles.findIndex((p) => p.name === name);
+
+// The profile shown in the editor (the first if the index has gone).
+function shownIndex() {
   const s = ui.settings;
-  return s.draft.profiles.find((p) => p.name === s.selected) ?? s.draft.profiles[0];
+  return s.draft.profiles[s.selected] ? s.selected : 0;
+}
+
+function selectedProfile() {
+  return ui.settings.draft.profiles[shownIndex()];
 }
 
 // ---------- Settings screen ----------
@@ -60,13 +83,22 @@ function selectedProfile() {
 function settingsPage(arg) {
   const tab = SETTINGS_TABS.some(([id]) => id === arg) ? arg : "aim";
   const tr = ui.trainer;
-  const ready = tr.data && ui.settings.draft;
-  if (!ready && !tr.error) loadTrainer();
+  const ready = Boolean(tr.data && ui.settings.draft);
+  // Your data shows the trainer's folders, so every tab asks for its data.
+  const wait = waitFor([{ ...trainerNeed(), have: ready }], "Loading settings…");
   const body = tab === "aim"
-    ? tr.error ? `<div class="card error">${esc(tr.error)}</div>` : ready ? settingsAim() : `<div class="empty-state">Loading settings…</div>`
+    ? tr.error ? `<div class="card error">${esc(tr.error)}</div>` : wait ?? settingsAim()
     : { goals: goalsTab, kovaaks: kovaaksTab, data: dataTab }[tab]();
   const actions = tab === "aim" && ready ? `<span class="chips" id="settings-actions">${settingsActions()}</span>` : "";
   return `<div class="page">${head("How AimAdapt is set up", "Settings", actions)}${tabs("settings", SETTINGS_TABS, tab)}${body}</div>`;
+}
+
+// The saved settings file couldn't be used (the note says why and what saving does),
+// or there isn't one yet.
+function settingsNotice(d) {
+  if (d.profiles_note) return `<section class="banner warn"><div class="banner-body">${esc(d.profiles_note)}</div></section>`;
+  if (d.settings_saved) return "";
+  return `<section class="banner info"><div class="banner-body">${d.kovaaks_profile ? "This profile was matched to your latest KovaaK's run. Save to keep it." : "These are defaults. Set your sensitivity and save."}</div></section>`;
 }
 
 function settingsAim() {
@@ -74,7 +106,7 @@ function settingsAim() {
   const d = ui.trainer.data;
   const p = selectedProfile();
   return `
-    ${d.settings_saved ? "" : `<section class="banner info"><div class="banner-body">${d.kovaaks_profile ? "This profile was matched to your latest KovaaK's run. Save to keep it." : "These are defaults. Set your sensitivity and save."}</div></section>`}
+    ${settingsNotice(d)}
     <div id="settings-problems">${settingsProblems()}</div>
     <div class="row">
       <section class="card" style="flex:1 1 280px;max-width:360px;align-self:flex-start">
@@ -88,7 +120,7 @@ function settingsAim() {
         <div class="chips">
           <button class="btn" type="button" data-action="duplicate-profile">Duplicate</button>
           <button class="btn" type="button" data-action="delete-profile" ${s.draft.profiles.length < 2 ? "disabled" : ""}>Delete</button>
-          ${p.name !== s.draft.active ? `<button class="btn primary" type="button" data-action="activate-profile">Use this one</button>` : ""}
+          ${shownIndex() !== s.active ? `<button class="btn primary" type="button" data-action="activate-profile">Use this one</button>` : ""}
         </div>
       </section>
       <div style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column;gap:16px">${profileEditor(p)}</div>
@@ -106,11 +138,12 @@ function settingsProblems() {
   return ps.length ? `<section class="banner"><div><div class="banner-title">Fix before saving</div><ul class="problems">${ps.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div></section>` : "";
 }
 
+// Each profile, picked by its place in the list.
 function profileList() {
   const s = ui.settings;
-  const sel = selectedProfile().name;
-  return s.draft.profiles.map((x) => `<button type="button" class="scenario-item ${x.name === sel ? "on" : ""}" data-action="select-profile" data-name="${esc(x.name)}">
-    <span class="main"><span class="name">${esc(x.name)} ${x.name === s.draft.active ? '<span class="tag">active</span>' : ""}</span>
+  const shown = shownIndex();
+  return s.draft.profiles.map((x, i) => `<button type="button" class="scenario-item ${i === shown ? "on" : ""}" data-action="select-profile" data-index="${i}">
+    <span class="main"><span class="name">${esc(x.name)} ${i === s.active ? '<span class="tag">active</span>' : ""}</span>
     <span class="sub">${esc(sensText(x))}</span></span></button>`).join("");
 }
 
@@ -125,7 +158,7 @@ function refreshSettingsBits() {
   set("settings-problems", settingsProblems());
   set("profile-list", profileList());
   const out = document.getElementById("cm-readout");
-  if (out) out.textContent = profileCm(selectedProfile()).toFixed(2);
+  if (out) out.textContent = cmText(profileCm(selectedProfile()), 2);
   const h2 = document.getElementById("profile-title");
   if (h2) h2.textContent = selectedProfile().name;
 }
@@ -153,7 +186,7 @@ function profileEditor(p) {
     <section class="card"><h2>Aim</h2>
       <div class="form-grid">
         ${g && g.yaw > 0
-          ? num_(`${esc(g.name)} sensitivity`, "game_sens", 'min="0.001" max="1000" step="0.01"', "", `= <span id="cm-readout" class="num">${profileCm(p).toFixed(2)}</span> cm/360 at your DPI`)
+          ? num_(`${esc(g.name)} sensitivity`, "game_sens", 'min="0.001" max="1000" step="0.01"', "", `= <span id="cm-readout" class="num">${cmText(profileCm(p), 2)}</span> cm/360 at your DPI`)
           : num_("Sensitivity", "settings.cm_per_360", 'min="1" max="500" step="0.1"', "cm/360", "Centimeters of mouse movement for a full turn.")}
         ${num_("Mouse DPI", "settings.dpi", 'min="50" max="50000" step="50"')}
         <label class="form-row"><span>Adaptive target mix</span><select class="select" data-pfield="settings.challenge">
@@ -242,11 +275,9 @@ let profileTimer = null;
 function recheckProfiles() {
   clearTimeout(profileTimer);
   profileTimer = setTimeout(async () => {
-    if (!tauri) return;
     try {
-      const [problems, cms] = await invoke("check_profiles", { profiles: ui.settings.draft });
+      const [problems] = await invoke("check_profiles", { profiles: ui.settings.draft });
       ui.settings.problems = problems;
-      ui.settings.cms = cms;
     } catch (e) {
       ui.settings.problems = [String(e)];
     }
@@ -263,10 +294,9 @@ function setProfileField(el) {
   else if (el.type === "number") v = el.value === "" ? null : Number(el.value);
   else v = el.value;
   if (key === "name") {
-    const old = p.name;
+    // It stays shown (by its place), and keeps the active mark if it has it.
     p.name = v;
-    if (ui.settings.draft.active === old) ui.settings.draft.active = v;
-    ui.settings.selected = v;
+    if (ui.settings.active === shownIndex()) ui.settings.draft.active = v;
     return;
   }
   if (key === "game") {
@@ -274,7 +304,8 @@ function setProfileField(el) {
     const cm = profileCm(p);
     p.game = v;
     const g = gameOf(v);
-    if (g && g.yaw > 0) p.game_sens = Math.round(((360 / (cm / 2.54 * p.settings.dpi)) / g.yaw) * 1000) / 1000;
+    if (cm === null) return;
+    if (g && g.yaw > 0) p.game_sens = gameSens(g, cm, p.settings.dpi);
     else p.settings.cm_per_360 = Math.round(cm * 100) / 100;
     return;
   }
@@ -296,27 +327,33 @@ document.addEventListener("click", (e) => {
   const s = ui.settings;
   const action = btn.dataset.action;
   const p = () => selectedProfile();
-  if (action === "select-profile") s.selected = btn.dataset.name;
-  else if (action === "activate-profile") s.draft.active = p().name;
-  else if (action === "add-profile") {
+  if (action === "select-profile") s.selected = Number(btn.dataset.index);
+  else if (action === "activate-profile") {
+    s.active = shownIndex();
+    s.draft.active = p().name;
+  } else if (action === "add-profile") {
     const g = gameOf(document.getElementById("new-profile-game").value);
     const base = structuredClone(p());
     const prof = { name: uniqueName(g.name), game: g.id, game_sens: 1, settings: base.settings };
     if (g.fov) prof.settings.fov = g.fov;
-    if (g.yaw > 0) prof.game_sens = Math.round(((360 / (profileCm(base) / 2.54 * base.settings.dpi)) / g.yaw) * 1000) / 1000;
+    const cm = profileCm(base);
+    if (g.yaw > 0 && cm !== null) prof.game_sens = gameSens(g, cm, base.settings.dpi);
     s.draft.profiles.push(prof);
-    s.selected = prof.name;
+    s.selected = s.draft.profiles.length - 1;
   } else if (action === "duplicate-profile") {
     const copy = structuredClone(p());
     copy.name = uniqueName(`${copy.name} copy`);
     s.draft.profiles.push(copy);
-    s.selected = copy.name;
+    s.selected = s.draft.profiles.length - 1;
   } else if (action === "delete-profile") {
     if (s.draft.profiles.length < 2 || !confirm(`Delete the ${p().name} profile?`)) return;
-    const name = p().name;
-    s.draft.profiles = s.draft.profiles.filter((x) => x.name !== name);
-    if (s.draft.active === name) s.draft.active = s.draft.profiles[0].name;
-    s.selected = s.draft.active;
+    // Only the one shown, even if another has its name.
+    const i = shownIndex();
+    s.draft.profiles.splice(i, 1);
+    if (s.active === i) s.active = 0;
+    else if (s.active > i) s.active -= 1;
+    s.draft.active = s.draft.profiles[s.active].name;
+    s.selected = s.active;
   } else if (action === "match-kovaaks") {
     const k = ui.trainer.data.kovaaks_profile;
     Object.assign(p(), { game: k.game, game_sens: k.game_sens });
@@ -328,8 +365,7 @@ document.addEventListener("click", (e) => {
     p().settings.display.play_area = k >= 0.999 ? null : [Math.round(px[0] * k), Math.round(px[1] * k)];
   } else if (action === "clear-play-area") p().settings.display.play_area = null;
   else if (action === "revert-settings") {
-    s.draft = structuredClone(ui.trainer.data.profiles);
-    s.selected = s.draft.active;
+    useDraft(ui.trainer.data.profiles);
     s.problems = [];
   } else if (action === "save-settings") {
     saveProfiles();
@@ -346,7 +382,7 @@ async function saveProfiles() {
     s.problems = [];
     ui.trainer.message = "Settings saved.";
     await loadTrainer();
-    s.draft = structuredClone(ui.trainer.data.profiles);
+    if (!ui.trainer.error) useDraft(ui.trainer.data.profiles);
   } catch (e) {
     s.problems = String(e).split("; ");
   }

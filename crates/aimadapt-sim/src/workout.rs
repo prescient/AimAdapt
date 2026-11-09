@@ -10,11 +10,11 @@
 //! mode = "adaptive"
 //! ```
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::library::slug;
+use crate::store;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -209,27 +209,11 @@ pub fn builtins() -> Vec<Entry> {
 
 pub fn load_all(dir: &Path) -> Vec<Entry> {
     let mut out = builtins();
-    let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("toml")))
-        .collect();
-    files.sort();
-    for path in files {
-        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else { continue };
+    for (stem, path) in store::user_files(dir) {
         let workout = std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|t| Workout::from_toml(&t));
         out.push(Entry { id: format!("user:{stem}"), builtin: false, workout });
     }
     out
-}
-
-fn user_path(dir: &Path, stem: &str) -> Result<PathBuf, String> {
-    if stem.is_empty() || stem.contains(['/', '\\', ':']) || stem.starts_with('.') {
-        return Err(format!("bad workout id {stem}"));
-    }
-    Ok(dir.join(format!("{stem}.toml")))
 }
 
 pub fn resolve(id: &str, dir: &Path) -> Result<Workout, String> {
@@ -237,11 +221,7 @@ pub fn resolve(id: &str, dir: &Path) -> Result<Workout, String> {
         let (_, text) = BUILTIN.iter().find(|(n, _)| *n == name).ok_or(format!("no built-in workout {name}"))?;
         return Workout::from_toml(text);
     }
-    let path = match id.strip_prefix("user:") {
-        Some(stem) => user_path(dir, stem)?,
-        None => PathBuf::from(id),
-    };
-    let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let (_, text) = store::read_user(dir, id, "workout")?;
     Workout::from_toml(&text)
 }
 
@@ -250,32 +230,27 @@ pub fn save_user(dir: &Path, w: &Workout, replace: Option<&str>) -> Result<Strin
     if !p.is_empty() {
         return Err(p.join("; "));
     }
-    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    let stem = match replace.and_then(|id| id.strip_prefix("user:")) {
-        Some(s) => s.to_string(),
-        None => {
-            let base = slug(&w.name);
-            let mut stem = base.clone();
-            let mut n = 2;
-            while dir.join(format!("{stem}.toml")).exists() {
-                stem = format!("{base}-{n}");
-                n += 1;
-            }
-            stem
-        }
-    };
-    std::fs::write(user_path(dir, &stem)?, w.to_toml()).map_err(|e| e.to_string())?;
-    Ok(format!("user:{stem}"))
+    store::save_user(dir, &w.name, &w.to_toml(), replace, "workout")
 }
 
 pub fn delete_user(dir: &Path, id: &str) -> Result<(), String> {
-    let stem = id.strip_prefix("user:").ok_or("only your own workouts can be deleted")?;
-    std::fs::remove_file(user_path(dir, stem)?).map_err(|e| e.to_string())
+    store::delete_user(dir, id, "workout")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Built-in workouts are listed by hand; see the scenarios' version of this test.
+    #[test]
+    fn every_built_in_workout_file_is_listed_once() {
+        crate::store::check_builtins("workouts", BUILTIN);
+        let mut names: Vec<String> = builtins().into_iter().map(|e| e.workout.unwrap().name).collect();
+        names.sort();
+        let n = names.len();
+        names.dedup();
+        assert_eq!(names.len(), n, "two built-in workouts share a name");
+    }
 
     #[test]
     fn builtin_workouts_are_valid_and_use_real_scenarios() {

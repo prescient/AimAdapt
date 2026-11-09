@@ -10,7 +10,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use aimadapt_core::db::SOURCE_ENGINE;
 use aimadapt_core::insights;
 use aimadapt_sim::profiles::{self, Profile, Profiles};
 use aimadapt_sim::workout::{self, Workout};
@@ -37,7 +36,7 @@ impl TrainerState {
 }
 
 /// Runs, best score and last played time for one scenario version.
-type History = (i64, Option<f64>, Option<String>);
+type History = aimadapt_core::trainer_runs::Played;
 
 #[derive(Serialize)]
 pub struct TrainerScenario {
@@ -79,6 +78,8 @@ pub struct Trainer {
     games: &'static [profiles::Game],
     /// Whether `engine.toml` exists; if not, `profiles` came from KovaaK's or defaults.
     settings_saved: bool,
+    /// Set when `engine.toml` exists but can't be used: `profiles` are defaults.
+    profiles_note: Option<String>,
     /// A profile matched to the latest KovaaK's run, if known.
     kovaaks_profile: Option<Profile>,
     fields: &'static [spec::Field],
@@ -89,30 +90,14 @@ pub struct Trainer {
     marks: Marks,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn trainer(state: State<'_, AppData>, t: State<'_, TrainerState>) -> Result<Trainer, String> {
     build_trainer(&state, &t)
 }
 
 pub fn build_trainer(state: &AppData, t: &TrainerState) -> Result<Trainer, String> {
     let db = state.db.lock().map_err(err)?;
-    let mut history: HashMap<(String, String), History> = HashMap::new();
-    let mut stmt = db
-        .conn()
-        .prepare(
-            "SELECT scenario, scenario_hash, COUNT(*), MAX(score), MAX(finished_at) FROM runs
-             WHERE source = ?1 GROUP BY scenario, scenario_hash",
-        )
-        .map_err(err)?;
-    let rows = stmt
-        .query_map([SOURCE_ENGINE], |r| {
-            Ok(((r.get(0)?, r.get::<_, Option<String>>(1)?.unwrap_or_default()), (r.get(2)?, r.get(3)?, r.get(4)?)))
-        })
-        .map_err(err)?;
-    for row in rows {
-        let (k, v) = row.map_err(err)?;
-        history.insert(k, v);
-    }
+    let history: HashMap<(String, String), History> = db.trainer_played().map_err(err)?;
     let levels: HashMap<String, insights::ScenarioSummary> =
         insights::overview(&db).map_err(err)?.into_iter().map(|s| (s.scenario.clone(), s)).collect();
 
@@ -178,6 +163,7 @@ pub fn build_trainer(state: &AppData, t: &TrainerState) -> Result<Trainer, Strin
         profiles: aimadapt_engine::load_profiles(&t.data_dir, Some(&db)),
         games: profiles::GAMES,
         settings_saved: aimadapt_engine::settings_path(&t.data_dir).exists(),
+        profiles_note: aimadapt_engine::profiles_note(&t.data_dir),
         kovaaks_profile: aimadapt_engine::kovaaks_profile(&db),
         fields: spec::FIELDS,
         scenarios_dir: t.scenarios_dir().display().to_string(),
@@ -260,20 +246,20 @@ pub struct InsightsOverview {
     scenarios: Vec<insights::ScenarioSummary>,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn insights_overview(state: State<'_, AppData>) -> Result<InsightsOverview, String> {
     let db = state.db.lock().map_err(err)?;
     Ok(InsightsOverview { scenarios: insights::overview(&db).map_err(err)? })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn insights(state: State<'_, AppData>, scenario: String) -> Result<Option<insights::Insights>, String> {
     let db = state.db.lock().map_err(err)?;
     insights::scenario(&db, &scenario).map_err(err)
 }
 
 /// A trainer run's replay, or `None` for a run without one.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn replay(state: State<'_, AppData>, run_id: i64) -> Result<Option<aimadapt_core::replay::Replay>, String> {
     let db = state.db.lock().map_err(err)?;
     aimadapt_core::replay::replay(&db, run_id).map_err(err)
@@ -307,13 +293,45 @@ pub(crate) fn anchor_args(x: i32, y: i32, width: u32) -> [String; 2] {
     ["--anchor".into(), format!("{x},{y},{width}")]
 }
 
+/// What the UI hears when the trainer closes.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct TrainerClosed {
+    /// Why the trainer failed, in its own words, or `None` when it closed normally.
+    pub error: Option<String>,
+}
+
+/// The trainer reports problems on stderr (`aimadapt: <message>`, or a panic) and
+/// exits with a non-zero code. Release builds have no console, so the app passes
+/// them on.
+pub(crate) fn closed_report(success: bool, code: Option<i32>, stderr: &[String]) -> TrainerClosed {
+    if success {
+        return TrainerClosed { error: None };
+    }
+    let own: Vec<&str> = stderr.iter().filter_map(|l| l.strip_prefix("aimadapt: ")).collect();
+    let lines: Vec<&str> = if own.is_empty() {
+        let n = stderr.len().saturating_sub(6);
+        stderr[n..].iter().map(|l| l.trim()).filter(|l| !l.is_empty()).collect()
+    } else {
+        own
+    };
+    let error = if lines.is_empty() {
+        match code {
+            Some(c) => format!("The trainer closed with an error (exit code {c})."),
+            None => "The trainer was stopped.".to_string(),
+        }
+    } else {
+        format!("The trainer closed with an error: {}", lines.join(" "))
+    };
+    TrainerClosed { error: Some(error) }
+}
+
 fn launch(app: AppHandle, state: &AppData, t: &TrainerState, args: &[String]) -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(err)?;
     if t.playing.swap(true, Ordering::SeqCst) {
         return Err("The trainer is already open".into());
     }
-    let exe = std::env::current_exe().map_err(err)?;
     let mut cmd = std::process::Command::new(exe);
-    cmd.args(args).arg("--db").arg(&state.db_path);
+    cmd.args(args).arg("--db").arg(&state.db_path).stderr(std::process::Stdio::piped());
     // Open the trainer over this window, where the player keeps it.
     {
         use tauri::Manager;
@@ -328,11 +346,28 @@ fn launch(app: AppHandle, state: &AppData, t: &TrainerState, args: &[String]) ->
         err(e)
     });
     let mut child = child?;
+    let stderr = child.stderr.take();
     std::thread::spawn(move || {
-        let _ = child.wait();
+        // Keep the last lines the trainer writes; reading also keeps its pipe from filling.
+        let mut lines = std::collections::VecDeque::new();
+        if let Some(out) = stderr {
+            use std::io::BufRead;
+            for line in std::io::BufReader::new(out).lines().map_while(Result::ok) {
+                if lines.len() == 40 {
+                    lines.pop_front();
+                }
+                lines.push_back(line);
+            }
+        }
+        let status = child.wait();
         use tauri::Manager;
         app.state::<TrainerState>().playing.store(false, Ordering::SeqCst);
-        let _ = app.emit("trainer-closed", ());
+        let lines: Vec<String> = lines.into();
+        let report = match status {
+            Ok(s) => closed_report(s.success(), s.code(), &lines),
+            Err(e) => TrainerClosed { error: Some(format!("Lost track of the trainer: {e}")) },
+        };
+        let _ = app.emit("trainer-closed", report);
     });
     Ok(())
 }
@@ -373,7 +408,7 @@ pub(crate) fn sce_file_for(name: &str, files: &[PathBuf]) -> Option<PathBuf> {
     files.iter().find(|f| f.file_stem().is_some_and(|s| s.to_string_lossy().trim().to_lowercase() == want)).cloned()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn sce_info(state: State<'_, AppData>, name: String) -> Result<SceInfo, String> {
     let files = aimadapt_sce::find_files(&aimadapt_core::discover::find_scenario_dirs());
     let path = sce_file_for(&name, &files);
@@ -383,14 +418,7 @@ pub fn sce_info(state: State<'_, AppData>, name: String) -> Result<SceInfo, Stri
         Some(Err(r)) => (false, r, Vec::new()),
     };
     let db = state.db.lock().map_err(err)?;
-    let (runs, best, last_played) = db
-        .conn()
-        .query_row(
-            "SELECT COUNT(*), MAX(score), MAX(finished_at) FROM runs WHERE source = ?1 AND mode = ?2 AND scenario = ?3",
-            (SOURCE_ENGINE, aimadapt_core::db::MODE_IMPORTED, &name),
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-        )
-        .map_err(err)?;
+    let (runs, best, last_played) = db.imported_played(&name).map_err(err)?;
     Ok(SceInfo { path: path.map(|p| p.display().to_string()), playable, reasons, notes, runs, best, last_played })
 }
 
@@ -498,7 +526,7 @@ pub struct ProgramPage {
     playing: bool,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn program(state: State<'_, AppData>, t: State<'_, TrainerState>) -> Result<ProgramPage, String> {
     build_program(&state, &t)
 }
@@ -569,6 +597,21 @@ pub fn play_program(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Bug: the app ignored how the trainer exited, and release builds have no
+    /// console, so a scenario that failed to load closed the game with no word why.
+    /// (The banner itself is in the UI; this checks what's passed to it.)
+    #[test]
+    fn a_failed_trainer_says_why() {
+        let lines = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(closed_report(true, Some(0), &[]), TrainerClosed { error: None });
+        let r = closed_report(false, Some(2), &lines(&["some log line", "aimadapt: no built-in scenario nope"]));
+        assert_eq!(r.error.as_deref(), Some("The trainer closed with an error: no built-in scenario nope"));
+        let r = closed_report(false, Some(101), &lines(&["thread 'main' panicked at src/x.rs:1:1:", "boom"]));
+        assert!(r.error.unwrap().contains("boom"));
+        let r = closed_report(false, Some(3), &[]);
+        assert!(r.error.unwrap().contains("exit code 3"));
+    }
 
     #[test]
     fn kovaaks_files_are_listed_once_each_with_whether_they_play() {

@@ -231,6 +231,19 @@ The plan is in [TESTING.md](TESTING.md).
 - [ ] `todo` P3 Daylight-saving handling: cap run length and add fixtures that span a clock change.
 - [ ] `todo` P3 Ignored real-data test over the local stats folder; an import timing test with 10k files.
 
+## 10b. Code health
+
+From the code review of 9 November 2026. Fixed then: two scenario-file panics, fire rate depending on frame rate, trainer and startup errors that never reached the screen, a settings file overwritten with defaults, files written in place, the dev snapshot inside a local exe, same-second runs a day long, the Fitts chart's oldest points, no guard against a newer database, a run saved in two halves, the CLI hiding refusals, several UI bugs, shared dependency versions, lint caps, a pinned toolchain, tests that tie hand-kept lists together, and SQL kept in aimadapt-core (`Db::conn()` is private to it outside tests).
+
+### To do
+- [ ] `todo` P2 Split the longest functions and lower the caps in `clippy.toml` as they go: insights `notes` (273 lines), convert `convert` (240) and `world` (207), sim `move_targets` (183) and `spawn` (139), insights `scenario` (160), engine `parse_and_run` (144) and `rebuild_world` (122).
+- [ ] `todo` P2 Split `Sim` (targets, firing, adaptive, telemetry, spawning, world) and the engine's 22-field `Game` resource.
+- [ ] `todo` P2 One list of what an imported scenario can't play: `inventory.rs` and `convert.rs` each keep one, as free text.
+- [ ] `todo` P2 Knob rules as one type in aimadapt-core instead of string comparisons in insights, telemetry and programs.
+- [ ] `todo` P3 Version the replay aim trace format and prune old traces (about 173 KB per minute of play, kept forever).
+- [ ] `todo` P3 Check whether the best rating should be per scenario version (`record.rs` ignores the fingerprint; the prior and best score use it).
+- [ ] `todo` P3 Small report bugs to confirm with a test first: insights notes compare ratings across knobs, sensitivity periods split on the scale name at the same cm/360, tied best scores pick different runs in two places, programs use a fixed 4 AM day start while Time uses the setting, and insights read every tracking sample on each page load.
+
 ## 11. Later
 
 - [ ] `todo` P3 Session notes (sleep, energy, hardware changes) linked to sessions.

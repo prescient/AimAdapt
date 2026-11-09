@@ -8,7 +8,7 @@ ui.insights = { overview: null, cache: new Map(), error: null };
 async function loadInsightsOverview(force = false) {
   if (ui.insights.overview && !force) return;
   try {
-    ui.insights.overview = tauri ? (await invoke("insights_overview")).scenarios : (await devData).insights_overview;
+    ui.insights.overview = (await invoke("insights_overview")).scenarios;
     ui.insights.cache.clear();
     ui.insights.error = null;
   } catch (e) {
@@ -17,18 +17,12 @@ async function loadInsightsOverview(force = false) {
   if (["scenarios", "today"].includes(route().view)) render();
 }
 
-async function insightsFor(name) {
-  const c = ui.insights.cache;
-  if (!c.has(name)) {
-    try {
-      c.set(name, tauri ? await invoke("insights", { scenario: name }) : (await devData).insights?.[name] ?? null);
-    } catch (e) {
-      c.set(name, { error: String(e) });
-    }
-    if (route().view === "scenarios") render();
-  }
-  return c.get(name);
-}
+// What views that need the overview pass to waitFor (app.js).
+const overviewNeed = () => ({ key: "insights-overview", have: Boolean(ui.insights.overview), error: ui.insights.error, load: loadInsightsOverview });
+
+// One scenario's insights: undefined while they load, null if there are none, or
+// { error }. Loaded once, however often the page asks (see loadCached).
+const insightsFor = (name) => loadCached(ui.insights.cache, name, () => invoke("insights", { scenario: name }));
 
 const ms = (v) => (v === null || v === undefined ? "–" : `${Math.round(v)} ms`);
 const share = (v) => (v === null || v === undefined ? "–" : `${Math.round(v * 100)}%`);
@@ -72,21 +66,31 @@ function insightRunsTable(d) {
 
 // ---------- charts ----------
 
-const W = 560, H = 240, PAD = { l: 44, r: 14, t: 14, b: 30 };
-const sx = (v, lo, hi) => PAD.l + ((v - lo) / (hi - lo || 1)) * (W - PAD.l - PAD.r);
-const sy = (v, lo, hi) => H - PAD.b - ((v - lo) / (hi - lo || 1)) * (H - PAD.t - PAD.b);
+// The charts here and the score chart (app.js) share these. A frame is a chart's
+// viewBox size (w × h) and the room left for its axes (l, r, t, b); sx and sy place
+// a value from lo to hi across or up a frame's plot area, CHART's unless given.
+const CHART = { w: 560, h: 240, l: 44, r: 14, t: 14, b: 30 };
+const sx = (v, lo, hi, f = CHART) => f.l + ((v - lo) / (hi - lo || 1)) * (f.w - f.l - f.r);
+const sy = (v, lo, hi, f = CHART) => f.h - f.b - ((v - lo) / (hi - lo || 1)) * (f.h - f.t - f.b);
+const tickValues = (lo, hi, n = 4) => Array.from({ length: n + 1 }, (_, i) => lo + ((hi - lo) * i) / n);
 
-// yfmt gets the exact tick value: rounding first made close ticks read the same.
-function axes(xlo, xhi, ylo, yhi, xlabel, ylabel, yfmt = (v) => Math.round(v * 10) / 10, yn = 4) {
-  const ticks = (lo, hi, n = 4) => Array.from({ length: n + 1 }, (_, i) => lo + ((hi - lo) * i) / n);
-  return `${ticks(ylo, yhi, yn).map((v) => `<line x1="${PAD.l}" x2="${W - PAD.r}" y1="${sy(v, ylo, yhi)}" y2="${sy(v, ylo, yhi)}" stroke="var(--border)" />
-      <text x="${PAD.l - 6}" y="${sy(v, ylo, yhi) + 4}" text-anchor="end" font-size="11" fill="var(--dim)">${yfmt(v)}</text>`).join("")}
-    ${ticks(xlo, xhi).map((v) => `<text x="${sx(v, xlo, xhi)}" y="${H - PAD.b + 16}" text-anchor="middle" font-size="11" fill="var(--dim)">${Math.round(v * 10) / 10}</text>`).join("")}
-    <text x="${W - PAD.r}" y="${H - 2}" text-anchor="end" font-size="11" fill="var(--dim)">${xlabel}</text>
-    <text x="${PAD.l}" y="${PAD.t - 2}" font-size="11" fill="var(--dim)">${ylabel}</text>`;
+// Grid lines and labels for n + 1 evenly spaced values from lo to hi. yfmt gets the
+// exact tick value: rounding first made close ticks read the same.
+function yTicks(lo, hi, yfmt = (v) => Math.round(v * 10) / 10, n = 4, f = CHART) {
+  return tickValues(lo, hi, n).map((v) => `<line x1="${f.l}" x2="${f.w - f.r}" y1="${sy(v, lo, hi, f)}" y2="${sy(v, lo, hi, f)}" stroke="var(--border)" />
+      <text x="${f.l - 6}" y="${sy(v, lo, hi, f) + 4}" text-anchor="end" font-size="11" fill="var(--dim)">${yfmt(v)}</text>`).join("");
 }
 
-const svg = (body, h = H, w = W) => `<svg viewBox="0 0 ${w} ${h}" width="100%" role="img" style="max-height:${h + 40}px">${body}</svg>`;
+// Both axes of a CHART-sized chart, with their labels.
+function axes(xlo, xhi, ylo, yhi, xlabel, ylabel, yfmt, yn) {
+  const f = CHART;
+  return `${yTicks(ylo, yhi, yfmt, yn)}
+    ${tickValues(xlo, xhi).map((v) => `<text x="${sx(v, xlo, xhi)}" y="${f.h - f.b + 16}" text-anchor="middle" font-size="11" fill="var(--dim)">${Math.round(v * 10) / 10}</text>`).join("")}
+    <text x="${f.w - f.r}" y="${f.h - 2}" text-anchor="end" font-size="11" fill="var(--dim)">${xlabel}</text>
+    <text x="${f.l}" y="${f.t - 2}" font-size="11" fill="var(--dim)">${ylabel}</text>`;
+}
+
+const svg = (body, h = CHART.h, w = CHART.w) => `<svg viewBox="0 0 ${w} ${h}" width="100%" role="img" style="max-height:${h + 40}px">${body}</svg>`;
 
 // Rating by run, drawn so "better" is always up: for lifetime and size the axis is
 // flipped, since lower is better.
@@ -136,16 +140,17 @@ function curveCard(c) {
   const xlo = Math.min(...xs), xhi = Math.max(...xs);
   const X = (v) => sx(h(v), xlo, xhi);
   const line = c.model.map((p, i) => `${i ? "L" : "M"}${X(p[0])},${sy(p[1] * 100, 0, 100)}`).join("");
+  const f = CHART;
   // Labels sit low on the chart, staggered, so they don't cover the curve's top.
-  const mark = (v, label, row) => `<line x1="${X(v)}" x2="${X(v)}" y1="${PAD.t}" y2="${H - PAD.b}" stroke="var(--dim)" stroke-dasharray="3 4"/>
-    <text x="${X(v) + 4}" y="${H - PAD.b - 8 - row * 14}" font-size="11" fill="var(--muted)">${label} ${esc(fmtKnob(knob, v))}</text>`;
-  const ticks = [0, 0.25, 0.5, 0.75, 1].map((k) => {
+  const mark = (v, label, row) => `<line x1="${X(v)}" x2="${X(v)}" y1="${f.t}" y2="${f.h - f.b}" stroke="var(--dim)" stroke-dasharray="3 4"/>
+    <text x="${X(v) + 4}" y="${f.h - f.b - 8 - row * 14}" font-size="11" fill="var(--muted)">${label} ${esc(fmtKnob(knob, v))}</text>`;
+  const xTicks = [0, 0.25, 0.5, 0.75, 1].map((k) => {
     const v = c.model[Math.round(k * (c.model.length - 1))][0];
-    return `<text x="${X(v)}" y="${H - PAD.b + 16}" text-anchor="middle" font-size="11" fill="var(--dim)">${esc(fmtKnob(knob, v))}</text>`;
+    return `<text x="${X(v)}" y="${f.h - f.b + 16}" text-anchor="middle" font-size="11" fill="var(--dim)">${esc(fmtKnob(knob, v))}</text>`;
   }).join("");
   return `<section class="card"><div class="card-head"><h2>Speed vs. hit rate</h2><span class="small muted">Harder to the right</span></div>
-    ${svg(`${[0, 25, 50, 75, 100].map((v) => `<line x1="${PAD.l}" x2="${W - PAD.r}" y1="${sy(v, 0, 100)}" y2="${sy(v, 0, 100)}" stroke="var(--border)"/><text x="${PAD.l - 6}" y="${sy(v, 0, 100) + 4}" text-anchor="end" font-size="11" fill="var(--dim)">${v}%</text>`).join("")}
-      ${ticks}
+    ${svg(`${yTicks(0, 100, (v) => `${v}%`)}
+      ${xTicks}
       ${mark(c.at95, "95%", 2)}${mark(c.at85, "85%", 1)}${mark(c.at50, "50%", 0)}
       <path d="${line}" fill="none" stroke="var(--rust)" stroke-width="2.5"/>
       ${c.observed.map((o) => `<circle cx="${X(o[0])}" cy="${sy(o[1] * 100, 0, 100)}" r="${3 + Math.min(6, Math.sqrt(o[2]))}" fill="var(--blue)" opacity="0.6"><title>${esc(fmtKnob(knob, o[0]))}: ${Math.round(o[1] * 100)}% of ${o[2]} targets</title></circle>`).join("")}`)}
@@ -214,11 +219,12 @@ function bars(items, fmt, max = 1) {
 }
 
 function reactionCard(r) {
+  const f = CHART;
   const max = Math.max(...r.histogram, 1);
-  const bw = (W - PAD.l - PAD.r) / r.histogram.length;
+  const bw = (f.w - f.l - f.r) / r.histogram.length;
   return `<section class="card"><div class="card-head"><h2>Reaction time</h2><span class="small muted">Until the crosshair starts moving</span></div>
-    ${svg(`${axes(0, 600, 0, max, "ms", "targets", (v) => Math.round(v))}${r.histogram.map((n, i) => `<rect x="${PAD.l + i * bw + 2}" y="${sy(n, 0, max)}" width="${bw - 4}" height="${H - PAD.b - sy(n, 0, max)}" fill="var(--rust)" rx="2"><title>${i * 50}–${i * 50 + 50} ms: ${n}</title></rect>`).join("")}
-      <line x1="${sx(r.median_ms, 0, 600)}" x2="${sx(r.median_ms, 0, 600)}" y1="${PAD.t}" y2="${H - PAD.b}" stroke="var(--blue)" stroke-width="2" stroke-dasharray="4 3"/>`)}
+    ${svg(`${axes(0, 600, 0, max, "ms", "targets", (v) => Math.round(v))}${r.histogram.map((n, i) => `<rect x="${f.l + i * bw + 2}" y="${sy(n, 0, max)}" width="${bw - 4}" height="${f.h - f.b - sy(n, 0, max)}" fill="var(--rust)" rx="2"><title>${i * 50}–${i * 50 + 50} ms: ${n}</title></rect>`).join("")}
+      <line x1="${sx(r.median_ms, 0, 600)}" x2="${sx(r.median_ms, 0, 600)}" y1="${f.t}" y2="${f.h - f.b}" stroke="var(--blue)" stroke-width="2" stroke-dasharray="4 3"/>`)}
     <div class="note-body">Median ${Math.round(r.median_ms)} ms (dashed line); half of your reactions are between ${Math.round(r.p25_ms)} and ${Math.round(r.p75_ms)} ms. ${r.median_before_ms ? delta(r.median_ms, r.median_before_ms, "ms", -1) + "." : ""}</div>
   </section>`;
 }
@@ -230,6 +236,7 @@ function distanceCard(ds) {
 }
 
 function trackingCard(t) {
+  const W = CHART.w;
   const lead = Math.max(-2, Math.min(2, t.lead_deg));
   return `<section class="card"><div class="card-head"><h2>Tracking</h2><span class="small muted">Sampled 30 times a second</span></div>
     <h3>On target by target speed</h3>${bars(t.by_speed.map((b) => [b.label, b.on_target, `${b.samples}`]), share)}

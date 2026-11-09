@@ -9,9 +9,21 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 use crate::parse::RunFile;
 
-pub use rusqlite::Error as DbError;
+/// Why a database call failed.
+#[derive(Debug, thiserror::Error)]
+pub enum DbError {
+    #[error(transparent)]
+    Sqlite(#[from] rusqlite::Error),
+    /// The database was written by a newer AimAdapt, whose tables this one doesn't
+    /// know. Opening it anyway could store runs the newer version can't read.
+    #[error(
+        "this history was saved by a newer version of AimAdapt (database version {found}, this version knows up to {known}). Update AimAdapt to open it."
+    )]
+    Newer { found: i64, known: usize },
+}
 
-const TIME_FORMAT: &str = "%Y-%m-%dT%H:%M:%S%.3f";
+/// How times are stored in the database: local time with milliseconds.
+pub(crate) const TIME_FORMAT: &str = "%Y-%m-%dT%H:%M:%S%.3f";
 
 /// Each entry upgrades the schema by one version (tracked in `PRAGMA user_version`).
 /// Never edit an entry once released; add a new one.
@@ -108,6 +120,14 @@ CREATE INDEX runs_source ON runs (source, scenario);
 /// Value of the `Source` field (and `runs.source`) for runs played in AimAdapt's
 /// engine. Stored in every run, so it keeps the app's old name (RustyAim).
 pub const SOURCE_ENGINE: &str = "rustyaim";
+
+/// `runs.source` of runs imported from KovaaK's stats files.
+pub const SOURCE_KOVAAKS: &str = "kovaaks";
+
+/// `runs.mode` of trainer runs (KovaaK's uses "Challenge"). They keep the app's
+/// old name so runs recorded before the rename stay in the same history.
+pub const MODE_STANDARD: &str = "RustyAim";
+pub const MODE_ADAPTIVE: &str = "RustyAim Adaptive";
 
 /// `runs.mode` of trainer runs of a scenario imported from a KovaaK's `.sce` file.
 /// They're kept apart from KovaaK's own runs of the same name (Progress leaves them
@@ -210,6 +230,15 @@ impl Db {
         Ok(Self { conn })
     }
 
+    /// The SQLite connection, for this crate's queries. Other crates use the named
+    /// queries, so a schema change can't break SQL outside this crate; their tests
+    /// get it with the `test-util` feature.
+    #[cfg(not(feature = "test-util"))]
+    pub(crate) fn conn(&self) -> &Connection {
+        &self.conn
+    }
+
+    #[cfg(feature = "test-util")]
     pub fn conn(&self) -> &Connection {
         &self.conn
     }
@@ -219,13 +248,27 @@ impl Db {
     }
 
     pub fn schema_version(&self) -> Result<u32, DbError> {
-        self.conn.pragma_query_value(None, "user_version", |r| r.get(0))
+        Ok(self.conn.pragma_query_value(None, "user_version", |r| r.get(0))?)
     }
 
     pub fn known_file_names(&self) -> Result<HashSet<String>, DbError> {
         let mut stmt = self.conn.prepare("SELECT file_name FROM runs")?;
         let names = stmt.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?;
         Ok(names)
+    }
+
+    /// Saves a trainer run and its details in one transaction, so a failure part
+    /// way leaves neither. Returns false if the run was already saved.
+    pub fn save_trainer_run(
+        &mut self,
+        run: &RunFile,
+        e: &crate::telemetry::EngineRun,
+        imported_at: NaiveDateTime,
+    ) -> Result<bool, DbError> {
+        let tx = self.conn.transaction()?;
+        let saved = insert_run(&tx, run, imported_at)? && crate::telemetry::insert_engine_run(&tx, &run.file_name, e)?;
+        tx.commit()?;
+        Ok(saved)
     }
 
     /// Inserts runs in one transaction. Runs already in the database are skipped.
@@ -268,10 +311,10 @@ impl Db {
         self.conn
             .query_row(
                 "SELECT sens_scale, horiz_sens, dpi, fov, fov_scale FROM runs
-                 WHERE source = 'kovaaks' AND sens_scale IS NOT NULL AND horiz_sens IS NOT NULL
+                 WHERE source = ?1 AND sens_scale IS NOT NULL AND horiz_sens IS NOT NULL
                    AND dpi IS NOT NULL
                  ORDER BY finished_at DESC LIMIT 1",
-                [],
+                [SOURCE_KOVAAKS],
                 |r| {
                     Ok(AimSettings {
                         sens_scale: r.get(0)?,
@@ -283,15 +326,19 @@ impl Db {
                 },
             )
             .optional()
+            .map_err(DbError::from)
     }
 
     pub fn last_finished_at(&self) -> Result<Option<String>, DbError> {
-        self.conn.query_row("SELECT MAX(finished_at) FROM runs", [], |r| r.get(0)).optional().map(Option::flatten)
+        Ok(self.conn.query_row("SELECT MAX(finished_at) FROM runs", [], |r| r.get(0)).optional()?.flatten())
     }
 }
 
 fn migrate(conn: &mut Connection) -> Result<(), DbError> {
     let current: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
+    if current > MIGRATIONS.len() as i64 {
+        return Err(DbError::Newer { found: current, known: MIGRATIONS.len() });
+    }
     for (i, sql) in (0i64..).zip(MIGRATIONS).skip(current as usize) {
         let tx = conn.transaction()?;
         tx.execute_batch(sql)?;
@@ -305,7 +352,7 @@ fn fmt(t: NaiveDateTime) -> String {
     t.format(TIME_FORMAT).to_string()
 }
 
-fn insert_run(tx: &Transaction, run: &RunFile, imported_at: NaiveDateTime) -> Result<bool, DbError> {
+pub(crate) fn insert_run(tx: &Transaction, run: &RunFile, imported_at: NaiveDateTime) -> Result<bool, DbError> {
     let changed = tx.execute(
         "INSERT OR IGNORE INTO runs (
             file_name, scenario, mode, started_at, finished_at, duration_s, score, accuracy,
@@ -348,7 +395,7 @@ fn insert_run(tx: &Transaction, run: &RunFile, imported_at: NaiveDateTime) -> Re
             run.field_f64("Avg Target Scale"),
             run.field_f64("Avg Time Dilation"),
             fmt(imported_at),
-            run.field("Source").unwrap_or("kovaaks"),
+            run.field("Source").unwrap_or(SOURCE_KOVAAKS),
         ],
     )?;
     if changed == 0 {
@@ -396,6 +443,21 @@ fn insert_run(tx: &Transaction, run: &RunFile, imported_at: NaiveDateTime) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Bug: a database from a newer AimAdapt opened without complaint, so an older
+    /// build wrote runs into tables it didn't know.
+    #[test]
+    fn a_newer_database_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.db");
+        Db::open(&path).unwrap();
+        let conn = Connection::open(&path).unwrap();
+        conn.pragma_update(None, "user_version", MIGRATIONS.len() as i64 + 1).unwrap();
+        drop(conn);
+        let err = Db::open(&path).err().expect("refused");
+        assert!(matches!(err, DbError::Newer { .. }), "{err}");
+        assert!(err.to_string().contains("newer version of AimAdapt"), "{err}");
+    }
 
     fn put(p: &std::path::Path, text: &str) {
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();

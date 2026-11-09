@@ -38,8 +38,10 @@ impl Section {
         self.str("Name")
     }
 
+    /// A number, or `None` when it's missing or not a real number (Rust reads
+    /// `nan` and `inf` as numbers; KovaaK's files never mean them).
     pub fn f32(&self, key: &str) -> Option<f32> {
-        self.get(key).and_then(|v| v.trim().parse().ok())
+        self.get(key).and_then(|v| v.trim().parse::<f32>().ok()).filter(|v| v.is_finite())
     }
 
     pub fn f32_or(&self, key: &str, default: f32) -> f32 {
@@ -90,7 +92,7 @@ pub fn parse_vec3(s: &str) -> Option<[f32; 3]> {
             "Z" => 2,
             _ => return None,
         };
-        out[i] = Some(v.trim().parse().ok()?);
+        out[i] = Some(v.trim().parse::<f32>().ok().filter(|v| v.is_finite())?);
     }
     Some([out[0]?, out[1]?, out[2]?])
 }
@@ -167,6 +169,18 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Bug: `nan` and `inf` parsed as numbers, so `MaxHealth=inf` or a vector with
+    /// `X=nan` came through into a scenario.
+    #[test]
+    fn nan_and_inf_are_not_numbers() {
+        let (s, _) = Settings::parse("Timelimit=nan\nMapScale=inf\nScale=1.5\nOffset=X=nan Y=0 Z=0\nAt=X=1 Y=2 Z=3\n");
+        assert_eq!(s.top.f32("Timelimit"), None);
+        assert_eq!(s.top.f32("MapScale"), None);
+        assert_eq!(s.top.f32("Scale"), Some(1.5));
+        assert_eq!(s.top.vec3("Offset"), None);
+        assert_eq!(s.top.vec3("At"), Some([1.0, 2.0, 3.0]));
+    }
 
     const FILE: &str = "\u{feff}Name=Test Scene\r\nTimelimit=60.0\r\nBotTeams=2;2\r\n\r\n[Bot Profile]\r\nName=Walker\r\n// a comment\r\nCameraOffset=X=0.000 Y=150.000 Z=-1.5\r\n\r\nUseWeapons=true\r\nStrayLineWithoutEquals\r\n\r\n[Character Profile]\r\nName=Ball\r\nFlickFOV=30\r\nflickfov=45\r\n\r\n[Map Data]\r\n{\"objects\": []}\r\n";
 

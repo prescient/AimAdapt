@@ -22,9 +22,10 @@ jobs:
       - name: Tests
         run: cargo test --workspace
       - name: Release executable
-        run: cargo build --release -p aimadapt-app --features custom-protocol
+        # The same script as the pre-commit hook.
+        run: sh scripts/release-exe.sh
       - uses: actions/upload-artifact@v4
         with:
           name: AimAdapt-exe
-          path: target/release/aimadapt-app.exe
+          path: dist/AimAdapt.exe
           if-no-files-found: error

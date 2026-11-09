@@ -13,7 +13,7 @@ use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, Timelike};
 
 use crate::db::{Db, DbError};
 
-const TIME_FORMAT: &str = "%Y-%m-%dT%H:%M:%S%.3f";
+use crate::db::TIME_FORMAT;
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq)]

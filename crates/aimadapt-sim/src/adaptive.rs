@@ -32,11 +32,11 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::rng::Rng;
 use crate::scenario::{MovementKind, Scenario, WeaponKind};
-use crate::sim::Rng;
 
 /// Chance of a slip (misclick, glance away) even on trivial targets.
-const LAPSE: f32 = 0.04;
+pub const LAPSE: f32 = 0.04;
 /// Weight of one tracking segment relative to one clicking target. Tracking ticks
 /// within a segment are strongly correlated, so a segment counts as a few targets.
 const SEGMENT_WEIGHT: f32 = 3.0;
@@ -186,7 +186,10 @@ impl Adaptive {
         }
     }
 
-    pub fn problems(&self) -> Vec<String> {
+    /// Problems with the adaptive settings. `resolved` is these settings with the
+    /// defaults for the scenario filled in, so easy and hard are compared even when
+    /// the file sets only one of them.
+    pub fn problems(&self, resolved: &Resolved) -> Vec<String> {
         let mut p = Vec::new();
         if !(0.6..=0.95).contains(&self.goal) {
             p.push("adaptive goal must be 0.6–0.95".into());
@@ -199,15 +202,15 @@ impl Adaptive {
                 p.push(format!("adaptive {name} can't be negative"));
             }
         }
-        if self.easy > 0.0 && self.hard > 0.0 && self.knob != Knob::Auto {
-            let (he, hh) = (self.knob.h(self.easy), self.knob.h(self.hard));
-            if he >= hh {
-                p.push(format!(
-                    "adaptive easy must be easier than hard ({} is {})",
-                    self.knob.label().to_lowercase(),
-                    if self.knob.higher_is_harder() { "harder when higher" } else { "harder when lower" }
-                ));
-            }
+        let knob = resolved.knob;
+        if knob.h(resolved.easy) >= knob.h(resolved.hard) {
+            p.push(format!(
+                "adaptive easy must be easier than hard ({} is {}; easy is {}, hard is {})",
+                knob.label().to_lowercase(),
+                if knob.higher_is_harder() { "harder when higher" } else { "harder when lower" },
+                knob.format(resolved.easy),
+                knob.format(resolved.hard),
+            ));
         }
         p
     }
@@ -397,7 +400,10 @@ impl Rating {
     /// The goal-rate value in knob units (the headline number).
     pub fn value(&self) -> f32 {
         let e = self.estimate();
-        self.cfg.knob.value(e.h_goal.clamp(self.h_easy(), self.h_hard()))
+        // Scenario files are checked for easy ≥ hard, but `clamp` panics on reversed
+        // limits, so don't trust that here.
+        let (lo, hi) = (self.h_easy().min(self.h_hard()), self.h_easy().max(self.h_hard()));
+        self.cfg.knob.value(e.h_goal.clamp(lo, hi))
     }
 
     /// Goal-rate value one standard deviation easier and harder.
@@ -527,6 +533,14 @@ mod tests {
 
     fn cfg() -> Resolved {
         Resolved { knob: Knob::Lifetime, easy: 3.0, hard: 0.25, start: 1.2, goal: 0.85, segment_s: 2.0 }
+    }
+
+    /// Bug: reversed limits made `value()` panic in `clamp`. Scenario files are now
+    /// checked for this, but the rating mustn't crash the trainer either way.
+    #[test]
+    fn reversed_limits_dont_panic() {
+        let r = Rating::new(Resolved { easy: 0.25, hard: 3.0, ..cfg() }, None);
+        assert!(r.value().is_finite());
     }
 
     /// A simulated player whose true 85% lifetime is `true85` with slope `s`.
@@ -696,7 +710,9 @@ mod tests {
         assert!((k.value(k.h(42.0)) - 42.0).abs() < 1e-3);
         assert!(Knob::Lifetime.h(0.5) > Knob::Lifetime.h(1.0));
         let a = Adaptive { knob: Knob::TargetSpeed, easy: 90.0, hard: 10.0, ..Default::default() };
-        assert!(!a.problems().is_empty(), "easy must be easier than hard");
+        let mut s = Scenario::default();
+        s.targets.movement.kind = MovementKind::Strafe;
+        assert!(!a.problems(&a.resolve(&s)).is_empty(), "easy must be easier than hard");
     }
 
     #[test]

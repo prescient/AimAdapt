@@ -150,6 +150,16 @@ impl PlayerSettings {
         if crate::scenario::parse_color(&self.crosshair.color).is_none() {
             p.push("crosshair color must look like #3cff8f".into());
         }
+        let c = &self.crosshair;
+        if !(0.0..=40.0).contains(&c.size) {
+            p.push("crosshair arm length must be 0–40 px".into());
+        }
+        if !(1.0..=10.0).contains(&c.thickness) {
+            p.push("crosshair thickness must be 1–10 px".into());
+        }
+        if !(0.0..=30.0).contains(&c.gap) {
+            p.push("crosshair gap must be 0–30 px".into());
+        }
         p
     }
 
@@ -167,6 +177,20 @@ impl PlayerSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Bug: crosshair numbers weren't checked, so `size = nan` or `gap = inf` in
+    /// engine.toml loaded and drew nothing (or covered the screen).
+    #[test]
+    fn crosshair_numbers_are_checked() {
+        let cases: [fn(&mut Crosshair); 4] =
+            [|c| c.size = f32::NAN, |c| c.gap = f32::INFINITY, |c| c.thickness = 0.0, |c| c.size = 500.0];
+        for set in cases {
+            let mut s = PlayerSettings::default();
+            set(&mut s.crosshair);
+            assert!(!s.problems().is_empty(), "{:?}", s.crosshair);
+        }
+        assert!(PlayerSettings::default().problems().is_empty());
+    }
 
     #[test]
     fn sensitivity_conversion() {

@@ -13,6 +13,7 @@ ui.trainer = {
   edit: null, // scenario being edited: { forId, replace, builtin, scenario, problems }
   wedit: null, // workout being edited: { forId, replace, builtin, workout, problems }
   message: null,
+  closedError: null, // why the trainer last closed, if it was an error: shown until dismissed or the next start
 };
 
 const TRAINER_VIEWS = ["today", "scenarios", "edit", "workout", "settings", "progress"];
@@ -26,6 +27,17 @@ async function loadTrainer() {
     ui.trainer.error = String(e);
   }
   if (TRAINER_VIEWS.includes(route().view)) render();
+}
+
+// What views that need the trainer's data pass to waitFor (app.js).
+const trainerNeed = () => ({ key: "trainer", have: Boolean(ui.trainer.data), error: ui.trainer.error, load: loadTrainer });
+
+// On the pages that start the trainer, after it closed with an error (a scenario it
+// couldn't play, a crash), until it's dismissed or the trainer starts again.
+function trainerErrorBanner() {
+  const error = ui.trainer.closedError;
+  return error ? `<section class="banner warn"><div><div class="banner-title">The trainer closed with an error</div><div class="banner-body">${esc(error)}</div></div>
+    <button class="btn" type="button" data-action="dismiss-trainer-error">Dismiss</button></section>` : "";
 }
 
 const getPath = (obj, path) => path.split(".").reduce((o, k) => (o == null ? undefined : o[k]), obj);
@@ -74,10 +86,8 @@ const minutes = (s) => `${Math.max(1, Math.round(s / 60))} min`;
 
 function edit(id) {
   const tr = ui.trainer;
-  if (!tr.data) {
-    loadTrainer();
-    return `<div class="empty-state">Loading…</div>`;
-  }
+  const wait = waitFor([trainerNeed()], "Loading…");
+  if (wait) return wait;
   if (!tr.edit || tr.edit.forId !== id) {
     const entry = tr.data.scenarios.find((e) => e.id === id);
     let scenario;
@@ -97,10 +107,11 @@ function edit(id) {
   }
   return `<div class="page">
     ${head(e.replace ? "Edit scenario" : e.builtin ? "Copy of a built-in scenario" : "New scenario", esc(e.scenario.name || "Untitled"), `<span class="chips">
-      <a class="btn" href="${e.replace || e.forId !== "new" ? scenarioHref(e.forId) : "#scenarios"}">Cancel</a>
+      <button class="btn" type="button" data-action="cancel-edit" data-href="${esc(e.replace || e.forId !== "new" ? scenarioHref(e.forId) : "#scenarios")}">Cancel</button>
       ${e.replace ? `<button class="btn" type="button" data-action="delete-scenario" data-id="${esc(e.replace)}">Delete</button>` : ""}
       <button class="btn" type="button" data-action="save-scenario">Save</button>
       <button class="btn primary" type="button" data-action="save-play">Save &amp; play adaptive</button></span>`)}
+    ${trainerErrorBanner()}
     ${e.builtin ? `<section class="banner info"><div class="banner-body">Built-in scenarios stay as they are. Saving makes your own copy.</div></section>` : ""}
     <div id="edit-status">${editStatus()}</div>
     <div class="editor-groups">${groups.map((g) => `<section class="card"><h2>${esc(g.name)}</h2><div class="form-grid">${g.fields.map((f) => fieldInput(f, getPath(e.scenario, f.path))).join("")}</div></section>`).join("")}</div>
@@ -120,17 +131,6 @@ function editStatus() {
     facts = "";
   }
   return problems + facts;
-}
-
-function knobsInput(f, value) {
-  const rows = (value || []).map((k, i) => `<div class="knob-row">
-      <select class="select" data-knob="${i}" data-part="knob" aria-label="Setting">${f.options.map((o) => `<option value="${o.value}" ${o.value === k.knob ? "selected" : ""} title="${esc(o.help)}">${esc(o.label)}</option>`).join("")}</select>
-      <span class="field"><input type="number" step="any" data-knob="${i}" data-part="easy" value="${esc(k.easy)}" aria-label="Easy value"><span class="muted small">easy</span></span>
-      <span class="field"><input type="number" step="any" data-knob="${i}" data-part="hard" value="${esc(k.hard)}" aria-label="Hard value"><span class="muted small">hard</span></span>
-      <button class="icon-btn" type="button" data-action="remove-knob" data-index="${i}" aria-label="Remove">×</button>
-    </div>`).join("");
-  return `<div class="knobs">${rows || '<div class="small muted">Using the default for this kind of scenario.</div>'}
-    <button class="btn" type="button" data-action="add-knob">Add a setting</button></div>`;
 }
 
 function fieldInput(f, value) {
@@ -170,13 +170,16 @@ function fieldInput(f, value) {
     case "toggle":
       control = `<span class="field"><input id="${id}" type="checkbox" data-path="${f.path}" data-kind="toggle" ${value ? "checked" : ""}></span>`;
       break;
-    case "knobs":
-      return `<div class="form-row wide"><label>${esc(f.label)}</label>${knobsInput(f, value)}${help}</div>`;
     default:
       control = `<span class="muted">${esc(JSON.stringify(value))}</span>`;
   }
   return `<div class="form-row"><label for="${id}">${esc(f.label)}</label>${control}${help}</div>`;
 }
+
+// Whether the page on screen is the scenario editor, editing this draft. Answers
+// that arrive after a wait only go on the page if it is: by then it can be another
+// page (whose heading a late check used to overwrite), or another draft.
+const editorShows = (draft) => route().view === "edit" && ui.trainer.edit === draft;
 
 let checkTimer = null;
 function recheck() {
@@ -184,10 +187,11 @@ function recheck() {
   clearTimeout(checkTimer);
   checkTimer = setTimeout(async () => {
     try {
-      e.problems = tauri ? await invoke("check_scenario", { scenario: e.scenario }) : [];
+      e.problems = await invoke("check_scenario", { scenario: e.scenario });
     } catch (err) {
       e.problems = [String(err)];
     }
+    if (!editorShows(e)) return;
     const box = document.getElementById("edit-status");
     if (box) box.innerHTML = editStatus();
     const h1 = document.querySelector(".page-head h1");
@@ -198,12 +202,6 @@ function recheck() {
 function onEditorInput(el) {
   const e = ui.trainer.edit;
   if (!e) return;
-  if (el.dataset.knob !== undefined) {
-    const k = e.scenario.adaptive.knobs[Number(el.dataset.knob)];
-    k[el.dataset.part] = el.dataset.part === "knob" ? el.value : Number(el.value);
-    recheck();
-    return;
-  }
   const path = el.dataset.path;
   let v;
   switch (el.dataset.kind) {
@@ -240,7 +238,9 @@ async function saveScenario(thenPlay) {
     if (thenPlay) await startPlay(id, true);
   } catch (err) {
     e.problems = String(err).split("; ");
-    document.getElementById("edit-status").innerHTML = editStatus();
+    if (!editorShows(e)) return;
+    const box = document.getElementById("edit-status");
+    if (box) box.innerHTML = editStatus();
     window.scrollTo(0, 0);
   }
 }
@@ -249,10 +249,8 @@ async function saveScenario(thenPlay) {
 
 function workout(id) {
   const tr = ui.trainer;
-  if (!tr.data) {
-    loadTrainer();
-    return `<div class="empty-state">Loading…</div>`;
-  }
+  const wait = waitFor([trainerNeed()], "Loading…");
+  if (wait) return wait;
   if (!tr.wedit || tr.wedit.forId !== id) {
     const entry = tr.data.workouts.find((e) => e.id === id);
     let w = id === "new" ? { name: "My workout", description: "", author: "", items: [{ scenario: "builtin:timed-flicks", runs: 2, mode: "adaptive" }] } : structuredClone(entry?.workout);
@@ -269,10 +267,11 @@ function workout(id) {
   }, 0);
   return `<div class="page">
     ${head(e.replace ? "Edit workout" : e.builtin ? "Copy of a built-in workout" : "New workout", esc(w.name || "Untitled"), `<span class="chips">
-      <a class="btn" href="${e.forId !== "new" ? scenarioHref(`workout:${e.forId}`) : "#scenarios"}">Cancel</a>
+      <button class="btn" type="button" data-action="cancel-workout" data-href="${esc(e.forId !== "new" ? scenarioHref(`workout:${e.forId}`) : "#scenarios")}">Cancel</button>
       ${e.replace ? `<button class="btn" type="button" data-action="delete-workout" data-id="${esc(e.replace)}">Delete</button>` : ""}
       <button class="btn" type="button" data-action="save-workout">Save</button>
       <button class="btn primary" type="button" data-action="save-workout-play">Save &amp; start</button></span>`)}
+    ${trainerErrorBanner()}
     ${e.problems.length ? `<section class="banner"><div><div class="banner-title">Fix before saving</div><ul class="problems">${e.problems.map((p) => `<li>${esc(p)}</li>`).join("")}</ul></div></section>` : ""}
     <section class="card">
       <div class="form-grid">
@@ -314,23 +313,25 @@ async function saveWorkout(thenPlay) {
 
 // ---------- Actions ----------
 
-async function startPlay(id, adaptive) {
+// Starts the trainer with start() (an invoke). If it can't start, that's the message;
+// the last run's error banner goes either way.
+async function launchTrainer(start) {
+  ui.trainer.closedError = null;
   try {
-    await invoke("play", { id, adaptive });
+    await start();
     ui.trainer.message = null;
   } catch (e) {
     ui.trainer.message = String(e);
   }
+}
+
+async function startPlay(id, adaptive) {
+  await launchTrainer(() => invoke("play", { id, adaptive }));
   await loadTrainer();
 }
 
 async function startWorkout(id) {
-  try {
-    await invoke("play_workout", { id });
-    ui.trainer.message = null;
-  } catch (e) {
-    ui.trainer.message = String(e);
-  }
+  await launchTrainer(() => invoke("play_workout", { id }));
   await loadTrainer();
 }
 
@@ -341,26 +342,27 @@ document.addEventListener("click", async (e) => {
   const tr = ui.trainer;
   if (action === "play") startPlay(btn.dataset.id, btn.dataset.adaptive === "1");
   else if (action === "play-workout") startWorkout(btn.dataset.id);
-  else if (action === "new-scenario") location.hash = "#edit/new";
-  else if (action === "new-workout") location.hash = "#workout/new";
-  else if (action === "save-scenario") saveScenario(false);
+  else if (action === "new-scenario") {
+    tr.edit = null;
+    location.hash = "#edit/new";
+  } else if (action === "new-workout") {
+    tr.wedit = null;
+    location.hash = "#workout/new";
+  } else if (action === "cancel-edit") {
+    // Drop the draft, or the cancelled changes come back when the editor reopens.
+    tr.edit = null;
+    location.hash = btn.dataset.href;
+  } else if (action === "cancel-workout") {
+    tr.wedit = null;
+    location.hash = btn.dataset.href;
+  } else if (action === "dismiss-trainer-error") {
+    tr.closedError = null;
+    render();
+  } else if (action === "save-scenario") saveScenario(false);
   else if (action === "save-play") saveScenario(true);
   else if (action === "save-workout") saveWorkout(false);
   else if (action === "save-workout-play") saveWorkout(true);
-  else if (action === "add-knob") {
-    const ks = tr.edit.scenario.adaptive.knobs;
-    const used = ks.map((k) => k.knob);
-    const opts = tr.data.fields.find((f) => f.kind === "knobs").options.map((o) => o.value);
-    const knob = opts.find((o) => !used.includes(o)) ?? opts[0];
-    const cur = { lifetime: tr.edit.scenario.targets.lifetime_s || 1.2, radius: tr.edit.scenario.targets.radius, speed: tr.edit.scenario.targets.movement.speed[1], change_every: tr.edit.scenario.targets.movement.change_every_s[1], spread: 1, health: tr.edit.scenario.targets.health, respawn_delay: tr.edit.scenario.targets.respawn_delay_s || 0.2 }[knob];
-    ks.push({ knob, easy: Math.round(cur * 150) / 100, hard: Math.round(cur * 50) / 100 });
-    render();
-    recheck();
-  } else if (action === "remove-knob") {
-    tr.edit.scenario.adaptive.knobs.splice(Number(btn.dataset.index), 1);
-    render();
-    recheck();
-  } else if (action.startsWith("witem-")) {
+  else if (action.startsWith("witem-")) {
     const items = tr.wedit.workout.items;
     const i = Number(btn.dataset.index);
     if (action === "witem-add") items.push({ scenario: items.at(-1)?.scenario ?? "builtin:timed-flicks", runs: 1, mode: "adaptive" });
@@ -370,13 +372,13 @@ document.addEventListener("click", async (e) => {
     render();
   } else if (action === "delete-scenario" || action === "delete-workout") {
     const id = btn.dataset.id;
-    const kind = action === "delete-scenario" ? "scenario" : "workout";
+    const isScenario = action === "delete-scenario";
     if (!confirm(`Delete ${id.replace(/^user:/, "")}? This removes the file; your past runs stay in your history.`)) return;
     try {
-      await invoke(action === "delete-scenario" ? "delete_scenario" : "delete_workout", { id });
+      await (isScenario ? invoke("delete_scenario", { id }) : invoke("delete_workout", { id }));
       tr.edit = null;
       tr.wedit = null;
-      tr.message = `${kind === "scenario" ? "Scenario" : "Workout"} deleted.`;
+      tr.message = `${isScenario ? "Scenario" : "Workout"} deleted.`;
     } catch (err) {
       tr.message = String(err);
     }
@@ -387,7 +389,7 @@ document.addEventListener("click", async (e) => {
 
 document.addEventListener("input", (e) => {
   const el = e.target;
-  if (el.dataset.path || el.dataset.knob !== undefined) onEditorInput(el);
+  if (el.dataset.path) onEditorInput(el);
   else if (el.dataset.wfield) ui.trainer.wedit.workout[el.dataset.wfield] = el.value;
   else if (el.dataset.witem !== undefined) {
     const it = ui.trainer.wedit.workout.items[Number(el.dataset.witem)];
@@ -399,12 +401,13 @@ document.addEventListener("change", (e) => {
   if (e.target.dataset.witem !== undefined && route().view === "workout") render();
 });
 
-if (tauri) {
-  tauri.event.listen("trainer-closed", async () => {
-    await load();
-    await loadTrainer();
-    if (typeof loadInsightsOverview === "function") loadInsightsOverview(true);
-    // Imported runs show on the KovaaK's scenario's page.
-    if (typeof ui.sceInfo !== "undefined") ui.sceInfo.clear();
-  });
-}
+// The trainer saved its runs and closed: reload what shows them. The event says
+// whether it closed with an error ({ error: string | null }), for the banner.
+listen("trainer-closed", async (event) => {
+  ui.trainer.closedError = event?.payload?.error ?? null;
+  await load();
+  await loadTrainer();
+  if (typeof loadInsightsOverview === "function") loadInsightsOverview(true);
+  // Imported runs show on the KovaaK's scenario's page.
+  if (typeof ui.sceInfo !== "undefined") ui.sceInfo.clear();
+});

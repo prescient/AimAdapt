@@ -23,13 +23,16 @@ const pctChange = (v, digits = 0) => (v === null || v === undefined ? "–" : `$
 async function loadProgram(force = false) {
   if (ui.program.data && !force) return;
   try {
-    ui.program.data = tauri ? await invoke("program") : (await devData).program;
+    ui.program.data = await invoke("program");
     ui.program.error = null;
   } catch (e) {
     ui.program.error = String(e);
   }
   if (["today", "progress"].includes(route().view)) render();
 }
+
+// What views that need the program pass to waitFor (app.js).
+const programNeed = () => ({ key: "program", have: Boolean(ui.program.data), error: ui.program.error, load: loadProgram });
 
 function todayInfo() {
   const d = ui.program.data;
@@ -42,30 +45,17 @@ function todayInfo() {
   return { today, next, stat };
 }
 
-function workoutBlocks(w) {
-  const groups = [];
-  for (const it of w.items) {
-    const label = BLOCK_LABELS[it.block ?? "none"] || "";
-    let g = groups.find((x) => x.label === label);
-    if (!g) groups.push((g = { label, items: [] }));
-    g.items.push(`${esc(scenarioName(it.scenario))} ×${it.runs}${it.mode === "standard" ? " (standard)" : ""}`);
-  }
-  return `<div class="blocks">${groups.map((g) => `<div class="block-row"><span class="block-label">${esc(g.label)}</span><span>${g.items.join(", ")}</span></div>`).join("")}</div>`;
-}
-
 // Progress › Skills: how each sub-skill and the week are going.
 function skillsTab() {
   const st = ui.program;
   if (st.error) return `<div class="card error">${esc(st.error)}</div>`;
-  if (!st.data || !ui.trainer.data) {
-    loadProgram();
-    if (!ui.trainer.data) loadTrainer();
-    return `<div class="empty-state">Loading…</div>`;
-  }
+  const wait = waitFor([programNeed(), trainerNeed()], "Loading…");
+  if (wait) return wait;
   const d = st.data;
   const p = d.progress;
   const s = p.summary;
-  return `<section class="kpis" aria-label="This week in numbers">
+  return `${trainerErrorBanner()}
+    <section class="kpis" aria-label="This week in numbers">
       ${kpi("Days done", `${s.days_done} <small>of ${s.days_planned}</small>`, `${esc(d.name)} this week`)}
       ${kpi("Minutes", Math.round(s.minutes), "This week, in the program")}
       ${s.best ? kpi("Biggest gain", esc(SKILL_LABELS[s.best[0]]), `${pctChange(s.best[1], 1)} over the last 7 days`) : ""}
@@ -148,12 +138,7 @@ function sessionsCard(sessions) {
 }
 
 async function startProgram(dayId) {
-  try {
-    await invoke("play_program", { id: ui.program.data.id, day: dayId });
-    ui.trainer.message = null;
-  } catch (e) {
-    ui.trainer.message = String(e);
-  }
+  await launchTrainer(() => invoke("play_program", { id: ui.program.data.id, day: dayId }));
   await loadProgram(true);
   if (ui.trainer.data) loadTrainer();
 }
@@ -163,4 +148,5 @@ document.addEventListener("click", (e) => {
   if (btn) startProgram(btn.dataset.day);
 });
 
-if (tauri) tauri.event.listen("trainer-closed", () => loadProgram(true));
+// The week's runs changed. (trainer.js's listener shows any error it closed with.)
+listen("trainer-closed", () => loadProgram(true));

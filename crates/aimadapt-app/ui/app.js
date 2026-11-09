@@ -2,33 +2,58 @@
 // everything (`snapshot`), renders the current screen into <main>, and reloads
 // when the folder watcher reports new runs.
 
+// ---------- talking to the Rust side ----------
+//
+// Views only call invoke() and listen(); this is the one place that knows whether
+// it's running in the app. Outside Tauri (a browser preview), commands are answered
+// from a dump made from a test database with
+//   aimadapt-app --db <file> --dump-snapshot crates/aimadapt-app/dev/dev-snapshot.json
+// The preview server serves crates/aimadapt-app, so this page is /ui/index.html and
+// the dump is at ../dev/ (never in ui/, which is built into the exe).
+
 const tauri = window.__TAURI__;
-// Outside Tauri (a browser preview), answer from a dump made with
-// `aimadapt-app --dump-snapshot dev-snapshot.json` placed next to this file.
-const devData = tauri ? null : fetch("dev-snapshot.json").then((r) => r.json());
+const devData = tauri
+  ? null
+  : fetch("../dev/dev-snapshot.json").then((r) => {
+      if (!r.ok) throw new Error(`No preview data: ../dev/dev-snapshot.json gave ${r.status}`);
+      return r.json();
+    });
+
+// What the preview answers for each command, from the dump (d) and the call's args (a).
+const PREVIEW = {
+  snapshot: (d) => d.snapshot,
+  scenario: (d, a) => d.scenarios[a.name] ?? null,
+  rescan: (d) => d.snapshot.last_import,
+  trainer: (d) => d.trainer,
+  check_scenario: () => [],
+  check_profiles: () => [[], []],
+  save_marks: (d, a) => a.marks,
+  insights_overview: (d) => ({ scenarios: d.insights_overview }),
+  insights: (d, a) => d.insights?.[a.scenario] ?? null,
+  replay: (d, a) => d.replays?.[a.runId] ?? null,
+  program: (d) => d.program,
+  sce_library: (d) => d.sce_library ?? [],
+  sce_info: (d, a) => d.sce_info?.[a.name] ?? { path: null, playable: false, reasons: [], notes: [], runs: 0, best: null, last_played: null },
+};
+
 const invoke = tauri
   ? (cmd, args) => tauri.core.invoke(cmd, args)
   : async (cmd, args) => {
-      const d = await devData;
-      if (cmd === "snapshot") return d.snapshot;
-      if (cmd === "scenario") return d.scenarios[args.name] ?? null;
-      if (cmd === "trainer") return d.trainer;
-      if (cmd === "check_scenario") return [];
-      if (cmd === "rescan") return d.snapshot.last_import;
-      if (cmd === "replay") return d.replays?.[args.runId] ?? null;
-      if (cmd === "save_marks") return args.marks;
-      if (cmd === "sce_library") return d.sce_library ?? [];
-      if (cmd === "sce_info") return d.sce_info?.[args.name] ?? { path: null, playable: false, reasons: [], notes: [], runs: 0, best: null, last_played: null };
-      throw new Error("Only available in the app");
+      if (!Object.hasOwn(PREVIEW, cmd)) throw new Error("Only available in the app");
+      return PREVIEW[cmd](await devData, args);
     };
+
+// Events from the Rust side (new runs, the trainer closing). The preview has none.
+const listen = tauri ? (event, handler) => tauri.event.listen(event, handler) : () => {};
 
 const ui = {
   snap: null,
   error: null,
-  scenarioCache: new Map(),
+  scenarioCache: new Map(), // a KovaaK's scenario's history by name (see scenarioDetail)
   calMonth: null, // Date for the first of the month shown on Progress › Time
   sessionsShown: 20,
   rescanning: false,
+  rescanError: null, // why the last Rescan failed, shown by the button until the next one
 };
 
 // ---------- formatting ----------
@@ -84,18 +109,73 @@ async function load() {
   render();
 }
 
-async function scenarioDetail(name) {
-  if (!ui.scenarioCache.has(name)) ui.scenarioCache.set(name, await invoke("scenario", { name }));
-  return ui.scenarioCache.get(name);
+// ---------- loading what a view needs ----------
+//
+// Views draw from data that loads in the background and draw again when it comes
+// in, so they ask for it on every render while it's missing. A load mustn't start
+// again while it's running, or after it failed: a failed load that each render
+// asked for again was an endless load/fail/render loop that never showed its error.
+
+const running = new Set();
+
+// Runs fetchData() unless the load under this key is still running.
+function startOnce(key, fetchData) {
+  if (running.has(key)) return;
+  running.add(key);
+  Promise.resolve()
+    .then(fetchData)
+    .catch((e) => console.error(e))
+    .finally(() => running.delete(key));
 }
+
+// What a view shows until it has everything in `needs`: null once it has, else the
+// first failed load's error, else `text` while the rest load (each started once).
+// A need is { key, have, error, load }: see trainerNeed, programNeed, overviewNeed.
+function waitFor(needs, text) {
+  const missing = needs.filter((n) => !n.have);
+  if (!missing.length) return null;
+  const failed = missing.find((n) => n.error);
+  if (failed) return `<div class="card error">${esc(failed.error)}</div>`;
+  for (const n of missing) startOnce(n.key, n.load);
+  return `<div class="empty-state">${esc(text)}</div>`;
+}
+
+// Marks a cache entry whose load is running.
+class Loading {}
+
+// One item's data in `cache`, loaded once by get(): undefined until it's in, then
+// the value, or { error } when the load failed, for the page to show rather than
+// ask again. Scenarios draws again when it arrives. If the cache is cleared while a
+// load runs, that load's answer is dropped and the next render starts a fresh one.
+function loadCached(cache, key, get) {
+  if (!cache.has(key)) {
+    const mark = new Loading();
+    cache.set(key, mark);
+    get()
+      .catch((e) => ({ error: String(e) }))
+      .then((value) => {
+        if (cache.get(key) !== mark) return;
+        cache.set(key, value ?? null);
+        if (route().view === "scenarios") render();
+      });
+  }
+  const v = cache.get(key);
+  return v instanceof Loading ? undefined : v;
+}
+
+// A KovaaK's scenario's history from its stats files: undefined while it loads, null
+// if there's none, or { error }.
+const scenarioDetail = (name) => loadCached(ui.scenarioCache, name, () => invoke("scenario", { name }));
 
 async function rescan() {
   ui.rescanning = true;
+  ui.rescanError = null;
   render();
   try {
     await invoke("rescan");
   } catch (e) {
-    ui.error = String(e);
+    // Not in ui.error: the reload below clears that, and it only shows without data.
+    ui.rescanError = String(e);
   }
   ui.rescanning = false;
   await load();
@@ -155,8 +235,58 @@ function render() {
   }
   if (!ui.snap) return;
   const views = { today, scenarios: scenariosPage, edit, workout, progress: progressPage, settings: settingsPage, help: helpPage, replay: replayPage };
-  main.innerHTML = (views[view] || today)(arg);
+  const focused = focusedControl(main);
+  try {
+    main.innerHTML = (views[view] || today)(arg);
+  } catch (e) {
+    // Say what broke instead of leaving the last page up (or "Loading…") with no word.
+    console.error(e);
+    main.innerHTML = `<div class="empty-state error">This page couldn't be drawn: ${esc(e?.message ?? e)}</div>`;
+    return;
+  }
+  refocus(main, focused);
   if (view === "replay") afterReplay();
+}
+
+// ---------- keeping the keyboard focus ----------
+//
+// Every render replaces <main>, which drops the focus. It goes back to the same
+// control when the new page still has one: matched by id, or else by its tag, link
+// and data-* attributes (data-action with the data-id, data-key, data-index… that
+// say what it acts on), with a text field's caret where it was.
+
+function controlKey(el) {
+  if (el.id) return `#${el.id}`;
+  const attrs = [...el.attributes].filter((a) => a.name === "href" || a.name.startsWith("data-"));
+  return attrs.length ? `${el.tagName} ${attrs.map((a) => `${a.name}=${a.value}`).sort().join(" ")}` : null;
+}
+
+function focusedControl(root) {
+  const el = document.activeElement;
+  if (!el || el === root || !root.contains(el)) return null;
+  const key = controlKey(el);
+  if (!key) return null;
+  let caret = null;
+  try {
+    if (typeof el.selectionStart === "number") caret = [el.selectionStart, el.selectionEnd];
+  } catch {
+    // Not a text field.
+  }
+  return { key, tag: el.tagName, caret };
+}
+
+function refocus(root, focused) {
+  if (!focused) return;
+  const el = [...root.querySelectorAll(focused.tag)].find((x) => controlKey(x) === focused.key);
+  if (!el) return;
+  el.focus({ preventScroll: true });
+  if (focused.caret) {
+    try {
+      el.setSelectionRange(...focused.caret);
+    } catch {
+      // Number fields have no caret to set.
+    }
+  }
 }
 
 function renderStatus() {
@@ -180,10 +310,12 @@ function head(eyebrow, title, actions = "") {
   return `<header class="page-head"><div><div class="eyebrow">${eyebrow}</div><h1>${title}</h1></div><div class="head-actions">${actions}${link}</div></header>`;
 }
 
+// Rescan, with why the last one failed beside it.
 const rescanButton = () =>
-  `<button class="btn" type="button" data-action="rescan" ${ui.rescanning ? "disabled" : ""}>
+  `<span class="rescan">${ui.rescanError ? `<span class="error small">Rescan failed: ${esc(ui.rescanError)}</span>` : ""}
+    <button class="btn" type="button" data-action="rescan" ${ui.rescanning ? "disabled" : ""}>
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"></path><path d="M20 4v7h-7"></path></svg>
-    ${ui.rescanning ? "Scanning…" : "Rescan folder"}</button>`;
+    ${ui.rescanning ? "Scanning…" : "Rescan folder"}</button></span>`;
 
 // Tabs that are links, so each tab has its own address and Back works.
 function tabs(base, list, current) {
@@ -330,26 +462,32 @@ function scenarioView({ stats: s, history, cold_starts }) {
     </div>`;
 }
 
+// A score axis from min to max rounded out to a "nice" step (1, 2, 2.5 or 5 × 10^n),
+// so tick labels read cleanly; `steps` is how many steps it spans.
+function niceScale(min, max) {
+  const raw = (max - min || Math.abs(max) || 1) / 4;
+  const mag = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw);
+  let lo = Math.floor(min / step) * step, hi = Math.ceil(max / step) * step;
+  if (hi === max) hi += step;
+  if (lo === min && min !== 0) lo -= step;
+  if (min >= 0) lo = Math.max(0, lo);
+  return { lo, hi, steps: Math.round((hi - lo) / step) };
+}
+
+// Score by run, with personal bests, a 3-run average, a line between days and a
+// marker where the settings changed. Drawn with the chart helpers in insights.js.
 function scoreChart(history, periods) {
   const pts = history.filter((r) => !r.restarted && r.score !== null);
   if (pts.length < 2) return `<div class="note-body">Play this scenario again to see a chart.</div>`;
-  const W = 760, H = 260, L = 56, R = 16, T = 16, B = 44;
+  const f = { w: 760, h: 260, l: 56, r: 16, t: 16, b: 44 };
   const scores = pts.map((p) => p.score);
-  // Round the axis to a "nice" step (1, 2, 2.5 or 5 × 10^n) so tick labels read cleanly.
-  const minS = Math.min(...scores), maxS = Math.max(...scores);
-  const raw = (maxS - minS || Math.abs(maxS) || 1) / 4;
-  const mag = 10 ** Math.floor(Math.log10(raw));
-  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw);
-  let lo = Math.floor(minS / step) * step, hi = Math.ceil(maxS / step) * step;
-  if (hi === maxS) hi += step;
-  if (lo === minS && minS !== 0) lo -= step;
-  if (minS >= 0) lo = Math.max(0, lo);
-  const x = (i) => L + (pts.length === 1 ? 0 : (i / (pts.length - 1)) * (W - L - R));
-  const y = (v) => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
-  const ticks = [];
-  for (let v = lo; v <= hi + step / 2; v += step) ticks.push(v);
+  const { lo, hi, steps } = niceScale(Math.min(...scores), Math.max(...scores));
+  const last = pts.length - 1;
+  const x = (i) => sx(i, 0, last, f);
+  const y = (v) => sy(v, lo, hi, f);
   const line = pts.map((p, i) => `${x(i).toFixed(1)},${y(p.score).toFixed(1)}`).join(" ");
-  const area = `M${x(0)},${y(lo)} L${line.replaceAll(" ", " L")} L${x(pts.length - 1)},${y(lo)} Z`;
+  const area = `M${x(0)},${y(lo)} L${line.replaceAll(" ", " L")} L${x(last)},${y(lo)} Z`;
   const avg = pts.length >= 4 ? pts.map((_, i) => {
     const w = scores.slice(Math.max(0, i - 2), i + 1);
     return `${x(i).toFixed(1)},${y(w.reduce((a, b) => a + b, 0) / w.length).toFixed(1)}`;
@@ -359,41 +497,40 @@ function scoreChart(history, periods) {
   let lastLabelX = -Infinity;
   pts.forEach((p, i) => {
     const prev = pts[i - 1];
+    const between = prev ? (x(i) + x(i - 1)) / 2 : 0;
     if (prev && p.sens_period !== prev.sens_period) {
-      const mx = (x(i) + x(i - 1)) / 2;
       const c = periods[p.sens_period];
-      marks.push(`<line x1="${mx}" y1="${T}" x2="${mx}" y2="${H - B}" stroke="#5aa9ff" stroke-dasharray="3 4"></line>
-        <text x="${mx + 4}" y="${T + 10}" fill="#5aa9ff" font-size="11">${esc(c.cm_per_360 ? c.cm_per_360.toFixed(1) + " cm" : "settings")}</text>`);
+      marks.push(`<line x1="${between}" y1="${f.t}" x2="${between}" y2="${f.h - f.b}" stroke="var(--blue)" stroke-dasharray="3 4"></line>
+        <text x="${between + 4}" y="${f.t + 10}" fill="var(--blue)" font-size="11">${esc(c.cm_per_360 ? c.cm_per_360.toFixed(1) + " cm" : "settings")}</text>`);
     }
     if (!prev || p.day !== prev.day) {
-      if (prev) marks.push(`<line x1="${(x(i) + x(i - 1)) / 2}" y1="${T}" x2="${(x(i) + x(i - 1)) / 2}" y2="${H - B}" stroke="#262a31"></line>`);
+      if (prev) marks.push(`<line x1="${between}" y1="${f.t}" x2="${between}" y2="${f.h - f.b}" stroke="var(--border)"></line>`);
       if (x(i) - lastLabelX > 56) {
-        marks.push(`<text x="${x(i)}" y="${H - B + 30}" fill="#aeb4be" font-size="11" text-anchor="${i === 0 ? "start" : "middle"}">${esc(fmtShort(day(p.day)))}</text>`);
+        marks.push(`<text x="${x(i)}" y="${f.h - f.b + 30}" fill="var(--muted)" font-size="11" text-anchor="${i === 0 ? "start" : "middle"}">${esc(fmtShort(day(p.day)))}</text>`);
         lastLabelX = x(i);
       }
     }
   });
   const dots = pts.map((p, i) => p.is_pb
-    ? `<circle cx="${x(i)}" cy="${y(p.score)}" r="${pts.length > 60 ? 3.5 : 5.5}" fill="#f2c14e" stroke="#16181c" stroke-width="2"><title>${esc(num(p.score))} (PB) · ${esc(fmtShort(dt(p.finished_at)))}</title></circle>`
-    : pts.length <= 60 ? `<circle cx="${x(i)}" cy="${y(p.score)}" r="3.5" fill="#16181c" stroke="#aeb4be" stroke-width="1.5"><title>${esc(num(p.score))} · ${esc(fmtShort(dt(p.finished_at)))}</title></circle>` : "").join("");
+    ? `<circle cx="${x(i)}" cy="${y(p.score)}" r="${pts.length > 60 ? 3.5 : 5.5}" fill="var(--gold)" stroke="var(--surface)" stroke-width="2"><title>${esc(num(p.score))} (PB) · ${esc(fmtShort(dt(p.finished_at)))}</title></circle>`
+    : pts.length <= 60 ? `<circle cx="${x(i)}" cy="${y(p.score)}" r="3.5" fill="var(--surface)" stroke="var(--muted)" stroke-width="1.5"><title>${esc(num(p.score))} · ${esc(fmtShort(dt(p.finished_at)))}</title></circle>` : "").join("");
 
   return `<figure style="margin:0">
-    <svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Score by run, ${pts.length} runs, best ${esc(num(Math.max(...scores)))}">
-      ${ticks.map((v) => `<line x1="${L}" y1="${y(v)}" x2="${W - R}" y2="${y(v)}" stroke="#262a31"></line>
-        <text x="${L - 8}" y="${y(v) + 4}" fill="#9aa1ac" font-size="11" text-anchor="end" font-family="Cascadia Mono, Consolas, monospace">${esc(num(v))}</text>`).join("")}
+    <svg viewBox="0 0 ${f.w} ${f.h}" width="100%" role="img" aria-label="Score by run, ${pts.length} runs, best ${esc(num(Math.max(...scores)))}">
+      ${yTicks(lo, hi, (v) => esc(num(v)), steps, f)}
       ${marks.join("")}
-      <path d="${area}" fill="#f0783c" fill-opacity="0.1"></path>
-      <polyline points="${line}" fill="none" stroke="#f0783c" stroke-width="2.25" stroke-linejoin="round"></polyline>
-      ${avg ? `<polyline points="${avg}" fill="none" stroke="#5aa9ff" stroke-width="1.5" stroke-dasharray="6 4"></polyline>` : ""}
+      <path d="${area}" fill="var(--rust)" fill-opacity="0.1"></path>
+      <polyline points="${line}" fill="none" stroke="var(--rust)" stroke-width="2.25" stroke-linejoin="round"></polyline>
+      ${avg ? `<polyline points="${avg}" fill="none" stroke="var(--blue)" stroke-width="1.5" stroke-dasharray="6 4"></polyline>` : ""}
       ${dots}
-      <text x="${L}" y="${H - B + 14}" fill="#7c8490" font-size="10">Run 1</text>
-      <text x="${W - R}" y="${H - B + 14}" fill="#7c8490" font-size="10" text-anchor="end">Run ${pts.length}</text>
+      <text x="${f.l}" y="${f.h - f.b + 14}" fill="var(--faint)" font-size="10">Run 1</text>
+      <text x="${f.w - f.r}" y="${f.h - f.b + 14}" fill="var(--faint)" font-size="10" text-anchor="end">Run ${pts.length}</text>
     </svg>
     <figcaption class="legend" style="margin-top:8px">
-      <span><i class="swatch" style="background:#f0783c;height:3px;width:14px"></i>Score</span>
-      <span><i class="swatch" style="background:#f2c14e;border-radius:50%"></i>New personal best</span>
-      ${avg ? `<span><i style="width:14px;border-top:2px dashed #5aa9ff"></i>3-run average</span>` : ""}
-      <span><i style="width:2px;height:12px;border-left:2px dashed #5aa9ff"></i>Settings change</span>
+      <span><i class="swatch" style="background:var(--rust);height:3px;width:14px"></i>Score</span>
+      <span><i class="swatch" style="background:var(--gold);border-radius:50%"></i>New personal best</span>
+      ${avg ? `<span><i style="width:14px;border-top:2px dashed var(--blue)"></i>3-run average</span>` : ""}
+      <span><i style="width:2px;height:12px;border-left:2px dashed var(--blue)"></i>Settings change</span>
     </figcaption></figure>`;
 }
 
@@ -631,7 +768,7 @@ window.addEventListener("hashchange", () => {
   if (route().view === "scenarios") restoreListScroll();
 });
 
-if (tauri) tauri.event.listen("runs-imported", () => load());
+listen("runs-imported", () => load());
 // Wait for every script: the first render needs views from the files loaded after
 // this one (trainer.js … today.js, help.js), and data can arrive before they've run.
 document.addEventListener("DOMContentLoaded", () => load());

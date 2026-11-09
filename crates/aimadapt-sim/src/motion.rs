@@ -13,7 +13,7 @@ use glam::Vec3;
 use serde::{Deserialize, Serialize};
 
 use crate::collide::Collider;
-use crate::sim::Rng;
+use crate::rng::Rng;
 
 /// Unreal's default terminal velocity, m/s.
 const TERMINAL: f32 = 40.0;
@@ -494,7 +494,6 @@ impl BotState {
         let wish = right * self.side * m.strafe_mult + toward * self.fore * back;
         let cap = m.max_speed * wish.length();
         let dir = wish.normalize_or_zero();
-        let before = Vec3::new(self.vel.x, 0.0, self.vel.z).length();
 
         let steps = (dt / SUBSTEP).ceil().clamp(1.0, 64.0) as usize;
         let h = dt / steps as f32;
@@ -558,7 +557,7 @@ impl BotState {
             if b.on_touch && touched_wall {
                 self.side = -self.side;
             } else if b.fraction > 0.0 && cap > 0.0 {
-                let speed = Vec3::new(self.vel.x, 0.0, self.vel.z).length().max(before.min(0.0));
+                let speed = Vec3::new(self.vel.x, 0.0, self.vel.z).length();
                 if speed < b.fraction * cap {
                     self.blocked_for += dt;
                     if self.blocked_for >= self.blocked_limit {
@@ -639,7 +638,8 @@ fn brake(v: Vec3, friction: f32, decel: f32, h: f32) -> Vec3 {
         return v;
     }
     let old = v;
-    let rev = -v.normalize() * decel.max(0.0);
+    // `normalize` gives NaN for a velocity too small to square.
+    let rev = -v.normalize_or_zero() * decel.max(0.0);
     let next = v + (-friction.max(0.0) * v + rev) * h;
     if next.dot(old) <= 0.0 || (decel > 0.0 && next.length() < STOP_SPEED) { Vec3::ZERO } else { next }
 }
@@ -691,6 +691,16 @@ pub fn separate(bots: &mut [(Vec3, f32, f32)]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Bug: a velocity too small to square made `normalize` return NaN, and the bot
+    /// vanished from the world.
+    #[test]
+    fn braking_a_tiny_velocity_stays_finite() {
+        for decel in [0.0, 5.0] {
+            let v = brake(Vec3::new(1e-30, 0.0, 0.0), 2.0, decel, 0.01);
+            assert!(v.is_finite(), "{v} with decel {decel}");
+        }
+    }
     use crate::world::WorldMesh;
 
     const DT: f32 = 1.0 / 120.0;

@@ -92,11 +92,14 @@ impl RunFile {
     }
 
     /// When the run started. `Challenge Start` is only a time of day, so a start
-    /// later than the finish time means the run crossed midnight.
+    /// later than the finish time means the run crossed midnight. The finish time
+    /// from the file name has whole seconds, so a start up to a second after it is
+    /// the same second, not yesterday.
     pub fn started_at(&self) -> Option<NaiveDateTime> {
         let time = parse_time_of_day(self.field("Challenge Start")?)?;
         let start = self.finished_at.date().and_time(time);
-        Some(if start > self.finished_at { start - Duration::days(1) } else { start })
+        let crossed_midnight = start >= self.finished_at + Duration::seconds(1);
+        Some(if crossed_midnight { start - Duration::days(1) } else { start })
     }
 
     /// Wall-clock length of the run in seconds (includes pauses).
@@ -241,6 +244,27 @@ fn parse_time_of_day(value: &str) -> Option<NaiveTime> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Bug: a run that started and finished in the same clock second (the finish
+    /// time from the file name drops the milliseconds) was taken to have started
+    /// the day before, and came out 86,399 seconds long.
+    #[test]
+    fn a_run_within_one_second_isnt_a_day_long() {
+        let finished = date(2026, 11, 3).and_hms_opt(6, 29, 11).unwrap();
+        let mut fields = std::collections::BTreeMap::new();
+        fields.insert("Challenge Start".to_string(), "06:29:11.400".to_string());
+        let run = RunFile {
+            file_name: "x".into(),
+            scenario: "x".into(),
+            mode: "Challenge".into(),
+            finished_at: finished,
+            fields,
+            kills: vec![],
+            weapons: vec![],
+        };
+        assert_eq!(run.started_at().unwrap().date(), finished.date());
+        assert_eq!(run.duration_s(), Some(0.0));
+    }
     use chrono::NaiveDate;
 
     fn date(y: i32, m: u32, d: u32) -> NaiveDate {

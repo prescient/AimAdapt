@@ -358,6 +358,16 @@ impl Db {
     /// by its file name. Does nothing if that run doesn't exist or already has details.
     pub fn save_engine_run(&mut self, file_name: &str, e: &EngineRun) -> Result<bool, DbError> {
         let tx = self.conn_mut().transaction()?;
+        let saved = insert_engine_run(&tx, file_name, e)?;
+        tx.commit()?;
+        Ok(saved)
+    }
+}
+
+/// Inserts an engine run's details for the run saved as `file_name`, inside `tx`.
+/// Returns false if there's no such run or it already has details.
+pub(crate) fn insert_engine_run(tx: &rusqlite::Transaction, file_name: &str, e: &EngineRun) -> Result<bool, DbError> {
+    {
         let Some(run_id) =
             tx.query_row("SELECT id FROM runs WHERE file_name = ?1", [file_name], |r| r.get::<_, i64>(0)).optional()?
         else {
@@ -460,10 +470,11 @@ impl Db {
                 ])?;
             }
         }
-        tx.commit()?;
         Ok(true)
     }
+}
 
+impl Db {
     /// When each workout was last played, by name: the finish time of the latest run
     /// saved as part of it. Program days count under their workout's name.
     pub fn workouts_last_played(&self) -> Result<HashMap<String, String>, DbError> {
@@ -472,7 +483,7 @@ impl Db {
              WHERE e.workout IS NOT NULL GROUP BY e.workout",
         )?;
         let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
-        rows.collect()
+        Ok(rows.collect::<Result<_, _>>()?)
     }
 
     /// The latest adaptive rating for a scenario, for showing.
@@ -510,6 +521,7 @@ impl Db {
                 },
             )
             .optional()
+            .map_err(DbError::from)
     }
 
     /// The hardest value the goal rate was held at for a whole run on a scenario
@@ -519,7 +531,7 @@ impl Db {
     /// With `hash`, only runs of that exact version of the scenario count.
     pub fn fastest_hit(&self, base_scenario: &str, knob: &str, hash: Option<&str>) -> Result<Option<f64>, DbError> {
         let agg = if knob == "target_speed" { "MAX" } else { "MIN" };
-        self.conn().query_row(
+        Ok(self.conn().query_row(
             &format!(
                 "SELECT {agg}(e.fastest) FROM engine_runs e JOIN runs r ON r.id = e.run_id
                  WHERE e.base_scenario = ?1 AND e.knob = ?2 AND e.run_value IS NOT NULL
@@ -527,7 +539,7 @@ impl Db {
             ),
             rusqlite::params![base_scenario, knob, hash],
             |r| r.get(0),
-        )
+        )?)
     }
 }
 

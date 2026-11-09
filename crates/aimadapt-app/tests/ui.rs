@@ -1,14 +1,186 @@
-//! Checks on the plain-JS UI in `ui/`, which has no test runner of its own.
+//! Checks on the plain-JS UI in `ui/`, which has no test runner of its own. They
+//! read the source as text, so most look for a function and a key token in it
+//! rather than a whole line, and survive reformatting.
+//!
+//! To see a check fail on older code, point them at a copy of that `ui/` folder:
+//! `AIMADAPT_TEST_UI_DIR=<folder> cargo test -p aimadapt-app --test ui`.
 
-const APP_JS: &str = include_str!("../ui/app.js");
-const INDEX: &str = include_str!("../ui/index.html");
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
+
+fn ui_dir() -> PathBuf {
+    std::env::var_os("AIMADAPT_TEST_UI_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("ui"))
+}
+
+/// A file in `ui/`, read when the test runs.
+fn ui(name: &str) -> String {
+    std::fs::read_to_string(ui_dir().join(name)).unwrap_or_else(|e| panic!("ui/{name}: {e}"))
+}
+
+/// Every script in `ui/` by file name, read when the test runs, so new files are covered.
+fn scripts() -> BTreeMap<String, String> {
+    let all: BTreeMap<String, String> = std::fs::read_dir(ui_dir())
+        .expect("ui folder")
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "js"))
+        .map(|p| (p.file_name().unwrap().to_string_lossy().into_owned(), std::fs::read_to_string(&p).unwrap()))
+        .collect();
+    assert!(all.len() >= 9 && all.contains_key("app.js"), "{:?}", all.keys());
+    all
+}
+
+/// A top-level declaration's text: from its `function name(`, `async function name(`,
+/// `const name =` or `let name =` line up to the next line that starts something
+/// else at column 0 (closing brackets there still belong to it).
+fn decl<'a>(src: &'a str, name: &str) -> &'a str {
+    let heads = [
+        format!("function {name}("),
+        format!("async function {name}("),
+        format!("const {name} ="),
+        format!("let {name} ="),
+    ];
+    let mut start = None;
+    let mut at = 0;
+    for line in src.split_inclusive('\n') {
+        if let Some(s) = start {
+            if line.starts_with(|c: char| !c.is_whitespace() && !matches!(c, '}' | ')' | ']')) {
+                return &src[s..at];
+            }
+        } else if heads.iter().any(|h| line.starts_with(h.as_str())) {
+            start = Some(at);
+        }
+        at += line.len();
+    }
+    &src[start.unwrap_or_else(|| panic!("no top-level {name}"))..]
+}
+
+/// The leading identifier of `s`.
+fn ident(s: &str) -> &str {
+    let end = s.find(|c: char| !(c.is_alphanumeric() || c == '_' || c == '$')).unwrap_or(s.len());
+    &s[..end]
+}
+
+/// `s` split at commas outside brackets and quotes.
+fn split_top_level(s: &str) -> Vec<&str> {
+    let (mut parts, mut depth, mut quote, mut from) = (Vec::new(), 0i32, None, 0);
+    for (i, c) in s.char_indices() {
+        match (quote, c) {
+            (Some(q), c) if c == q => quote = None,
+            (Some(_), _) => {}
+            (None, '"' | '\'' | '`') => quote = Some(c),
+            (None, '(' | '[' | '{') => depth += 1,
+            (None, ')' | ']' | '}') => depth -= 1,
+            (None, ',') if depth == 0 => {
+                parts.push(&s[from..i]);
+                from = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&s[from..]);
+    parts
+}
+
+/// Names a script declares at the top level (column 0): functions, classes, and
+/// each name in a `const`, `let` or `var` statement's first line.
+fn top_level_names(file: &str, src: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    for line in src.lines() {
+        if let Some(rest) = ["async function ", "function ", "class "].iter().find_map(|k| line.strip_prefix(k)) {
+            names.push(ident(rest.trim_start_matches('*').trim_start()).to_string());
+        } else if let Some(rest) = ["const ", "let ", "var "].iter().find_map(|k| line.strip_prefix(k)) {
+            for part in split_top_level(rest).into_iter().map(str::trim) {
+                assert!(
+                    !part.starts_with(['{', '[']),
+                    "{file}: top-level destructuring isn't checked here, declare the names one by one: {line}"
+                );
+                if !part.is_empty() {
+                    names.push(ident(part).to_string());
+                }
+            }
+        }
+    }
+    names
+}
+
+/// Commands the Rust side registers, from `tauri::generate_handler![…]` in main.rs.
+fn registered_commands() -> BTreeSet<String> {
+    let main = std::fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/main.rs")).expect("main.rs");
+    let list = main
+        .split("generate_handler![")
+        .nth(1)
+        .and_then(|s| s.split(']').next())
+        .expect("generate_handler! in main.rs");
+    list.split(',').map(|s| s.trim().rsplit("::").next().unwrap().to_string()).filter(|s| !s.is_empty()).collect()
+}
+
+// ---------- the page as a whole ----------
+
+/// Every script shares one global scope. A name declared twice at the top level
+/// breaks the page: a second `const`, `let` or `class` is a SyntaxError that drops
+/// its whole script, and a second `function` silently replaces the first.
+#[test]
+fn no_top_level_name_is_declared_twice() {
+    let mut first: BTreeMap<String, String> = BTreeMap::new();
+    let mut twice = Vec::new();
+    for (file, src) in scripts() {
+        for name in top_level_names(&file, &src) {
+            if let Some(other) = first.insert(name.clone(), file.clone()) {
+                twice.push(format!("{name} ({other} and {file})"));
+            }
+        }
+    }
+    for name in ["ui", "esc", "render", "invoke", "loadTrainer", "settingsPage", "today", "helpPage"] {
+        assert!(first.contains_key(name), "didn't find {name}: is the parsing still right?");
+    }
+    assert!(twice.is_empty(), "declared twice: {twice:?}");
+}
+
+/// A misspelled or renamed command only fails when its page is used. Every
+/// `invoke("…")` must name a command main.rs registers, by name (not computed), and
+/// the browser preview's answers must be for real commands too.
+#[test]
+fn every_invoke_names_a_registered_command() {
+    let commands = registered_commands();
+    assert!(commands.len() >= 10 && commands.contains("snapshot"), "{commands:?}");
+    let mut called = BTreeSet::new();
+    for (file, src) in scripts() {
+        for (i, _) in src.match_indices("invoke(") {
+            let line = src[..i].rsplit('\n').next().unwrap();
+            // Tauri's own invoke, another function's name, or a comment.
+            if line.ends_with(|c: char| c == '.' || c == '_' || c.is_alphanumeric())
+                || line.trim_start().starts_with("//")
+            {
+                continue;
+            }
+            let rest = &src[i + "invoke(".len()..];
+            let name = rest.strip_prefix('"').and_then(|r| r.split('"').next()).unwrap_or_else(|| {
+                panic!("{file}: invoke( needs its command's name in quotes: invoke({}", &rest[..rest.len().min(40)])
+            });
+            assert!(commands.contains(name), "{file} invokes \"{name}\", which main.rs doesn't register");
+            called.insert(name.to_string());
+        }
+    }
+    assert!(called.len() >= 15, "{called:?}");
+    let app = ui("app.js");
+    let preview =
+        app.split("const PREVIEW = {").nth(1).and_then(|s| s.split("\n};").next()).expect("PREVIEW in app.js");
+    for line in preview.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with("//")) {
+        let name = ident(line);
+        assert!(commands.contains(name), "the preview answers \"{name}\", which main.rs doesn't register");
+    }
+}
 
 /// Playtest: whole degrees per second were too coarse; the app shows one decimal,
 /// like the trainer and Insights notes.
 #[test]
 fn target_speed_shows_one_decimal() {
-    let trainer = include_str!("../ui/trainer.js");
-    assert!(trainer.contains("if (knob === \"target_speed\") return `${v.toFixed(1)} °/s`;"), "fmtKnob in trainer.js");
+    let trainer = ui("trainer.js");
+    let fmt = decl(&trainer, "fmtKnob");
+    assert!(fmt.contains("\"target_speed\"") && fmt.contains("toFixed(1)} °/s"), "{fmt}");
 }
 
 /// Bug: the first render could run before the scripts after app.js had run, so
@@ -16,16 +188,17 @@ fn target_speed_shows_one_decimal() {
 /// stayed on "Loading". app.js must wait for DOMContentLoaded before loading.
 #[test]
 fn the_first_render_waits_for_every_script() {
+    let app = ui("app.js");
+    let start =
+        app.lines().find(|l| l.contains("addEventListener(\"DOMContentLoaded\"")).expect("a DOMContentLoaded listener");
+    assert!(start.contains("load()"), "app.js should start loading on DOMContentLoaded: {start}");
     assert!(
-        APP_JS.contains("document.addEventListener(\"DOMContentLoaded\", () => load());"),
-        "app.js should start loading on DOMContentLoaded"
-    );
-    assert!(
-        !APP_JS.lines().any(|l| l.trim() == "load();"),
+        !app.lines().any(|l| l.trim() == "load();"),
         "app.js shouldn't call load() straight away, before the other scripts have run"
     );
     // The scripts are plain, in-order <script> tags at the end of the body.
-    let scripts: Vec<&str> = INDEX.split("<script src=\"").skip(1).map(|s| s.split('"').next().unwrap()).collect();
+    let index = ui("index.html");
+    let scripts: Vec<&str> = index.split("<script src=\"").skip(1).map(|s| s.split('"').next().unwrap()).collect();
     assert_eq!(scripts.first(), Some(&"app.js"), "{scripts:?}");
     assert!(scripts.contains(&"help.js"), "{scripts:?}");
 }
@@ -34,15 +207,18 @@ fn the_first_render_waits_for_every_script() {
 /// pages, in the guide's history and anywhere else, must still land somewhere.
 #[test]
 fn old_page_addresses_still_go_somewhere() {
-    let moved = APP_JS.split("const MOVED = {").nth(1).and_then(|s| s.split('}').next()).expect("MOVED in app.js");
+    let app = ui("app.js");
+    let index = ui("index.html");
+    let moved = app.split("const MOVED = {").nth(1).and_then(|s| s.split('}').next()).expect("MOVED in app.js");
     for old in ["dashboard", "play", "program", "training", "benchmarks", "library"] {
         assert!(moved.contains(&format!("{old}: \"")), "#{old} needs a new home in MOVED");
     }
     // Insights and a scenario's old Progress history go to the scenario on Scenarios.
-    assert!(APP_JS.contains("if (view === \"insights\")"), "#insights/<name> needs a redirect");
-    assert!(APP_JS.contains("if (view === \"progress\" && arg"), "#progress/<name> needs a redirect");
+    let moved_to = decl(&app, "movedTo");
+    assert!(moved_to.contains("view === \"insights\""), "#insights/<name> needs a redirect");
+    assert!(moved_to.contains("view === \"progress\" && arg"), "#progress/<name> needs a redirect");
     for old in ["dashboard", "play", "program", "insights", "training", "benchmarks", "library"] {
-        assert!(!INDEX.contains(&format!("data-view=\"{old}\"")), "the sidebar shouldn't link to #{old} any more");
+        assert!(!index.contains(&format!("data-view=\"{old}\"")), "the sidebar shouldn't link to #{old} any more");
     }
 }
 
@@ -50,12 +226,12 @@ fn old_page_addresses_still_go_somewhere() {
 /// rating axis from 0.50 to 0.56 s read "0.50" on every line.
 #[test]
 fn chart_ticks_are_formatted_from_their_exact_value() {
-    let insights = include_str!("../ui/insights.js");
+    let insights = ui("insights.js");
     assert!(
         !insights.contains("yfmt(Math.round(v * 10) / 10)"),
         "round inside the default format, not before every format"
     );
-    assert!(insights.contains("${yfmt(v)}"), "axes() passes the exact tick value");
+    assert!(insights.contains("${yfmt(v)}"), "the tick labels get the exact tick value");
 }
 
 /// Bug: with no scenario in the address, Scenarios showed the list's first item,
@@ -66,10 +242,11 @@ fn chart_ticks_are_formatted_from_their_exact_value() {
 /// its item.
 #[test]
 fn favorite_and_hide_act_on_the_item_they_name() {
-    let scenarios = include_str!("../ui/scenarios.js");
-    assert!(scenarios.contains("return itemPage(all.find((x) => x.key === arg) ?? null, all);"));
+    let scenarios = ui("scenarios.js");
+    let page = decl(&scenarios, "scenariosPage");
+    assert!(page.contains("itemPage(all.find((x) => x.key === arg)"), "{page}");
     // With no address, Scenarios goes to a list, never to an item.
-    assert!(scenarios.contains("location.replace(`#scenarios/${defaultTab(all)}`);"));
+    assert!(page.contains("location.replace(`#scenarios/${defaultTab(all)}`)"), "{page}");
     // Item keys have a colon (builtin:, user:, workout:, kovaaks:); list names don't.
     let tabs = scenarios.split("const LIST_TABS = [").nth(1).and_then(|s| s.split(';').next()).expect("LIST_TABS");
     assert!(tabs.contains("[\"browse\", \"Browse\"]") && !tabs.contains(':'), "{tabs}");
@@ -78,4 +255,190 @@ fn favorite_and_hide_act_on_the_item_they_name() {
     assert!(scenarios.contains("data-action=\"hide\" data-key=\"${esc(key)}\""));
     assert!(scenarios.contains("data-action=\"favorite\" data-key=\"${esc(x.key)}\""));
     assert!(scenarios.contains("data-action=\"hide\" data-key=\"${esc(x.key)}\""));
+}
+
+// ---------- regression tests ----------
+
+/// Bug: settings profiles were picked by name. With "Valorant" and "Valorant 2",
+/// renaming the second to "Valorant" sent its edits to the first, and Delete removed
+/// both (and threw if they were the only two). The profile shown is now an index.
+#[test]
+fn settings_edits_go_to_the_profile_shown() {
+    let s = ui("settings.js");
+    let shown = decl(&s, "selectedProfile");
+    assert!(!shown.contains(".name ==="), "the shown profile isn't found by name: {shown}");
+    assert!(s.contains("data-action=\"select-profile\" data-index=\"${i}\""), "the list picks by position");
+    assert!(!s.contains("btn.dataset.name"), "the list picks by position");
+    let field = decl(&s, "setProfileField");
+    assert!(!field.contains("selected ="), "renaming mustn't change which profile is shown: {field}");
+    assert!(!s.contains("x.name !== name"), "Delete removes the profile shown, not every profile with its name");
+}
+
+/// Bug: Today, Scenarios, Progress › Skills and the editors asked for their data
+/// again on every render while it was missing, without looking at the load's error.
+/// A failed load rendered, which loaded again, forever: "Loading today…" stayed up
+/// and the error never showed. They go through waitFor now, which starts each load
+/// once and shows the error.
+#[test]
+fn a_failed_load_shows_its_error_instead_of_loading_forever() {
+    let views = [
+        ("today.js", "today"),
+        ("program.js", "skillsTab"),
+        ("trainer.js", "edit"),
+        ("trainer.js", "workout"),
+        ("scenarios.js", "scenariosPage"),
+        ("settings.js", "settingsPage"),
+    ];
+    for (file, name) in views {
+        let src = ui(file);
+        let view = decl(&src, name);
+        assert!(view.contains("waitFor("), "{name} in {file} should wait for its data with waitFor");
+        for load in ["loadTrainer()", "loadProgram()", "loadInsightsOverview()"] {
+            assert!(!view.contains(load), "{name} in {file} calls {load} itself");
+        }
+    }
+    let app = ui("app.js");
+    let wait = decl(&app, "waitFor");
+    assert!(wait.contains(".error") && wait.contains("startOnce("), "{wait}");
+    assert!(decl(&app, "startOnce").contains("running.has("), "a load isn't started twice at once");
+    // A scenario's insights were asked for on every render while they loaded.
+    assert!(decl(&ui("insights.js"), "insightsFor").contains("loadCached("));
+}
+
+/// Bug: a failed Rescan was never shown. Its error went in ui.error, which the reload
+/// after it cleared, and which only shows when there's no data at all.
+#[test]
+fn a_failed_rescan_is_shown_next_to_the_button() {
+    let app = ui("app.js");
+    let rescan = decl(&app, "rescan");
+    assert!(!rescan.contains("ui.error ="), "{rescan}");
+    assert!(rescan.contains("ui.rescanError ="), "{rescan}");
+    assert!(decl(&app, "rescanButton").contains("ui.rescanError"));
+}
+
+/// Bug: a KovaaK's scenario whose history failed to load stayed on "Loading <name>…",
+/// and every render asked again. The failure is kept and shown, as sce_info's was.
+#[test]
+fn a_failed_scenario_history_is_shown() {
+    let app = ui("app.js");
+    assert!(decl(&app, "scenarioDetail").contains("loadCached("));
+    assert!(decl(&app, "loadCached").contains("error: String("), "a failed load is kept as {{ error }}");
+    let scenarios = ui("scenarios.js");
+    let detail = decl(&scenarios, "kovaaksDetail");
+    assert!(detail.contains("detail?.error"), "kovaaksDetail shows the error: {detail}");
+}
+
+/// Bug: emptying a "Custom (cm/360)" profile's cm/360 stored null, and sensText
+/// called toFixed on it and threw. render() had no try/catch, so once you left
+/// Settings that way every render threw and Settings couldn't be opened again.
+#[test]
+fn an_empty_sensitivity_field_cant_break_rendering() {
+    for (file, src) in scripts() {
+        for (i, _) in src.match_indices("profileCm(") {
+            let mut depth = 0;
+            let close = src[i..]
+                .char_indices()
+                .find(|&(_, c)| {
+                    depth += match c {
+                        '(' => 1,
+                        ')' => -1,
+                        _ => 0,
+                    };
+                    c == ')' && depth == 0
+                })
+                .map(|(j, _)| i + j)
+                .expect("closing parenthesis");
+            assert!(!src[close + 1..].starts_with(".toFixed"), "{file}: profileCm can be null; format it with cmText");
+        }
+    }
+    let settings = ui("settings.js");
+    assert!(!decl(&settings, "sensText").contains("cm.toFixed"));
+    assert!(decl(&settings, "profileCm").contains("Number.isFinite"), "profileCm says null for a missing number");
+    let app = ui("app.js");
+    let render = decl(&app, "render");
+    assert!(render.contains("try {") && render.contains("catch") && render.contains("console.error("), "{render}");
+}
+
+/// Bug: Cancel in the scenario and workout editors was a plain link, and the draft
+/// was only cleared on Save or Delete, so a cancelled change came back when the
+/// editor was opened again.
+#[test]
+fn cancel_in_the_editors_drops_the_draft() {
+    let trainer = ui("trainer.js");
+    assert!(!trainer.contains(">Cancel</a>"), "Cancel is an action, not a link");
+    for (action, clears) in [("cancel-edit", "tr.edit = null"), ("cancel-workout", "tr.wedit = null")] {
+        assert!(trainer.contains(&format!("data-action=\"{action}\"")), "{action} button");
+        let handler = trainer.split(&format!("action === \"{action}\"")).nth(1).expect("its click handler");
+        let handler = &handler[..handler.find("else if").unwrap_or(handler.len())];
+        assert!(handler.contains(clears), "{action} should do {clears}: {handler}");
+    }
+}
+
+/// Bug: the scenario editor's check answers 150 ms (and a call) after typing, and
+/// wrote to the page without checking it was still the editor: it could retitle the
+/// next page's heading, and a failed save after leaving threw on the missing
+/// #edit-status.
+#[test]
+fn late_editor_checks_only_touch_their_own_editor() {
+    let trainer = ui("trainer.js");
+    let shows = decl(&trainer, "editorShows");
+    assert!(shows.contains("route().view === \"edit\"") && shows.contains("ui.trainer.edit === draft"), "{shows}");
+    assert!(decl(&trainer, "recheck").contains("if (!editorShows(e)) return;"));
+    assert!(decl(&trainer, "saveScenario").contains("if (!editorShows(e)) return;"));
+    assert!(!trainer.contains("getElementById(\"edit-status\").innerHTML"), "#edit-status can be missing");
+}
+
+// ---------- features and tidy-ups that should stay ----------
+
+/// The trainer can close with an error (`trainer-closed` carries { error }), and a
+/// settings file can be unusable (`profiles_note`). Both are shown, escaped, as
+/// warnings: the first on the pages that start the trainer until dismissed or the
+/// next start, the second on Settings › Aim and display.
+#[test]
+fn trainer_errors_and_unusable_settings_are_shown() {
+    let trainer = ui("trainer.js");
+    let closed = trainer.split("listen(\"trainer-closed\"").nth(1).expect("trainer-closed listener");
+    assert!(closed.contains("payload?.error"), "the listener keeps the error");
+    let banner = decl(&trainer, "trainerErrorBanner");
+    assert!(banner.contains("banner warn") && banner.contains("esc(error)"), "{banner}");
+    assert!(decl(&trainer, "launchTrainer").contains("closedError = null"), "a new start clears it");
+    assert!(decl(&ui("scenarios.js"), "trainerBanners").contains("trainerErrorBanner()"), "Today and Scenarios");
+    assert!(decl(&ui("program.js"), "skillsTab").contains("trainerErrorBanner()"), "Progress › Skills");
+    let settings = ui("settings.js");
+    let notice = decl(&settings, "settingsNotice");
+    assert!(notice.contains("esc(d.profiles_note)") && notice.contains("banner warn"), "{notice}");
+}
+
+/// Views reach Tauri only through app.js's invoke() and listen(), whose preview
+/// answers from crates/aimadapt-app/dev/ (never ui/, which is built into the exe);
+/// and the score chart draws with the shared chart helpers (one place for ticks)
+/// and the theme's colors.
+#[test]
+fn views_use_the_shared_helpers() {
+    for (file, src) in scripts() {
+        if file != "app.js" {
+            assert!(!src.contains("tauri") && !src.contains("devData"), "{file} should only use invoke() and listen()");
+        }
+    }
+    let app = ui("app.js");
+    assert!(app.contains("fetch(\"../dev/dev-snapshot.json\")"));
+    let chart = decl(&app, "scoreChart");
+    assert!(chart.contains("yTicks(") && chart.contains("sx(") && chart.contains("sy("), "{chart}");
+    assert!(!chart.contains("=\"#") && !chart.contains(":#"), "colors come from the theme's variables");
+}
+
+/// Every render replaces <main>, which dropped the keyboard focus, and fields showed
+/// no focus at all. render() puts the focus back, and focus is drawn.
+#[test]
+fn keyboard_focus_shows_and_survives_a_render() {
+    let app = ui("app.js");
+    let render = decl(&app, "render");
+    assert!(render.contains("focusedControl(") && render.contains("refocus("), "{render}");
+    for (file, src) in scripts() {
+        if file != "app.js" {
+            assert!(!src.contains("setSelectionRange("), "{file}: render() keeps the caret");
+        }
+    }
+    let css = ui("styles.css");
+    assert!(css.contains(":focus-visible") && css.contains(".field:focus-within"));
 }

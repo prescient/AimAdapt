@@ -12,7 +12,7 @@ use aimadapt_sim::adaptive::Knob;
 use aimadapt_sim::scenario::{Shape, parse_color};
 use aimadapt_sim::settings::DisplayMode;
 use aimadapt_sim::sim::from_angles;
-use aimadapt_sim::{Event, Input, Phase, PlayerSettings, Scenario, Sim};
+use aimadapt_sim::{Event, Input, Phase, PlayerSettings, RunResult, Scenario, Sim};
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::{ClearColorConfig, Viewport};
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
@@ -108,6 +108,7 @@ pub fn run(opts: PlayOptions) -> AppExit {
         fps: 0.0,
         best: None,
         saved: None,
+        result: None,
         flashes: HashMap::new(),
         banner: None,
         done: Vec::new(),
@@ -177,6 +178,9 @@ struct Game {
     best: Option<f64>,
     /// What happened when the finished run was saved.
     saved: Option<Result<(), String>>,
+    /// The finished run's result, built once: the results screen reads it every
+    /// frame, and building it copies the run's whole telemetry.
+    result: Option<RunResult>,
     /// Seconds of hit flash left, by target id.
     flashes: HashMap<u64, f32>,
     /// A message shown mid-screen for a moment (breakthroughs), and seconds left.
@@ -229,6 +233,7 @@ impl Game {
         self.frames = 0;
         self.run_time = 0.0;
         self.saved = None;
+        self.result = None;
         self.flashes.clear();
         self.banner = None;
         if changed {
@@ -857,6 +862,7 @@ fn step(
                 let size = camera
                     .physical_viewport_size()
                     .unwrap_or(UVec2::new(window.physical_width(), window.physical_height()));
+                game.result = Some(game.sim.result());
                 save_run(&mut game, format!("{}x{}", size.x, size.y));
                 game.record_done();
             }
@@ -881,7 +887,7 @@ fn save_run(game: &mut Game, resolution: String) {
         return;
     };
     let finished_at = Local::now().naive_local();
-    let result = game.sim.result();
+    let result = game.result.clone().unwrap_or_else(|| game.sim.result());
     let avg_fps = (game.run_time > 0.0).then(|| game.frames as f32 / game.run_time);
     let info = RunInfo {
         scenario: game.sim.scenario(),
@@ -1112,10 +1118,9 @@ fn update_overlay(
 ) {
     let finished = game.sim.phase() == Phase::Finished;
     **overlay = if finished { Visibility::Visible } else { Visibility::Hidden };
-    if !finished {
+    let Some(r) = game.result.as_ref().filter(|_| finished) else {
         return;
-    }
-    let r = game.sim.result();
+    };
     let st = &r.stats;
     let acc = st.accuracy().map_or("-".into(), |a| format!("{:.1}%", a * 100.0));
     let ttk = r.avg_ttk_s().map_or("-".into(), |t| format!("{:.0} ms", t * 1000.0));

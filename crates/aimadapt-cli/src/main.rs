@@ -134,7 +134,8 @@ fn main() -> Result<()> {
             }
         }
         Command::Sens => print_sens(&progress::load(&db, &TimeSettings::default())?),
-        Command::Sce { .. } => unreachable!("handled before the database is opened"),
+        // Handled before the database is opened.
+        Command::Sce { .. } => {}
         Command::Errors => {
             let errors = db.import_errors()?;
             if errors.is_empty() {
@@ -158,7 +159,31 @@ fn stats_dir(given: Option<PathBuf>) -> Result<PathBuf> {
     discover::find_stats_dir().context("couldn't find the KovaaK's stats folder in your Steam libraries; pass --stats")
 }
 
+/// Whether the trainer plays a scenario file.
+enum Status {
+    /// It plays, as this.
+    Plays(Box<aimadapt_sce::Imported>),
+    /// Covered by the plan, but the importer refuses it, for these reasons.
+    Refused(Vec<String>),
+    /// It uses features outside the plan.
+    Gaps(Vec<aimadapt_sce::Gap>),
+}
+
+fn status(path: &Path, sce: &aimadapt_sce::Sce) -> Status {
+    let gaps = aimadapt_sce::gaps(sce);
+    if !gaps.is_empty() {
+        return Status::Gaps(gaps);
+    }
+    match aimadapt_sce::import(path) {
+        Ok(i) => Status::Plays(Box::new(i)),
+        Err(reasons) => Status::Refused(reasons),
+    }
+}
+
 fn print_sce(filter: Option<&str>, from: &[PathBuf], summary_only: bool) -> Result<()> {
+    if let Some(missing) = from.iter().find(|p| !p.exists()) {
+        bail!("{} doesn't exist", missing.display());
+    }
     let dirs = if from.is_empty() { discover::find_scenario_dirs() } else { from.to_vec() };
     if dirs.is_empty() {
         bail!("couldn't find KovaaK's scenario folders in your Steam libraries; pass --from");
@@ -181,45 +206,50 @@ fn print_sce(filter: Option<&str>, from: &[PathBuf], summary_only: bool) -> Resu
                 if needle.as_ref().is_some_and(|n| !name.to_lowercase().contains(n)) {
                     continue;
                 }
-                let gaps = aimadapt_sce::gaps(&sce);
-                // Playable now: the trainer can run it.
-                let plays = if gaps.is_empty() { aimadapt_sce::import(f).ok() } else { None };
-                rows.push((name, gaps, plays));
+                rows.push((name, status(f, &sce)));
             }
             Err(e) => unreadable.push(format!("{}: {e}", f.display())),
         }
     }
-    rows.sort_by_key(|(n, _, _)| n.to_lowercase());
+    rows.sort_by_key(|(n, _)| n.to_lowercase());
     if !summary_only {
-        for (name, gaps, plays) in &rows {
-            if let Some(i) = plays {
-                println!("  >>  {name}");
-                println!("        {}", describe_import(&i.scenario));
-                for n in &i.notes {
-                    println!("        note: {n}");
+        for (name, status) in &rows {
+            match status {
+                Status::Plays(i) => {
+                    println!("  >>  {name}");
+                    println!("        {}", describe_import(&i.scenario));
+                    for n in &i.notes {
+                        println!("        note: {n}");
+                    }
                 }
-            } else if gaps.is_empty() {
-                println!("  ok  {name}");
-            } else {
-                println!("  --  {name}");
-                for g in gaps {
-                    println!("        {}: {}", g.feature, g.detail);
+                Status::Refused(reasons) => {
+                    println!("  !!  {name}");
+                    for r in reasons {
+                        println!("        {r}");
+                    }
+                }
+                Status::Gaps(gaps) => {
+                    println!("  --  {name}");
+                    for g in gaps {
+                        println!("        {}: {}", g.feature, g.detail);
+                    }
                 }
             }
         }
         println!();
     }
-    let covered = rows.iter().filter(|(_, g, _)| g.is_empty()).count();
-    let playable = rows.iter().filter(|(_, _, p)| p.is_some()).count();
+    let playable = rows.iter().filter(|(_, s)| matches!(s, Status::Plays(_))).count();
+    let refused = rows.iter().filter(|(_, s)| matches!(s, Status::Refused(_))).count();
+    let gapped = rows.len() - playable - refused;
     println!(
-        "{} scenarios: {playable} play in the trainer now (>>), {covered} covered by the trainer's plan, {} use features it won't have yet",
+        "{} scenarios: {playable} play in the trainer now (>>), {refused} are covered by the plan but don't play yet (!!), {gapped} use features it won't have yet (--)",
         rows.len(),
-        rows.len() - covered
     );
     let mut by_feature: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
-    for (_, gaps, _) in &rows {
-        let mut seen: Vec<&str> = gaps.iter().map(|g| g.feature).collect();
-        seen.dedup();
+    for (_, s) in &rows {
+        let Status::Gaps(gaps) = s else { continue };
+        // Each feature once per scenario.
+        let seen: std::collections::BTreeSet<&str> = gaps.iter().map(|g| g.feature).collect();
         for f in seen {
             *by_feature.entry(f).or_default() += 1;
         }
@@ -282,7 +312,7 @@ fn print_summary(db: &Db, top: usize) -> Result<()> {
         println!("No runs imported yet. Run `aimadapt import` first.");
         return Ok(());
     }
-    let day = |s: &Option<String>| s.as_deref().map(|s| s[..10].to_string()).unwrap_or_default();
+    let day = |s: &Option<String>| s.as_deref().map(|s| s.get(..10).unwrap_or(s).to_string()).unwrap_or_default();
     println!("{} runs across {} scenarios, {} to {}", t.runs, t.scenarios, day(&t.first), day(&t.last));
     println!("Time in runs: {}", hm(t.run_seconds));
 
@@ -630,4 +660,34 @@ fn hm(seconds: f64) -> String {
 
 fn num(v: f64) -> String {
     if v.fract() == 0.0 { format!("{v:.0}") } else { format!("{v:.1}") }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixture(name: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../aimadapt-sce/tests/fixtures/AimAdapt Test - {name}.sce"))
+    }
+
+    /// Bug: `aimadapt sce` threw away why the importer refused a file with no gaps,
+    /// printed it as "ok" and counted it as covered.
+    #[test]
+    fn a_refused_file_says_why() {
+        let path = fixture("Drifting Pair");
+        let sce = aimadapt_sce::Sce::read(&path).unwrap();
+        match status(&path, &sce) {
+            Status::Refused(reasons) => assert!(reasons.iter().any(|r| r.contains("abilities")), "{reasons:?}"),
+            _ => panic!("expected a refusal with reasons"),
+        }
+        let path = fixture("Still Wall");
+        assert!(matches!(status(&path, &aimadapt_sce::Sce::read(&path).unwrap()), Status::Plays(_)));
+    }
+
+    /// Bug: `--from` a folder that doesn't exist found nothing and still succeeded.
+    #[test]
+    fn a_missing_from_folder_is_an_error() {
+        let err = print_sce(None, &[PathBuf::from("no such folder")], true).unwrap_err();
+        assert!(err.to_string().contains("doesn't exist"), "{err}");
+    }
 }

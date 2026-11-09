@@ -149,15 +149,18 @@ If KovaaK's is installed, AimAdapt imports its per-run stats files from your Ste
 
 The `aimadapt-cli` command line tool shows the same reports.
 
-Playing your own KovaaK's scenarios in the trainer is being built (Voltaic benchmarks first), and most already play: Scenarios › Browse lists every KovaaK's scenario in your folders, and a playable one has **Play** on its row and **Play in AimAdapt** on its page. It plays the `.sce` file on its own map, newer JSON or older Reflex, with its bots, weapon and scoring. Bots move as their dodge profiles say (strafing, keeping their distance, jumping, flying, jetpacks) on Unreal-style movement, walls stop shots and bots, several kinds of bot can share a scenario (in a set order when the file says so), and its rules on where bots appear, bots' health regen or drain, and invincible bots apply. 30 of the 34 Voltaic S5 Novice benchmarks play so far; bots that use abilities (dashes and knockbacks, as in Pasu, Raw Control, Controlsphere and Ground) come next. Maps have been checked side by side with KovaaK's on DriftTS, ww5t, ControlTS and Frogtagon, and where you and the bots start (your eye height) with test maps there; how closely movement matches is still to be checked, so scores may differ. Those runs are kept apart from your KovaaK's runs. `aimadapt-cli sce` lists your local and Workshop scenarios and marks each one as playable now (`>>`), covered by the plan (`ok`) or using features beyond it, with the reasons. `aimadapt-cli sce "Novice S5"` lists only the matching ones. The trainer can also play a file directly: `aimadapt-engine --sce "<file>.sce"`. Your files are only read: nothing in them is changed.
+Playing your own KovaaK's scenarios in the trainer is being built (Voltaic benchmarks first), and most already play: Scenarios › Browse lists every KovaaK's scenario in your folders, and a playable one has **Play** on its row and **Play in AimAdapt** on its page. It plays the `.sce` file on its own map, newer JSON or older Reflex, with its bots, weapon and scoring. Bots move as their dodge profiles say (strafing, keeping their distance, jumping, flying, jetpacks) on Unreal-style movement, walls stop shots and bots, several kinds of bot can share a scenario (in a set order when the file says so), and its rules on where bots appear, bots' health regen or drain, and invincible bots apply. 30 of the 34 Voltaic S5 Novice benchmarks play so far; bots that use abilities (dashes and knockbacks, as in Pasu, Raw Control, Controlsphere and Ground) come next. Maps have been checked side by side with KovaaK's on DriftTS, ww5t, ControlTS and Frogtagon, and where you and the bots start (your eye height) with test maps there; how closely movement matches is still to be checked, so scores may differ. Those runs are kept apart from your KovaaK's runs. `aimadapt-cli sce` lists your local and Workshop scenarios and marks each one as playable now (`>>`), covered by the plan but not playable yet (`!!`) or using features beyond it (`--`), with the reasons. `aimadapt-cli sce "Novice S5"` lists only the matching ones. The trainer can also play a file directly: `aimadapt-engine --sce "<file>.sce"`. Your files are only read: nothing in them is changed.
 
 ## Data
 
 Everything is stored locally in `%APPDATA%\AimAdapt`:
 - `aimadapt.db`: SQLite.
-- `engine.toml`: settings profiles.
+- `engine.toml`: settings profiles. If it can't be read, Settings says so and saving keeps the old file as `engine (unusable).toml`.
 - `list.json`: favorites and hidden items on the Scenarios page.
 - `scenarios\` and `workouts\`: your own files.
+- `crash.log`: written only if AimAdapt crashes, with what went wrong.
+
+If the trainer stops with an error, the app shows why. If the database can't be opened (for example, one saved by a newer version of AimAdapt), the app opens and says so.
 
 Nothing is sent anywhere.
 
@@ -201,11 +204,13 @@ git config core.hooksPath .githooks
 Testing tools:
 - **Bot test:** `--smoke <folder>` has a bot play short runs and save screenshots. `--smoke-seconds` sets the run length.
 - **Separate database:** `--db <file>` keeps test runs out of your own data. The app also takes `--no-import` to skip KovaaK's.
-- **Browser preview:** `cargo run -p aimadapt-app -- --dump-snapshot crates/aimadapt-app/ui/dev-snapshot.json`, then `python -m http.server 8765 --directory crates/aimadapt-app/ui`.
+- **Browser preview:** `cargo run -p aimadapt-app -- --db <test.db> --no-import --dump-snapshot crates/aimadapt-app/dev/dev-snapshot.json`, then `python -m http.server 8765 --directory crates/aimadapt-app` and open `http://127.0.0.1:8765/ui/`. The `dev` folder is git-ignored. Everything in `ui/` is built into the exe, so the build refuses data files there.
 
 [TESTING.md](TESTING.md) has the test plan and [BACKLOG.md](BACKLOG.md) has the roadmap.
 
-Before a release, bump the version line in the [user guide](crates/aimadapt-app/ui/guide.md) and check its What's new section; a test fails until the guide's version matches. Pushing a version tag (`git tag v0.2.0` then `git push origin v0.2.0`) runs `.github/workflows/release.yml`. It builds the portable exe and both installers and attaches them to a GitHub release.
+Before a release, bump `version` in the root `Cargo.toml` (every crate and the app use it) and the version line in the [user guide](crates/aimadapt-app/ui/guide.md), and check the guide's What's new section; a test fails until the guide's version matches.
+
+The Rust version is pinned in `rust-toolchain.toml`, so the hook and CI run the same clippy; rustup installs it on the first build. Shared dependency versions and lint settings are in the root `Cargo.toml`, and `clippy.toml` caps function length and complexity at today's longest. Pushing a version tag (`git tag v0.2.0` then `git push origin v0.2.0`) runs `.github/workflows/release.yml`. It builds the portable exe and both installers and attaches them to a GitHub release.
 
 If the repo is in a synced folder like OneDrive, move build output out of it with a local, gitignored `.cargo/config.toml` containing `[build]` and `target-dir = "C:/some/other/folder"`.
 

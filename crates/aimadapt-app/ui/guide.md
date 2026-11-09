@@ -203,14 +203,14 @@ Built-in workouts:
 
 Workouts have their own tab on Scenarios, and show on Recent once you've played them.
 
-**Editing a workout:** add scenarios, set runs and mode for each, and reorder them with the arrows. **Save & start** saves it and plays it straight away. Built-ins are copied before editing, so the originals stay as they are. **Cancel** goes back to the workout's page.
+**Editing a workout:** add scenarios, set runs and mode for each, and reorder them with the arrows. **Save & start** saves it and plays it straight away. Built-ins are copied before editing, so the originals stay as they are. **Cancel** throws away your changes and goes back to the workout's page.
 
 ## Scenario editor {#edit}
 
 The editor is a form with every scenario setting, grouped as in the file format: about, timing, weapon, targets, spawn area, movement, scoring, adaptive and arena. Each field explains itself, and values are checked as you type. Anything that needs fixing is listed under **Fix before saving**.
 
 - **Built-ins are copied before editing.** Your copy is saved in your own scenarios folder.
-- **Save & play adaptive** saves and starts an adaptive run. **Save** and **Cancel** go back to the scenario's page.
+- **Save & play adaptive** saves and starts an adaptive run. **Save** goes back to the scenario's page; **Cancel** does too and throws away your changes.
 - **Changing settings starts the rating over** with a calibration run (see [Adaptive mode](#help/adaptive)).
 - Scenario files are TOML, so you can also edit them in a text editor. SCENARIOS.md in the project documents every field.
 
@@ -297,8 +297,9 @@ Sensitivity is in degrees per mouse count, so it stays the same at any resolutio
 
 Everything is stored on your computer in `%APPDATA%\AimAdapt`:
 - `aimadapt.db`: your runs and ratings (SQLite).
-- `engine.toml`: your settings profiles.
+- `engine.toml`: your settings profiles. If AimAdapt can't read it, Settings tells you and shows the defaults, and saving keeps the old file as `engine (unusable).toml` so nothing in it is lost.
 - `scenarios\` and `workouts\`: your own scenario and workout files.
+- `crash.log`: only there if AimAdapt has crashed. It says what went wrong, which helps with a bug report.
 
 AimAdapt used to be called RustyAim. The first time the new version runs, it moves your old `%APPDATA%\RustyAim` folder to `%APPDATA%\AimAdapt`, so your history, ratings, profiles, scenarios and workouts carry over.
 
@@ -310,10 +311,22 @@ Nothing is sent anywhere. Deleting one of your scenarios or workouts removes the
 - **A rating started over.** The scenario's settings changed, so it calibrates again. This happens when you edit a scenario, and when an update changes a built-in.
 - **No KovaaK's runs.** Settings › KovaaK's shows where AimAdapt looked. It searches every Steam library for FPSAimTrainer\stats. Use **Rescan folder** after installing KovaaK's.
 - **The trainer opens in the wrong place.** It opens over the app window, so move the app window where you want the trainer, or use full screen.
+- **The trainer closed straight away.** The app shows why in a banner, such as a scenario file it couldn't load.
+- **"Couldn't load data" when the app opens.** The message says why. If your history was saved by a newer version of AimAdapt, update AimAdapt to open it; the older version won't write to it.
 
 ## What's new {#whats-new}
 
 **November 2026**
+- Fixed: holding fire shot slower than the scenario's fire rate when your frame rate was low (a 9 shots a second weapon fired 8.6 at 60 FPS, and fast full-auto weapons in KovaaK's scenarios fired once a frame at most). Fire rate is now the same at any frame rate, so hold-to-fire runs at a low frame rate score a little higher than before.
+- When the trainer stops with an error, the app now says why, and if AimAdapt can't open your history it opens and tells you instead of not starting. Crashes are written to `crash.log` (see [Your data](#help/data)).
+- Fixed: a settings file AimAdapt couldn't read was replaced with the defaults the next time you saved. It's now kept as `engine (unusable).toml`, and Settings tells you. A settings file whose active profile is missing now loads, on its first profile.
+- Fixed: giving a profile the same name as another while typing sent your changes to the other one, and Delete could remove both.
+- Fixed: Today could stay on "Loading" for good when something failed to load, and a failed rescan or a scenario page that failed to load said nothing. They now show what went wrong.
+- Fixed: Cancel in the scenario and workout editors kept your unsaved changes for the next time you opened the editor.
+- Fixed: a KovaaK's run that started and finished in the same second counted as nearly a day long in your play time.
+- Fixed: the flick time chart in a scenario's insights showed your oldest 400 flicks instead of your newest.
+- Text fields and buttons show where the keyboard focus is, and the focus stays where it was when a page redraws.
+- Scenario files that crashed the trainer are now refused with a reason: adaptive easy and hard the wrong way round once the defaults fill in, targets taller than the room, adaptive target speed on still targets, and `inf` or `nan` as a number. The editor's health limit is now 1,000,000, the value the built-in tracking scenarios use.
 - Fixed: in KovaaK's scenarios played here you saw from lower than in KovaaK's, by up to 2.5 meters (inside tamTS's pit instead of looking down into it, and 1.5 to 2.5 meters lower on Pasu Smooth Regen, B180 and Controlsphere), and bots started lower too. You now see from where KovaaK's puts your eye, and bots start where they do there. AimAdapt runs of those scenarios from before were played from the wrong height.
 - KovaaK's scenarios played here: bots whose health drains on their own now go when it runs out and the next one comes (VT Aether, VT PGT), bots listed in a set order come in that order (VT Aether, B180), and invincible bots take hits but never go down (VT Snake Track, PGTI Voltaic). Before, VT Aether's first target stayed all run and Snake Track's bot could be killed.
 - Fixed: Air Pure and Air CELESTIAL showed as playable but scored nothing: they end when the bot runs out of lives and score the time left, which isn't played yet. They now say they can't be played yet.
