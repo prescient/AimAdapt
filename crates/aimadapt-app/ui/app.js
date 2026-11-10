@@ -52,6 +52,7 @@ const ui = {
   scenarioCache: new Map(), // a KovaaK's scenario's history by name (see scenarioDetail)
   calMonth: null, // Date for the first of the month shown on Progress › Time
   sessionsShown: 20,
+  folds: {}, // which folds (see fold()) are open, by id, so a redraw keeps them as they were
   allRuns: false, // a scenario's Runs table shows every run, not the latest 30
   rescanning: false,
   rescanError: null, // why the last Rescan failed, shown by the button until the next one
@@ -194,7 +195,7 @@ const MOVED = {
   benchmarks: "progress/benchmarks",
   library: "settings/kovaaks",
 };
-const PROGRESS_TABS = [["skills", "Skills"], ["benchmarks", "Benchmarks"], ["time", "Time"]];
+const PROGRESS_TABS = [["skills", "Skills"], ["benchmarks", "Benchmarks from KovaaK's"], ["time", "Time"]];
 const SETTINGS_TABS = [["aim", "Aim and display"], ["goals", "Goals and time"], ["kovaaks", "KovaaK's"], ["data", "Your data"]];
 
 // The tabs of a scenario's own page. Overview is also the bare address.
@@ -336,6 +337,20 @@ function tabs(base, list, current, bare = null) {
   return `<nav class="tabs" aria-label="Sections">${list.map(([id, label]) => `<a class="tab ${id === current ? "on" : ""}" href="${href(id)}" ${id === current ? 'aria-current="page"' : ""}>${label}</a>`).join("")}</nav>`;
 }
 
+// A section the reader opens when they want it: a native <details>, so the keyboard
+// works. Whether it's open is kept in ui.folds, because every render redraws it. The
+// summary has an id, so the focus stays on it across a render (see refocus).
+function fold(id, title, body) {
+  return `<details class="fold" data-fold="${esc(id)}" ${ui.folds[id] ? "open" : ""}>
+    <summary id="fold-${esc(id)}">${esc(title)}</summary><div class="fold-body">${body}</div></details>`;
+}
+
+// toggle doesn't bubble, so listen on the way down.
+document.addEventListener("toggle", (e) => {
+  const id = e.target.dataset?.fold;
+  if (id) ui.folds[id] = e.target.open;
+}, true);
+
 const noRunsYet = () =>
   `<div class="card"><div class="note-body">No runs yet. Play something on <a href="#scenarios">Scenarios</a>${ui.snap.stats_dir ? ", or in KovaaK's," : ""} and it shows up here.</div></div>`;
 
@@ -387,50 +402,6 @@ function dailyChart(n) {
       <span><i class="swatch" style="background:var(--session)"></i>Session</span>
       <span><i style="width:14px;border-top:2px dashed var(--dim)"></i>${s.time_settings.daily_goal_min} min goal</span></div></div>
     <div class="bars"><div class="goal" style="bottom:calc(24px + (100% - 48px) * ${goalFrac.toFixed(4)})"></div>${cols.join("")}</div>`;
-}
-
-function coachNotes() {
-  const s = ui.snap;
-  const notes = [];
-  const runs = s.training.runs.length;
-  const sc = s.scenarios;
-  const perScenario = runs / Math.max(1, sc.length);
-  if (perScenario < 3) {
-    const played = sc.filter((x) => x.counted_runs >= 5);
-    const later = played.filter((x) => (x.improvement_pct ?? 0) > 0).length;
-    notes.push({
-      title: "Repeat before you switch",
-      body: `${sc.length} scenarios in ${runs} runs is ${perScenario.toFixed(1)} runs each.` +
-        (played.length ? ` In your ${played.length} scenarios with 5+ runs, the best came after the first attempt in ${later}.` : "") +
-        " Try 3 to 5 runs per scenario.",
-    });
-  }
-  const warm = s.cold_starts.map((c) => c.vs_rest_of_day_pct).filter((v) => v !== null);
-  const warmMedian = median(warm);
-  if (warm.length >= 3 && warmMedian < -5) {
-    notes.push({
-      title: "Warm up first",
-      body: `Your first run of the day on a scenario is typically ${Math.abs(warmMedian).toFixed(0)}% below your later runs that day (${warm.length} days measured). Start with an easy scenario.`,
-    });
-  }
-  const plateaus = sc.filter((x) => x.plateau);
-  if (plateaus.length) {
-    notes.push({
-      title: `Plateau on ${plateaus.length === 1 ? plateaus[0].scenario : `${plateaus.length} scenarios`}`,
-      body: `${s.progress_settings.plateau_runs}+ runs without a new best and a flat trend. Try an easier or harder variant for a while.`,
-    });
-  }
-  const periods = s.sens_periods;
-  if (periods.length > 1) {
-    const [prev, cur] = periods.slice(-2);
-    const cm = (p) => (p.cm_per_360 ? `${p.cm_per_360.toFixed(1)} cm/360` : sensLabel(p.settings));
-    notes.push({
-      title: `Settings changed on ${fmtShort(dt(cur.from))}`,
-      body: `${cm(prev)} (${sensLabel(prev.settings)}) → ${cm(cur)} (${sensLabel(cur.settings)}). Score charts mark the change.`,
-    });
-  }
-  if (!notes.length) notes.push({ title: "Keep going", body: "Notes appear here as patterns show up in your runs." });
-  return notes.slice(0, 3);
 }
 
 // A KovaaK's scenario's score history: the figures and the score chart.
@@ -574,12 +545,12 @@ function timeTab() {
       <section class="card grow-3" aria-label="Calendar" style="flex:3 1 420px">${calendar()}</section>
       <section class="card grow-2" aria-label="Sessions" style="flex:2 1 320px">${sessionsList()}</section>
     </div>
-    <section class="card" aria-label="When you train">${timeline()}</section>
-    <div class="row">
-      <section class="card grow-2" aria-label="By day of week" style="flex:2 1 320px">${weekdays(first, today)}</section>
-      <section class="card grow-3" aria-label="Runs by hour" style="flex:3 1 420px">${hours()}</section>
-      <section class="card grow-2" aria-label="Active vs idle" style="flex:2 1 300px">${activeIdle(active, session)}</section>
-    </div>`;
+    ${fold("time-more", "More about when you train", `<section class="card" aria-label="When you train">${timeline()}</section>
+      <div class="row">
+        <section class="card grow-2" aria-label="By day of week" style="flex:2 1 320px">${weekdays(first, today)}</section>
+        <section class="card grow-3" aria-label="Runs by hour" style="flex:3 1 420px">${hours()}</section>
+        <section class="card grow-2" aria-label="Active vs idle" style="flex:2 1 300px">${activeIdle(active, session)}</section>
+      </div>`)}`;
 }
 
 // Every session, newest first, a page at a time.
@@ -709,10 +680,11 @@ function activeIdle(active, session) {
 function benchmarksTab() {
   const vt = ui.snap.scenarios.filter((x) => /^VT .* S5\b/.test(x.scenario)).sort((a, b) => a.scenario.localeCompare(b.scenario));
   return `<section class="card"><div class="card-head"><h2>Voltaic Season 5</h2><span class="small muted">${vt.length} scenario${vt.length === 1 ? "" : "s"} played in KovaaK's</span></div>
+      <div class="note-body">Your best scores on the Voltaic Season 5 benchmark scenarios, read from your KovaaK's stats. AimAdapt's own scenarios are rated on their own pages and on <a href="#progress/skills">Skills</a> instead.</div>
       ${vt.length ? `<div class="table-wrap"><table><thead><tr><th>Scenario</th><th class="r">Runs</th><th class="r">Best</th><th class="r">Last played</th></tr></thead><tbody>
         ${vt.map((x) => `<tr><td><a href="${scenarioHref(`kovaaks:${x.scenario}`)}">${esc(x.scenario)}</a></td><td class="r mono">${x.runs}</td><td class="r num">${num(x.best_score)}</td>
           <td class="r">${esc(fmtShort(dt(x.last_played)))}</td></tr>`).join("")}</tbody></table></div>`
-        : `<div class="note-body">No Voltaic Season 5 scenarios played in KovaaK's yet. Your bests on them show up here.</div>`}
+        : `<div class="note-body">None of them has been played in KovaaK's yet. If you have played them, check where AimAdapt reads your KovaaK's stats in <a href="#settings/kovaaks">Settings › KovaaK's</a>.</div>`}
     </section>`;
 }
 

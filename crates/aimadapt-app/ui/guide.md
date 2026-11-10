@@ -10,7 +10,7 @@ The app has four pages, in the sidebar: **Today** (what to play now), **Scenario
 2. **Choose a display mode.** Borderless full screen is the default. See [Settings](#help/settings) for exclusive full screen, a window, and a smaller play area on a big monitor.
 3. **Play today's workout.** Today shows today's day of the Core Week program. Press **Start session** and the trainer opens over the app.
 4. **Expect a calibration run.** Your first adaptive run on each scenario finds your level as you play, so it gets harder and easier along the way. After that, every run plays at one difficulty.
-5. **Check your progress.** Progress shows your week and your skill profile. Each scenario's page on Scenarios breaks it down: where you miss, how fast you react, how steady your tracking is, with replays of your recent runs.
+5. **Check your progress.** Progress shows your skill profile and how your week went. Each scenario's page on Scenarios breaks it down: where you miss, how fast you react, how steady your tracking is, with replays of your recent runs.
 
 Train most days, keep sessions to about half an hour, and take Sunday off. Day-to-day changes under about 5% are mostly luck. Look at the trend over a week or two.
 
@@ -20,19 +20,20 @@ Today is the home page: what to play now and how the week is going.
 
 - **Streak and today's time** at the top: the days in a row you've trained, and today's active time against your daily goal.
 - **Today's workout:** today's day of the Core Week program, with each drill's block (warm-up, main, secondary, maintenance), its runs and your current 85% rating. The bar shows how many of today's runs you've done. The button says **Start session**, **Continue session** if you've done part of it, or **Repeat session** once it's done. **Something else** opens Scenarios on Browse. A drill's name opens it on Scenarios. On a rest day it tells you what's next.
-- **This week:** each day's minutes in the program, coloured done, partial or missed. **Week in detail** opens Progress › Skills.
+- **This week:** each day's minutes in the program, coloured done, partial or missed. **Whole week** opens the Program tab on Scenarios, with every day's drills.
 - **Favorites:** the scenarios and workouts you've starred (up to six), with **Play** on scenarios and **Start session** on workouts.
 - **Recently played:** your last five scenarios or workouts, with your current figure and **Play** on scenarios or **Start session** on workouts. Play starts an adaptive run. KovaaK's scenarios have no button here unless AimAdapt can play them (then it says **Play in AimAdapt**); the rest you play in KovaaK's.
-- **Worth knowing:** up to two things: the skill furthest behind in your profile (with a link to that skill's scenarios on Browse), and a pattern from your history, such as cold starts, a plateau or a settings change.
+- **Worth knowing:** the top note: the most important one from your skill profile and history (see Worth knowing under [Progress](#help/progress)). When the skill furthest behind is the top note, it links to that skill's scenarios on Browse. **All notes** opens the full list on Progress › Skills. With no notes, the card isn't shown.
 
 ## Scenarios {#scenarios}
 
-Scenarios has four lists, each a tab across the page: **Recent**, **Browse**, **Workouts** and **Yours**. Each scenario and workout opens on its own page; **Scenarios ·** and the list's name, at the top of that page, take you back to the list where you left it. The Scenarios link in the sidebar opens the list you were last on.
+Scenarios has five tabs across the page: four lists, **Recent**, **Browse**, **Workouts** and **Yours**, and **Program**, which shows the week's plan (see below). Each scenario and workout opens on its own page; **Scenarios ·** and the list's name, at the top of that page, take you back to the tab where you left it. The Scenarios link in the sidebar opens the tab you were last on.
 
 - **Recent:** everything you've played, in the trainer or in KovaaK's, newest first and grouped by day (Today, Yesterday, then weekdays and dates). Filter by **Type** (AimAdapt, KovaaK's or Workouts) and **Skill**. KovaaK's rows are scenarios you played in KovaaK's: their page shows your scores, but you play them in KovaaK's.
 - **Browse:** every scenario, played or not, grouped by skill: the trainer's, and your KovaaK's scenarios (every `.sce` file in your KovaaK's and Workshop folders, plus any you've played in KovaaK's). A KovaaK's scenario's skill is its aim type (Clicking, Tracking or Target switching) and its tags are the game and weapon tags in its file. Filter by **Type** (AimAdapt, KovaaK's, or KovaaK's that play here: the ones AimAdapt's trainer can play), **Skill**, **Played** (played or not played yet), or pick tags (for example *tracking* and *smooth*) to show only scenarios that have all of them. Each tag shows how many scenarios have it; **N more** shows the rest of the tags.
-- **Workouts:** the built-in workouts and yours, with how many scenarios and runs each has and about how long it takes. Filter by **Made by** (built-in or you). The program's own days are on Today and Progress.
+- **Workouts:** the built-in workouts and yours, with how many scenarios and runs each has and about how long it takes. Filter by **Made by** (built-in or you). The Core Week's daily sessions aren't listed here. They're on Today and the Program tab.
 - **Yours:** the scenarios and workouts you made or copied with Copy & edit.
+- **Program:** the plan for the week. It isn't a list, so it has no search or filters. There is a card for each day, Monday to Sunday, with today marked. A training day shows its focus, how many drills, runs and minutes it has, each drill (its block, its name as a link to the scenario, its runs, and "standard" for a drill played in standard mode), how many of its runs you've done, and its session button: **Start session**, **Continue session** if you've done part of it, or **Repeat session** once it's done. A missed day can be made up later in the week. A rest day has no button. The weak-spots day says its drills are rebuilt from your skill profile. The top of the tab has the program's name and description, how many days are done this week, and links to the guide and to your results on Progress › Skills. A drill's page links back to the Program tab when you came from it. See [The Core Week program](#help/program).
 
 **Searching and sorting:** the search on each tab finds every word you type in a name, skill, tag or description, so *wide flick* finds Wide Flicks and anything tagged both. Click a column heading to sort by it, and again to reverse it. Sorting by Skill, Type, Made by, Rating or Last played puts a heading over each group. Ratings only compare within one kind (kill pace, speed, tracking speed or size), so Rating sorts by kind, then best first. Lists show 100 rows at a time: **Show more** or **Show all** at the bottom shows the rest. Each tab keeps its own search, filters and sort while the app is open. **Clear filters** shows the whole tab again.
 
@@ -191,7 +192,7 @@ Core Week is a six-day plan of about 29 minutes a day, built around reps rather 
 
 Each day has a warm-up (one drill, two standard runs), two main drills of five reps, two secondary drills of four, and a maintenance drill from another skill group (three reps). Most drills alternate week by week with a variant that trains the same sub-skill, for example Strafe Track one week and Hop Strafe Track the next. The training day starts at 4 AM, so a late-night session counts toward the day it started on.
 
-Today shows the day's workout; Progress › Skills shows the week, your skill profile and how each drill moves across its reps.
+Today shows today's workout. **Scenarios › Program** shows the whole week: every day's drills, with a start button on each day. **Progress › Skills** shows the results: your skill profile, how each drill moves across its reps, and how each day went. Start buttons are only on Today and the Program tab.
 
 ## Workouts {#workout}
 
@@ -224,13 +225,13 @@ Progress shows how you're doing across all your scenarios, in three tabs.
 **Skills**
 - **Key figures:** days done this week in the program, minutes, your overall change since you started each drill, and your biggest gain over the last seven days.
 - **Skill profile:** the change in each of the nine sub-skills, each group and overall, measured from the end of your first day on each drill.
-- **Worth knowing:** the skill furthest behind, skills you haven't trained in a week, and what Saturday's weak-spots day will play.
-- **This week:** each Core Week day as done, partial or missed, with runs and minutes, and each day's main drills compared with the same day last week. A day counts as done at 75% of its runs. A day you haven't finished has a **Start session** (or **Continue session**) button, so a missed day can be made up later in the week.
+- **Worth knowing:** every note, most important first: the skill furthest behind, a plateau, warming up first, repeating a scenario before you switch, skills you haven't trained in a week, a change of settings, and what Saturday's weak-spots day will play. Today shows only the first. A note appears only while it applies.
 - **Reps and carry-over:** your first rep against your last rep of each drill, and how much of the previous session's rating carried over to the next.
+- **This week:** the results for each Core Week day: done, partial or missed, with runs and minutes, and each day's main drills compared with the same day last week. A day counts as done at 75% of its runs. Skills has no start buttons: **The plan** opens the Program tab, where you start a day or make up a missed one.
 
-**Benchmarks** lists your bests on Voltaic Season 5 scenarios from your KovaaK's stats files. Each opens the scenario on Scenarios.
+**Benchmarks from KovaaK's** lists your best scores on the Voltaic Season 5 benchmark scenarios, read from your KovaaK's stats files. Each opens the scenario on Scenarios. AimAdapt's own scenarios aren't here: they're rated on their own pages and on Skills. If you haven't played any of them in KovaaK's, the tab says so and links to Settings › KovaaK's, where the stats folder is set up.
 
-**Time** shows when and how much you train, counting KovaaK's runs and trainer runs together: totals (active time, session time, days trained, days the daily goal was met), daily time for the last seven days, a calendar of daily time (use the arrows to change month), every session newest first, the last seven days as session blocks, time by day of the week, runs by hour of day, and active against idle time. How time is counted is in [Settings › Goals and time](#help/settings).
+**Time** shows when and how much you train, counting KovaaK's runs and trainer runs together: totals (active time, session time, days trained, days the daily goal was met), daily time for the last seven days, a calendar of daily time (use the arrows to change month) and every session newest first. **More about when you train** opens four more cards: the last seven days as session blocks, time by day of the week, runs by hour of day, and active against idle time. It starts closed, and stays open or closed as you use the page. How time is counted is in [Settings › Goals and time](#help/settings).
 
 ## Playing KovaaK's scenarios {#kovaaks-play}
 
@@ -322,6 +323,12 @@ Nothing is sent anywhere. Deleting one of your scenarios or workouts removes the
 ## What's new {#whats-new}
 
 **November 2026**
+- Scenarios has a **Program** tab with the week's plan: a card for each day with its drills, runs, your progress and a start button. Opening a drill from the tab and pressing back returns to it.
+- Start buttons for program days are only on Today and the Program tab. Progress › Skills shows results. **Week in detail** on Today is now **Whole week** and opens the Program tab.
+- Progress › Skills now shows the skill profile, then reps and carry-over, then the week.
+- The Benchmarks tab is now called **Benchmarks from KovaaK's**. It says where its scores come from, and when it's empty it points to Settings › KovaaK's.
+- On Progress › Time, the timeline, weekday, hour and active-versus-idle cards are in a fold, **More about when you train**.
+- Notes are ranked in one list. Progress › Skills shows all of them, most important first. Today shows only the top one, with a link to the rest. Before, Today could show a note that Progress didn't have.
 - A scenario's page now has tabs under its header: Overview, Insights and Runs (KovaaK's scenarios have Overview and Runs). The header shows your latest rating, its likely range and your best held, and Back returns to the tab you were on.
 - Steadier ratings: when your skill hasn't changed, your rating moves about half as much from run to run. It now remembers between runs how well it knows your consistency. A real improvement takes a few runs to show in full. Your ratings are kept. On each scenario the full effect starts with your second run after updating.
 - One meaning for Play: **Play** always starts an adaptive run of one scenario, and a scenario's page has a small line under it saying what it will do. Workouts and program days say **Start session**, **Continue session** and **Repeat session**. **Standard run** is the secondary button, and a KovaaK's scenario that plays here says **Play in AimAdapt**.

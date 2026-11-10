@@ -114,7 +114,7 @@ h3 { font-size: 16px; font-weight: 700; }
 select.select { min-height: 44px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--control); background: #1a1d22; }
 .icon-btn { width: 40px; height: 40px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--control); background: #1a1d22; display: inline-flex; align-items: center; justify-content: center; }
 /* Keyboard focus. A field's input has no outline of its own, so the box shows it. */
-:where(a, button, input, select, textarea):focus-visible { outline: 2px solid var(--rust); outline-offset: 2px; }
+:where(a, button, input, select, textarea, summary):focus-visible { outline: 2px solid var(--rust); outline-offset: 2px; }
 .field:focus-within { outline: 2px solid var(--rust); outline-offset: -1px; }
 
 /* Lists and tables */
@@ -235,6 +235,26 @@ svg text { font-family: var(--font); }
 .week-day.is-today { outline: 2px solid var(--rust); outline-offset: -2px; }
 .week-day .tag { align-self: flex-start; }
 .wd-name { font-weight: 600; color: var(--text-strong); }
+/* Scenarios › Program: a card per day. They wrap to as many columns as fit; long drill names wrap inside. */
+.day-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 270px), 1fr)); gap: 16px; }
+.day-card { min-width: 0; gap: 10px; }
+.day-card.rest { background: #121317; }
+.day-card.is-today { border-color: var(--rust); }
+.day-card .btn { align-self: flex-start; margin-top: auto; }
+.day-drills { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.day-drills li { display: flex; gap: 8px; align-items: baseline; padding: 6px 0; border-top: 1px solid var(--border-soft); min-width: 0; }
+.dd-block { flex: 0 0 82px; }
+.dd-name { flex: 1 1 0; min-width: 0; overflow-wrap: anywhere; }
+.dd-name a { color: var(--text-strong); font-weight: 600; }
+.dd-runs { flex: none; font-size: 13px; }
+/* A fold: a native <details>, its summary a bar like a card's head, the body the cards inside it. */
+.fold > summary { min-height: 52px; padding: 0 20px; display: flex; align-items: center; gap: 12px; cursor: pointer; list-style: none; font-weight: 600; color: var(--text-strong); background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::before { content: ""; flex: none; width: 7px; height: 7px; border: solid var(--dim); border-width: 0 2px 2px 0; transform: rotate(-45deg); }
+.fold[open] > summary::before { transform: rotate(45deg); }
+.fold > summary:hover { background: var(--surface-2); }
+.fold[open] > summary { margin-bottom: 16px; }
+.fold-body { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .wd-focus { min-height: 32px; }
 .hbar .lbl.skill-lbl { width: 140px; font-size: 13px; }
 .hbar .track.diverge { position: relative; background: var(--surface-2); }

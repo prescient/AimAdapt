@@ -248,7 +248,8 @@ fn favorite_and_hide_act_on_the_item_they_name() {
     // With no address, Scenarios goes to a list, never to an item.
     assert!(page.contains("location.replace(`#scenarios/${defaultTab(all)}`)"), "{page}");
     // Item keys have a colon (builtin:, user:, workout:, kovaaks:); list names don't.
-    let tabs = scenarios.split("const LIST_TABS = [").nth(1).and_then(|s| s.split(';').next()).expect("LIST_TABS");
+    let tabs =
+        scenarios.split("const SCENARIO_TABS = [").nth(1).and_then(|s| s.split(';').next()).expect("SCENARIO_TABS");
     assert!(tabs.contains("[\"browse\", \"Browse\"]") && !tabs.contains(':'), "{tabs}");
     // On the item's page and on each list row.
     assert!(scenarios.contains("data-action=\"favorite\" data-key=\"${esc(key)}\""));
@@ -284,6 +285,7 @@ fn a_failed_load_shows_its_error_instead_of_loading_forever() {
     let views = [
         ("today.js", "today"),
         ("program.js", "skillsTab"),
+        ("program.js", "programTab"),
         ("trainer.js", "edit"),
         ("trainer.js", "workout"),
         ("scenarios.js", "scenariosPage"),
@@ -403,6 +405,7 @@ fn trainer_errors_and_unusable_settings_are_shown() {
     assert!(banner.contains("banner warn") && banner.contains("esc(error)"), "{banner}");
     assert!(decl(&trainer, "launchTrainer").contains("closedError = null"), "a new start clears it");
     assert!(decl(&ui("scenarios.js"), "trainerBanners").contains("trainerErrorBanner()"), "Today and Scenarios");
+    assert!(decl(&ui("scenarios.js"), "programPage").contains("trainerBanners()"), "Scenarios › Program");
     assert!(decl(&ui("program.js"), "skillsTab").contains("trainerErrorBanner()"), "Progress › Skills");
     let settings = ui("settings.js");
     let notice = decl(&settings, "settingsNotice");
@@ -476,7 +479,8 @@ fn play_always_means_an_adaptive_run() {
             seen += 1;
         }
     }
-    assert!(seen >= 4, "found {seen} session buttons");
+    // The program's one sessionButton (Today and the Program tab share it) and the workout buttons.
+    assert!(seen >= 3, "found {seen} session buttons");
     // A KovaaK's scenario that plays here has one button, "Play in AimAdapt".
     let play_sce = scenarios.matches("data-action=\"play-sce\"").count();
     assert!(play_sce >= 2, "{play_sce}");
@@ -601,4 +605,278 @@ fn rating_figures_use_only_the_current_versions_runs() {
     for table in ["insightRunsTable", "latestRunsCard"] {
         assert!(decl(&insights, table).contains("ratingCell(r)"), "{table}");
     }
+}
+
+// ---------- plan L4: the Program tab, Progress trimmed ----------
+
+/// Where `needle` first appears in `text`, or a failure naming both.
+fn at(text: &str, needle: &str) -> usize {
+    text.find(needle).unwrap_or_else(|| panic!("{needle:?} isn't in:\n{text}"))
+}
+
+/// The body of the CSS rule for `selector` (alone at the start of a line).
+fn css_rule(css: &str, selector: &str) -> String {
+    let start = css.find(&format!("\n{selector} {{")).unwrap_or_else(|| panic!("no rule for {selector}"));
+    let rest = &css[start..];
+    rest[..rest.find('}').unwrap()].to_string()
+}
+
+/// Rule (plan L4): Scenarios has a Program tab between Workouts and Yours. It sits in
+/// the same row of tabs as the lists but isn't a list: it has no TAB_SETUP, search or
+/// table, `scenariosPage` sends it to its own page, and that page has the lists' head
+/// and banners. The back link from a drill opened there returns to it.
+#[test]
+fn scenarios_has_a_program_tab_that_is_not_a_list() {
+    let scenarios = ui("scenarios.js");
+    let tabs =
+        scenarios.split("const SCENARIO_TABS = [").nth(1).and_then(|s| s.split(';').next()).expect("SCENARIO_TABS");
+    assert!(at(tabs, "[\"workouts\"") < at(tabs, "[\"program\", \"Program\"]"), "{tabs}");
+    assert!(at(tabs, "[\"program\"") < at(tabs, "[\"yours\""), "{tabs}");
+
+    assert!(decl(&scenarios, "isListTab").contains("isScenarioTab(arg)"));
+    assert!(decl(&scenarios, "scenarioTabList").contains("SCENARIO_TABS"));
+    assert!(decl(&scenarios, "listPage").contains("scenarioTabList(all, tab)"));
+    assert!(decl(&scenarios, "programPage").contains("scenarioTabList(all, \"program\")"));
+    // Not a list: nothing indexes TAB_SETUP["program"], and isListTab says no.
+    let setup = scenarios.split("const TAB_SETUP = {").nth(1).and_then(|s| s.split("\n};").next()).expect("TAB_SETUP");
+    assert!(!setup.contains("program"), "Program has no list setup: {setup}");
+    assert!(decl(&scenarios, "isListTab").contains("!== \"program\""));
+    // scenariosPage sends it to the program page before the list page, and remembers it
+    // as the tab to come back to.
+    let page = decl(&scenarios, "scenariosPage");
+    let program = at(page, "arg === \"program\"");
+    let list = at(page, "isListTab(arg)");
+    assert!(program < list, "{page}");
+    let branch = &page[program..list];
+    assert!(branch.contains("programPage(all)") && branch.contains("ui.list.tab = arg"), "{branch}");
+    // The page has the lists' head and banners, the tab row with Program selected, and the body.
+    let program_page = decl(&scenarios, "programPage");
+    for part in ["scenariosHead()", "trainerBanners()", "tabs(\"scenarios\"", "programTab()"] {
+        assert!(program_page.contains(part), "programPage should draw {part}: {program_page}");
+    }
+    assert!(!program_page.contains("listPage(") && !program_page.contains("tabItems("));
+    assert!(decl(&scenarios, "listPage").contains("scenariosHead()"), "the lists draw the same head");
+    // The back link and the sidebar go to the last tab, Program included, by its label.
+    assert!(decl(&scenarios, "itemPage").contains("TAB_LABELS[listTab]"));
+    assert!(decl(&scenarios, "defaultTab").contains("ui.list.tab"));
+    assert!(decl(&scenarios, "TAB_LABELS").contains("SCENARIO_TABS"));
+    // Core Week's days stay off the Workouts list, which points to the tab for them.
+    assert!(decl(&scenarios, "isProgramDay").contains("builtin:core-"));
+    assert!(decl(&scenarios, "listPage").contains("#scenarios/program"), "the Workouts tab points to Program");
+    // Today's week links to it.
+    let today_js = ui("today.js");
+    let strip = decl(&today_js, "weekStrip");
+    assert!(strip.contains("href=\"#scenarios/program\"") && !strip.contains("Week in detail"), "{strip}");
+    // The program redraws the page when it arrives, on Scenarios too.
+    assert!(decl(&ui("program.js"), "loadProgram").contains("\"scenarios\""));
+}
+
+/// Rule (plan L4): you start a program day from Today's card or the Program tab, and
+/// nowhere else. Progress is for results. Both draw the button, the label and the
+/// drill names through one helper each.
+#[test]
+fn program_start_buttons_are_only_on_today_and_the_program_tab() {
+    let mut buttons = 0;
+    let mut callers = Vec::new();
+    for (file, src) in scripts() {
+        buttons += src.matches("type=\"button\" data-action=\"play-program\"").count();
+        for name in ["skillsTab", "weekCard", "notesCard", "profileCard", "sessionsCard"] {
+            if src.contains(&format!("function {name}(")) {
+                let text = decl(&src, name);
+                assert!(
+                    !text.contains("play-program") && !text.contains("sessionButton("),
+                    "{file}: {name} is Progress and has no start button"
+                );
+            }
+        }
+        for func in ["todayWorkout", "dayCard"] {
+            if src.contains(&format!("function {func}(")) && decl(&src, func).contains("sessionButton(") {
+                callers.push(func);
+            }
+        }
+    }
+    assert_eq!(buttons, 1, "the one button is drawn by sessionButton");
+    callers.sort_unstable();
+    assert_eq!(callers, ["dayCard", "todayWorkout"]);
+    let program = ui("program.js");
+    let button = decl(&program, "sessionButton");
+    assert!(button.contains("data-action=\"play-program\"") && button.contains("data-day="), "{button}");
+    assert!(
+        button.contains("ui.program.data.playing || ui.trainer.data.playing") && button.contains("disabled"),
+        "{button}"
+    );
+    let label = decl(&program, "sessionLabel");
+    for text in ["Start session", "Continue session", "Repeat session"] {
+        assert!(label.contains(text), "{label}");
+    }
+    let today = ui("today.js");
+    for text in ["Start session", "Continue session", "Repeat session", "scenarioName("] {
+        assert!(!today.contains(text), "today.js builds its own {text}: use sessionLabel and drillLookup");
+    }
+    assert!(decl(&today, "todayWorkout").contains("drillLookup()"));
+    assert!(decl(&program, "programTab").contains("drillLookup()"));
+}
+
+/// Rule (plan L4): the Program tab shows the plan, never a result. A day's card has
+/// its drills (linked when the scenario exists), runs and mode, a rest day has no
+/// button, and the cards wrap instead of running off the page.
+#[test]
+fn the_program_tab_shows_the_plan_and_no_results() {
+    let program = ui("program.js");
+    let tab = decl(&program, "programTab");
+    let card = decl(&program, "dayCard");
+    for part in ["#help/program", "#progress/skills", "d.description", "days_done", "75%", "made up"] {
+        assert!(tab.contains(part), "programTab should have {part}");
+    }
+    assert!(
+        !tab.contains("focus_change") && !card.contains("focus_change"),
+        "focus_change is a result: it stays on Progress"
+    );
+    for part in [
+        "BLOCK_LABELS",
+        "STATUS_LABELS",
+        "scenarioHref(",
+        "it.mode === \"standard\"",
+        "Rest day",
+        "weak_spots",
+        "bar-track",
+        "isToday",
+    ] {
+        assert!(card.contains(part), "dayCard should have {part}");
+    }
+    assert!(at(card, "Rest day") < at(card, "sessionButton("), "a rest day returns before the button");
+    // A rest day says so once: "Rest day" stands in for the focus, with no second line.
+    assert_eq!(card.matches("Rest").count(), 1, "{card}");
+    assert!(card.contains("esc(name)"), "drill names come from the user's files");
+    let css = ui("styles.css");
+    assert!(
+        css_rule(&css, ".day-grid").contains("repeat(auto-fill, minmax("),
+        "the days wrap into as many columns as fit"
+    );
+    let name = css_rule(&css, ".dd-name");
+    assert!(name.contains("min-width: 0") && name.contains("overflow-wrap"), "long drill names wrap");
+    assert!(css_rule(&css, ".day-card .btn").contains("align-self: flex-start"), "the button keeps its own width");
+    for selector in [".day-grid", ".day-card", ".day-drills li", ".dd-name", ".dd-block", ".dd-runs"] {
+        assert!(!css_rule(&css, selector).contains("nowrap"), "{selector} must not stop wrapping");
+    }
+}
+
+/// Rule (plan L4): Progress › Skills leads with the profile and the notes, then
+/// reps and carry-over, then the week, which is results only and links to the plan.
+#[test]
+fn skills_are_ordered_profile_then_carry_over_then_week() {
+    let program = ui("program.js");
+    let skills = decl(&program, "skillsTab");
+    assert!(at(skills, "kpi(") < at(skills, "profileCard("));
+    assert!(at(skills, "profileCard(") < at(skills, "notesCard()"));
+    assert!(at(skills, "notesCard()") < at(skills, "sessionsCard("));
+    assert!(at(skills, "sessionsCard(") < at(skills, "weekCard("), "{skills}");
+    let week = decl(&program, "weekCard");
+    assert!(week.contains("href=\"#scenarios/program\"") && week.contains("focus_change"), "{week}");
+}
+
+/// Rule (plan L4): Benchmarks says where its figures come from. Its label names
+/// KovaaK's, it explains itself with or without scores, and an empty one points to
+/// where the stats are set up.
+#[test]
+fn benchmarks_say_they_come_from_kovaaks() {
+    let app = ui("app.js");
+    let tabs = app.split("const PROGRESS_TABS = [").nth(1).and_then(|s| s.split("];").next()).expect("PROGRESS_TABS");
+    assert!(tabs.contains("[\"benchmarks\", \"Benchmarks from KovaaK's\"]"), "{tabs}");
+    let bench = decl(&app, "benchmarksTab");
+    let intro = at(bench, "benchmark scenarios, read from your KovaaK's stats");
+    assert!(bench[intro..].contains("own pages") && bench[intro..].contains("#progress/skills"), "{bench}");
+    // The intro comes before the table, so it shows when there are scores. The empty
+    // state is the table's else branch and says what to do.
+    assert!(intro < at(bench, "<table>"));
+    let empty = &bench[at(bench, "None of them has been played in KovaaK's")..];
+    assert!(empty.contains("href=\"#settings/kovaaks\""), "{empty}");
+    assert!(app.contains("[\"kovaaks\", \"KovaaK's\"]"), "Settings has a KovaaK's tab for that address");
+}
+
+/// Rule (plan L4): Progress › Time keeps the totals, the daily chart, the calendar
+/// and the sessions up top, and folds the other four cards into "More about when you
+/// train", closed to begin with. The fold is a native <details> (the keyboard works),
+/// its open state is kept in `ui.folds` because every action redraws the page (Show
+/// more sessions, a month change), and `toggle` doesn't bubble, so it is heard in the
+/// capture phase.
+#[test]
+fn the_time_tab_folds_its_extra_cards() {
+    let app = ui("app.js");
+    let time = decl(&app, "timeTab");
+    let fold = at(time, "fold(\"time-more\", \"More about when you train\"");
+    assert!(at(time, "kpi(") < at(time, "dailyChart("));
+    for up_top in ["dailyChart(", "calendar()", "sessionsList()"] {
+        assert!(at(time, up_top) < fold, "{up_top} stays above the fold");
+    }
+    let inside = &time[fold..];
+    for card in ["timeline()", "weekdays(", "hours()", "activeIdle("] {
+        assert!(inside.contains(card), "{card} goes inside the fold");
+        assert_eq!(time.matches(card).count(), 1, "{card} is drawn once");
+    }
+    let helper = decl(&app, "fold");
+    assert!(helper.contains("<details") && helper.contains("<summary"), "{helper}");
+    assert!(helper.contains("ui.folds[id] ? \"open\" : \"\""), "closed unless it was opened: {helper}");
+    assert!(helper.contains("<summary id=\"fold-"), "the summary has an id, so render() puts the focus back: {helper}");
+    assert!(app.contains("folds: {}"), "ui.folds starts empty");
+    let listener = &app[at(&app, "addEventListener(\"toggle\"")..];
+    let listener = &listener[..at(listener, "}, true);") + "}, true);".len()];
+    assert!(
+        listener.contains("ui.folds[id] = e.target.open"),
+        "capture phase, since toggle doesn't bubble: {listener}"
+    );
+    // The summary shows the keyboard focus like other controls.
+    assert!(ui("styles.css").contains("summary):focus-visible"));
+}
+
+/// Rule (plan L4): notes are ranked once. `rankedNotes` builds each one, in order of
+/// importance; Today shows the first and Progress › Skills all of them; `coachNotes`
+/// (a second list that was cut to three and never shown past its first) is gone.
+#[test]
+fn notes_are_ranked_once_and_both_pages_draw_from_the_list() {
+    for (file, src) in scripts() {
+        assert!(!src.contains("coachNotes"), "{file} still has coachNotes: use rankedNotes");
+    }
+    let program = ui("program.js");
+    let ranked = decl(&program, "rankedNotes");
+    let order = [
+        "is furthest behind",
+        "Plateau on",
+        "Warm up first",
+        "Repeat before you switch",
+        "Not trained in a week",
+        "Settings changed on",
+        "weak spots",
+    ];
+    let mut last = 0;
+    for title in order {
+        let here = at(ranked, title);
+        assert!(here > last, "{title} is out of order in rankedNotes");
+        last = here;
+    }
+    assert!(
+        !ranked.contains("Keep going") && !ranked.contains("slice(0"),
+        "no placeholder and no cap in the shared list"
+    );
+    // Today: the top note only, no card without one. Progress: every note, with the
+    // placeholder text only for an empty list.
+    let today_js = ui("today.js");
+    let worth = decl(&today_js, "worthKnowing");
+    assert!(worth.contains("const [note] = rankedNotes()") && worth.contains("if (!note) return \"\""), "{worth}");
+    assert!(worth.contains("#progress/skills"), "a link to the full list");
+    let card = decl(&program, "notesCard");
+    assert!(
+        card.contains("rankedNotes()") && card.contains(".map(noteView)") && card.contains("Notes show up here"),
+        "{card}"
+    );
+    // One list: nothing else builds notes or calls rankedNotes.
+    let calls: usize = scripts()
+        .values()
+        .map(|s| s.matches("rankedNotes()").count() - s.matches("function rankedNotes()").count())
+        .sum();
+    assert_eq!(calls, 2, "Today and Progress call rankedNotes, and nothing else does");
+    // A note is data: drawn escaped, with the one skill button the furthest-behind note has.
+    let view = decl(&program, "noteView");
+    assert!(view.contains("esc(n.title)") && view.contains("esc(n.body)"), "{view}");
+    assert!(view.contains("data-action=\"browse-skill\"") && view.contains("esc(n.skill)"), "{view}");
 }

@@ -119,7 +119,7 @@ Last reviewed: Nov 10, 2026 (after the layout review and the adaptive review; th
 - [ ] `todo` P2 Pick the active program, and add more programs (e.g. a clicking-heavy or tracking-heavy week).
 - [ ] `todo` P2 Program editor and weekly calendar: edit the plan in the app (each day's workout, drills, runs and blocks) and set your week (which days you train, which are rest days, which day is weak spots), instead of Core Week's fixed Mon–Sat. Goes with the scenario and workout manager (section 2).
 - [ ] `todo` P2 Weak-spots day from Insights detail, not just sub-skills: e.g. your weakest flick direction, distance band or tracking speed.
-- [ ] `todo` P2 A Program tab on Scenarios with the week, each day's drills and a start button; Core Week's day workouts move there from the Workouts list (plan L4).
+- [x] A Program tab on Scenarios with the week, each day's drills and a start button; Core Week's day workouts are kept off the Workouts list, which points to it (plan L4).
 
 ## 5. Insights and analytics
 
@@ -167,7 +167,7 @@ Last reviewed: Nov 10, 2026 (after the layout review and the adaptive review; th
 
 ### To do (second step of the simpler layout)
 - [ ] `todo` P1 Today: "Since your last session" (rating changes and breakthroughs since the session before) and each drill's change against the same day last week, with a session summary when the trainer closes (plan L3b).
-- [ ] `todo` P2 Progress trimmed: Skills leads with the profile and carry-over, Benchmarks says it comes from KovaaK's, Time folds its extra cards, and notes are ranked once (plan L4).
+- [x] Progress trimmed: Skills leads with the profile and carry-over and has no start buttons, Benchmarks says it comes from KovaaK's, Time folds its extra cards, and notes are ranked once, with Today showing the top one (plan L4).
 - [ ] `todo` P3 Scenarios tabs become Browse, Workouts and Program, with Recent and Yours as Browse filters, and the rating in the Best score column (plan L6a).
 - [ ] `todo` P3 Help contents rail with a filter, icon-only sidebar on narrow windows, and editor sections that hold defaults start folded (plan L6b).
 - [ ] `todo` P2 One streak: the program streak and the all-runs streak still differ (Today shows the all-runs one).

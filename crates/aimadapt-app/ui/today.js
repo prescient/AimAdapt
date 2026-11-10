@@ -1,6 +1,6 @@
 // Today: the home page. Today's program workout with each drill's runs and rating,
 // the week at a glance, your favorites and what you played last (each with its play button),
-// and a couple of things worth knowing.
+// and the top note from your history.
 // Loaded after program.js and scenarios.js and draws with their helpers.
 
 function today() {
@@ -29,29 +29,25 @@ function today() {
 function todayWorkout() {
   const d = ui.program.data;
   const { today, next, stat } = todayInfo();
-  const playing = d.playing || ui.trainer.data.playing;
   if (!today.workout) {
     return `<section class="card today-card"><div class="eyebrow">${esc(d.name)} · ${esc(today.name)}</div><h2>Rest day</h2>
       <div class="note-body">Next up: ${esc(next.name)}, ${esc(next.focus)}. If you want to play anyway, <button type="button" class="link-btn inline" data-action="list-tab-open" data-tab="browse">pick a scenario</button>.</div></section>`;
   }
-  const done = stat?.status === "done";
-  const started = stat && stat.done > 0;
-  const byId = new Map(ui.trainer.data.scenarios.map((e) => [e.id, e]));
+  const drill = drillLookup();
   const share = stat && stat.planned ? Math.min(1, stat.done / stat.planned) : 0;
   return `<section class="card today-card">
     <div class="card-head" style="align-items:flex-start">
       <div><div class="eyebrow accent">${esc(d.name)} · ${esc(today.name)}</div><h2 class="detail-title">${esc(today.focus)}</h2>
         <div class="small muted">${today.workout.items.length} drills · ${today.runs} runs · about ${Math.round(today.minutes)} min</div></div>
       <span class="chips"><button class="btn" type="button" data-action="list-tab-open" data-tab="browse">Something else</button>
-        <button class="btn primary" type="button" data-action="play-program" data-day="${today.day}" ${playing ? "disabled" : ""}>${playIcon}${done ? "Repeat session" : started ? "Continue session" : "Start session"}</button></span>
+        ${sessionButton(today.day, stat)}</span>
     </div>
     ${stat && stat.planned ? `<div class="day-progress"><div class="small muted"><span>${stat.done} of ${stat.planned} runs</span><span>${stat.minutes ? `${Math.round(stat.minutes)} min in` : ""}</span></div>
       <div class="bar-track"><div class="bar-fill" style="width:${(share * 100).toFixed(0)}%"></div></div></div>` : ""}
     <div class="drills" role="table" aria-label="Today's drills">
       <div class="drill head" role="row"><span role="columnheader">Block</span><span role="columnheader">Drill</span><span role="columnheader">Runs</span><span role="columnheader" class="r">85% rating</span></div>
       ${today.workout.items.map((it) => {
-        const e = byId.get(it.scenario);
-        const name = e?.scenario?.name ?? scenarioName(it.scenario);
+        const { entry: e, name } = drill(it);
         const rating = it.mode !== "standard" && e && e.rating !== null && e.rating !== undefined ? fmtKnob(e.knob, e.rating) : "–";
         return `<div class="drill" role="row"><span role="cell" class="small muted">${esc(BLOCK_LABELS[it.block ?? "none"] || "")}</span>
           <span role="cell">${e?.scenario ? `<a href="${scenarioHref(e.id)}">${esc(name)}</a>` : esc(name)}</span>
@@ -66,7 +62,7 @@ function todayWorkout() {
 function weekStrip() {
   const d = ui.program.data;
   const p = d.progress;
-  return `<section class="card"><div class="card-head"><h2>This week</h2><a class="small" href="#progress/skills">Week in detail</a></div>
+  return `<section class="card"><div class="card-head"><h2>This week</h2><a class="small" href="#scenarios/program">Whole week</a></div>
     <div class="week-strip">${p.week.map((w) => {
       const info = d.days.find((x) => x.day === w.day);
       const label = w.planned ? (w.minutes ? `${Math.round(w.minutes)}` : w.status === "missed" ? "missed" : "–") : "rest";
@@ -103,17 +99,10 @@ function recentlyPlayed() {
   </section>`;
 }
 
-// At most two: the program's weakest skill, and the first pattern from your history.
+// The top note from the ranked list (rankedNotes, in program.js). The whole list is on
+// Progress › Skills.
 function worthKnowing() {
-  const s = ui.program.data.progress.summary;
-  const notes = [];
-  if (s.lagging) {
-    const skill = SKILL_LABELS[s.lagging];
-    notes.push([`${skill} is furthest behind`, `Your smallest gain since you started. The program's weak-spots day leans on it. <button type="button" class="link-btn inline" data-action="browse-skill" data-skill="${esc(skill)}">${esc(skill)} scenarios</button>`, "#progress/skills"]);
-  }
-  const coach = ui.snap.training.runs.length ? coachNotes().filter((n) => n.title !== "Keep going") : [];
-  if (coach.length) notes.push([coach[0].title, esc(coach[0].body), null]);
-  if (!notes.length) return "";
-  return `<section class="card"><h2>Worth knowing</h2><div class="grid">${notes.slice(0, 2).map(([title, body, href]) => `<div class="note">
-    <div class="note-title">${href ? `<a href="${href}">${esc(title)}</a>` : esc(title)}</div><div class="note-body">${body}</div></div>`).join("")}</div></section>`;
+  const [note] = rankedNotes();
+  if (!note) return "";
+  return `<section class="card"><div class="card-head"><h2>Worth knowing</h2><a class="small" href="#progress/skills">All notes</a></div>${noteView(note)}</section>`;
 }

@@ -3,7 +3,9 @@
 //
 // - #scenarios/<tab> is a list across the whole page, one tab each for Recent,
 //   Browse, Workouts and Yours (plus Hidden): a search, the tab's filters, and a
-//   table you can sort by any column, a hundred rows at a time.
+//   table you can sort by any column, a hundred rows at a time. Program (the week's
+//   plan, drawn by programTab in program.js) sits in the same row of tabs but is not
+//   a list: it has no search, filters or table.
 // - #scenarios/<key> is one item's own page: Play at the top, then key figures, the
 //   rating chart, what to work on, Insights and the runs.
 //
@@ -11,9 +13,12 @@
 // trainer.js, insights.js and program.js; it draws with their helpers and data
 // (ui.trainer.data, ui.insights, ui.snap).
 
-const LIST_TABS = [["recent", "Recent"], ["browse", "Browse"], ["workouts", "Workouts"], ["yours", "Yours"]];
-const TAB_LABELS = Object.fromEntries([...LIST_TABS, ["hidden", "Hidden"]]);
-const isListTab = (arg) => Object.hasOwn(TAB_LABELS, arg ?? "");
+// The row of tabs: the one list of what Scenarios has. Hidden is added when something is hidden.
+const SCENARIO_TABS = [["recent", "Recent"], ["browse", "Browse"], ["workouts", "Workouts"], ["program", "Program"], ["yours", "Yours"]];
+const TAB_LABELS = Object.fromEntries([...SCENARIO_TABS, ["hidden", "Hidden"]]);
+const isScenarioTab = (arg) => Object.hasOwn(TAB_LABELS, arg ?? "");
+// A tab that is a list (has TAB_SETUP, filters and a table): every tab but Program.
+const isListTab = (arg) => isScenarioTab(arg) && arg !== "program";
 // Rows shown before "Show more", and tags before "N more".
 const PAGE_ROWS = 100;
 const TAGS_SHOWN = 10;
@@ -24,7 +29,7 @@ const NO_FILTERS = { query: "", skill: "", tags: [], kind: "", played: "", owner
 ui.list = { tab: null, filters: {}, sort: {}, limit: {}, scroll: {}, moreTags: false };
 const listFilters = (tab) => (ui.list.filters[tab] ??= structuredClone(NO_FILTERS));
 
-// Built-in workouts for the program's days live on Today and Progress, not here.
+// Built-in workouts for the program's days live on Today and Scenarios › Program, not in the lists.
 const isProgramDay = (e) => e.builtin && /^builtin:core-/.test(e.id);
 
 const marks = () => ui.trainer.data?.marks ?? { favorites: [], hidden: [] };
@@ -315,6 +320,10 @@ function scenariosPage(arg, tab) {
     location.replace(`#scenarios/${defaultTab(all)}`);
     return "";
   }
+  if (arg === "program") {
+    ui.list.tab = arg;
+    return programPage(all);
+  }
   if (isListTab(arg)) {
     ui.list.tab = arg;
     return listPage(all, arg);
@@ -408,23 +417,43 @@ function listTable(tab, rows) {
       <button class="link-btn" type="button" data-action="all-rows">Show all</button></div>` : ""}`;
 }
 
+// The page head of every Scenarios tab: the title and the New workout and New scenario buttons.
+function scenariosHead() {
+  return head("Play, and see how you're doing", "Scenarios", `<span class="chips">${playingWith()}
+      <button class="btn" type="button" data-action="new-workout">New workout</button>
+      <button class="btn" type="button" data-action="new-scenario">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>New scenario</button></span>`);
+}
+
+// The tab row, with Hidden (and how many) once something is hidden.
+function scenarioTabList(all, tab) {
+  const hidden = all.filter((x) => isHidden(x.key)).length;
+  return hidden || tab === "hidden" ? [...SCENARIO_TABS, ["hidden", `Hidden <span class="tab-count">${hidden}</span>`]] : SCENARIO_TABS;
+}
+
+// Scenarios › Program: the same head and tabs as a list, then the plan (programTab).
+function programPage(all) {
+  return `<div class="page">
+    ${scenariosHead()}
+    ${trainerBanners()}
+    ${tabs("scenarios", scenarioTabList(all, "program"), "program")}
+    ${programTab()}
+  </div>`;
+}
+
 function listPage(all, tab) {
   const base = tabItems(all, tab);
   const rows = sortRows(filterRows(base, tab), tab);
   const filtering = isFiltering(tab);
-  const hidden = all.filter((x) => isHidden(x.key)).length;
-  const tabList = hidden || tab === "hidden" ? [...LIST_TABS, ["hidden", `Hidden <span class="tab-count">${hidden}</span>`]] : LIST_TABS;
   const noun = tab === "workouts" ? "workout" : tab === "browse" ? "scenario" : "item";
   const reading = ui.sceLibrary === "loading" && ["browse", "recent"].includes(tab) ? " · Reading your KovaaK's scenarios…" : "";
   const count = (filtering ? `${rows.length} of ${base.length} match` : `${base.length} ${noun}${base.length === 1 ? "" : "s"} · ${TAB_SETUP[tab].note}`) + reading;
   return `<div class="page">
-    ${head("Play, and see how you're doing", "Scenarios", `<span class="chips">${playingWith()}
-      <button class="btn" type="button" data-action="new-workout">New workout</button>
-      <button class="btn" type="button" data-action="new-scenario">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>New scenario</button></span>`)}
+    ${scenariosHead()}
     ${trainerBanners()}
-    ${tabs("scenarios", tabList, tab)}
+    ${tabs("scenarios", scenarioTabList(all, tab), tab)}
     <section class="card library" aria-label="${esc(TAB_LABELS[tab])}">
+      ${tab === "workouts" ? `<div class="small muted">The Core Week's daily sessions are on the <a href="#scenarios/program">Program</a> tab.</div>` : ""}
       ${base.length ? `${listTools(tab, base)}${tagChips(tab, base)}
         <div class="lib-count small muted"><span>${esc(count)}</span>${filtering ? `<button type="button" class="link-btn" data-action="clear-list">Clear filters</button>` : ""}</div>
         ${rows.length ? listTable(tab, rows) : `<div class="note-body">Nothing matches these filters.</div>`}`
@@ -620,10 +649,11 @@ async function startSce(path) {
   await loadTrainer();
 }
 
-// The list tab on screen, or null on an item's page.
+// The tab on screen (a list, or Program), or null on an item's page. Program has no
+// filters or sort to act on, but it keeps its scroll position like the lists.
 const shownTab = () => {
   const { view, arg } = route();
-  return view === "scenarios" && isListTab(arg) ? arg : null;
+  return view === "scenarios" && isScenarioTab(arg) ? arg : null;
 };
 
 // Each list remembers where it was scrolled, so Back from an item's page lands on
