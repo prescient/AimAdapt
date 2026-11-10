@@ -172,13 +172,14 @@ const starIcon = (filled) => `<svg width="14" height="14" viewBox="0 0 24 24" fi
 const playIcon = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l13 8-13 8z"></path></svg>`;
 const dash = `<span class="dim">–</span>`;
 
-// Play (an adaptive run) for trainer scenarios, Start for workouts, and Play (its
-// own file, in standard mode) for a KovaaK's scenario the trainer can play.
+// Play (an adaptive run) for trainer scenarios, Start session for workouts, and
+// Play in AimAdapt (its own file, in standard mode) for a KovaaK's scenario the
+// trainer can play.
 function playButton(x) {
   const playing = ui.trainer.data.playing ? "disabled" : "";
   if (x.kind === "trainer") return `<button class="btn play-btn" type="button" data-action="play" data-id="${esc(x.key)}" data-adaptive="1" ${playing} aria-label="Play ${esc(x.name)}">${playIcon}Play</button>`;
-  if (x.kind === "workout") return `<button class="btn play-btn" type="button" data-action="play-workout" data-id="${esc(x.entry.id)}" ${playing} aria-label="Start ${esc(x.name)}">${playIcon}Start</button>`;
-  if (x.sce?.playable) return `<button class="btn play-btn" type="button" data-action="play-sce" data-path="${esc(x.sce.path)}" ${playing} aria-label="Play ${esc(x.name)} in AimAdapt" title="Plays this scenario's own file in AimAdapt's trainer">${playIcon}Play</button>`;
+  if (x.kind === "workout") return `<button class="btn play-btn" type="button" data-action="play-workout" data-id="${esc(x.entry.id)}" ${playing} aria-label="Start session ${esc(x.name)}">${playIcon}Start session</button>`;
+  if (x.sce?.playable) return `<button class="btn play-btn" type="button" data-action="play-sce" data-path="${esc(x.sce.path)}" ${playing} aria-label="Play ${esc(x.name)} in AimAdapt" title="Plays this scenario's own file in AimAdapt's trainer">${playIcon}Play in AimAdapt</button>`;
   return "";
 }
 
@@ -487,7 +488,7 @@ function workoutDetail(e) {
           <div class="note-body">${esc(w.description)}</div>
           <div class="small muted" style="margin-top:4px">About ${minutes(e.seconds)} · ${w.items.reduce((a, i) => a + i.runs, 0)} runs${e.last_played ? ` · last played ${esc(fmtShort(dt(e.last_played)))}` : ""}</div></div>
         <span class="chips">${markButtons(`workout:${e.id}`)}<a class="btn" href="#workout/${encodeURIComponent(e.id)}">${e.builtin ? "Copy &amp; edit" : "Edit"}</a>
-          <button class="btn primary" type="button" data-action="play-workout" data-id="${esc(e.id)}" ${playing}>${playIcon}Start</button></span>
+          <button class="btn primary" type="button" data-action="play-workout" data-id="${esc(e.id)}" ${playing} aria-label="Start session ${esc(w.name)}">${playIcon}Start session</button></span>
       </div>
       <div class="steps">${w.items.map((it, i) => {
         const s = byId.get(it.scenario);
@@ -528,8 +529,9 @@ function trainerDetail(e) {
           <div class="small muted" style="margin-top:4px">${esc(scenarioFacts(s))}</div></div>
         <span class="chips">${markButtons(e.id)}
           <a class="btn" href="#edit/${encodeURIComponent(e.id)}">${e.builtin ? "Copy &amp; edit" : "Edit"}</a>
-          <button class="btn" type="button" data-action="play" data-id="${esc(e.id)}" data-adaptive="0" ${playing}>Standard</button>
-          <button class="btn primary" type="button" data-action="play" data-id="${esc(e.id)}" data-adaptive="1" ${playing}>${playIcon}Play adaptive</button></span>
+          <button class="btn" type="button" data-action="play" data-id="${esc(e.id)}" data-adaptive="0" ${playing}>Standard run</button>
+          <span class="play-group"><button class="btn primary" type="button" data-action="play" data-id="${esc(e.id)}" data-adaptive="1" ${playing}>${playIcon}Play</button>
+            <span class="small muted">adaptive · ${num(s.timing.duration_s)} s</span></span></span>
       </div>
       ${jumpLinks(jumps)}
     </section>
@@ -561,11 +563,11 @@ function sceCard(name) {
     return `<section class="card"><div class="note-body"><strong>Can't play this in AimAdapt yet.</strong> It uses ${esc(s.reasons.join("; "))}. See <a href="#help/kovaaks-play">Playing KovaaK's scenarios</a>.</div>${history ? `<div class="small muted">${esc(history)}</div>` : ""}</section>`;
   }
   return `<section class="card sce-card"><div class="card-head" style="align-items:flex-start">
-      <div><h2>Play in AimAdapt</h2>
+      <div><h2>In AimAdapt's trainer</h2>
         <div class="note-body">Plays this scenario's own file on its map in AimAdapt's trainer, in standard mode. Its runs are kept apart from your KovaaK's runs.</div>
         ${s.notes.length ? `<ul class="small muted sce-notes">${s.notes.map((n) => `<li>${esc(n[0].toUpperCase() + n.slice(1))}.</li>`).join("")}</ul>` : ""}
         ${history ? `<div class="small muted">${esc(history)}</div>` : ""}</div>
-      <button class="btn primary" type="button" data-action="play-sce" data-path="${esc(s.path)}" ${playing}>${playIcon}Play</button>
+      <button class="btn primary" type="button" data-action="play-sce" data-path="${esc(s.path)}" ${playing}>${playIcon}Play in AimAdapt</button>
     </div></section>`;
 }
 

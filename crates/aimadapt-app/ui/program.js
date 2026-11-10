@@ -81,7 +81,7 @@ function weekCard(d) {
           <div class="small">${w.done} / ${w.planned} runs${w.minutes ? ` · ${Math.round(w.minutes)} min` : ""}</div>` : `<div class="small muted">Rest day</div>`}
         ${STATUS_LABELS[w.status] ? `<span class="tag ${w.status === "done" ? "" : "grey"}">${STATUS_LABELS[w.status]}</span>` : ""}
         ${w.focus_change !== null ? `<div class="small"><span class="${w.focus_change >= 0 ? "pos" : "neg"}">${pctChange(w.focus_change, 1)}</span> vs last ${esc(info.name)}</div>` : ""}
-        ${w.planned && w.status !== "done" ? `<button class="btn small-btn" type="button" data-action="play-program" data-day="${w.day}" ${d.playing ? "disabled" : ""}>${w.done ? "Continue" : "Play"}</button>` : ""}
+        ${w.planned && w.status !== "done" ? `<button class="btn small-btn" type="button" data-action="play-program" data-day="${w.day}" ${d.playing ? "disabled" : ""}>${w.done ? "Continue session" : "Start session"}</button>` : ""}
       </div>`;
     }).join("")}</div>
     <div class="small muted">A day counts as done at 75% of its runs. The change compares the day's main drills with the same day last week. A missed day can be made up later in the week.</div>

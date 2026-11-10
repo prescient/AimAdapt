@@ -442,3 +442,71 @@ fn keyboard_focus_shows_and_survives_a_render() {
     let css = ui("styles.css");
     assert!(css.contains(":focus-visible") && css.contains(".field:focus-within"));
 }
+
+/// Rule (plan L1): Play always means an adaptive run of one AimAdapt scenario.
+/// Sessions (workouts and program days) say "session", never Play, and the
+/// scenario page's secondary button is "Standard run". The replay page's
+/// Play/Pause is a transport control and is left out.
+#[test]
+fn play_always_means_an_adaptive_run() {
+    for (file, src) in scripts() {
+        assert!(!src.contains("Play adaptive"), "{file} still says \"Play adaptive\"");
+    }
+    let scenarios = ui("scenarios.js");
+    assert!(
+        decl(&scenarios, "trainerDetail").contains(">Standard run</button>"),
+        "the scenario header's secondary button"
+    );
+    assert!(decl(&scenarios, "trainerDetail").contains("adaptive · "), "the line under Play says what it does");
+    // Every session button is labelled "session" and never Play.
+    let mut seen = 0;
+    for (file, src) in scripts() {
+        for (at, _) in src.match_indices("<button") {
+            let button = &src[at..];
+            let Some(end) = button.find("</button>") else { continue };
+            let button = &button[..end];
+            let Some(action) =
+                ["play-workout", "play-program"].into_iter().find(|a| button.contains(&format!("data-action=\"{a}\"")))
+            else {
+                continue;
+            };
+            let label = &button[button.find('>').unwrap() + 1..];
+            assert!(label.to_lowercase().contains("session"), "{file}: {action} button says {label:?}");
+            assert!(!label.contains("Play"), "{file}: {action} button says {label:?}");
+            seen += 1;
+        }
+    }
+    assert!(seen >= 4, "found {seen} session buttons");
+    // A KovaaK's scenario that plays here has one button, "Play in AimAdapt".
+    let play_sce = scenarios.matches("data-action=\"play-sce\"").count();
+    assert!(play_sce >= 2, "{play_sce}");
+    for (at, _) in scenarios.match_indices("data-action=\"play-sce\"") {
+        let rest = &scenarios[at..];
+        assert!(rest[..rest.find("</button>").unwrap()].ends_with("Play in AimAdapt"), "play-sce button");
+    }
+}
+
+/// Found checking plan L1 in the browser, before it was committed: the longer
+/// session labels stuck out of the week cards' buttons on windows under about
+/// 1300 px wide, and the line under Play stretched the buttons beside it to its
+/// height. A week card's button wraps its label, the week drops to four columns
+/// before a word can't fit, and the scenario header keeps its buttons their own
+/// height. (Layout can't be measured here, so this checks the rules that fix it.)
+#[test]
+fn longer_button_labels_fit_where_they_are_shown() {
+    let css = ui("styles.css");
+    let rule = |selector: &str| {
+        let at = css.find(&format!("\n{selector} {{")).unwrap_or_else(|| panic!("no rule for {selector}"));
+        let rest = &css[at..];
+        rest[..rest.find('}').unwrap()].to_string()
+    };
+    assert!(!rule(".small-btn").contains("nowrap"), "a week card's button wraps its label");
+    assert!(
+        css.contains("@media (max-width: 1100px) { .week-grid { grid-template-columns: repeat(4,"),
+        "the week has four columns on narrower windows"
+    );
+    assert!(
+        rule(".detail-head .card-head > .chips").contains("align-items: flex-start"),
+        "the scenario header's buttons keep their own height"
+    );
+}

@@ -161,10 +161,10 @@ Last reviewed: Nov 10, 2026 (after the layout review and the adaptive review; th
 - [x] Today: the program day with each drill's rating, the week, recently played and two notes.
 - [x] Progress › Time lists every session.
 - [x] Help: the user guide (`ui/guide.md`) with contents, search and What's new. Every page's header links to its section. A test keeps it in step with the pages, built-ins, ratings, trainer keys and version.
+- [x] Play always means an adaptive run of one scenario; workouts and program days say Start session, Continue session and Repeat session; a KovaaK's scenario that plays here says Play in AimAdapt (plan L1).
 
 ### To do (second step of the simpler layout)
 - [ ] `todo` P1 Today: "Since your last session" (rating changes and breakthroughs since the session before) and each drill's change against the same day last week, with a session summary when the trainer closes (plan L3b).
-- [ ] `todo` P1 Play always means an adaptive run of one scenario; workouts and program days say Start session and Continue session (plan L1).
 - [ ] `todo` P1 Scenario page tabs (Overview, Last run, Runs) under one header, with the same layout for KovaaK's scenarios (plan L2).
 - [ ] `todo` P2 Progress trimmed: Skills leads with the profile and carry-over, Benchmarks says it comes from KovaaK's, Time folds its extra cards, and notes are ranked once (plan L4).
 - [ ] `todo` P3 Scenarios tabs become Browse, Workouts and Program, with Recent and Yours as Browse filters, and the rating in the Best score column (plan L6a).

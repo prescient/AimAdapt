@@ -1,5 +1,5 @@
 // Today: the home page. Today's program workout with each drill's runs and rating,
-// the week at a glance, your favorites and what you played last (each with Play),
+// the week at a glance, your favorites and what you played last (each with its play button),
 // and a couple of things worth knowing.
 // Loaded after program.js and scenarios.js and draws with their helpers.
 
@@ -43,7 +43,7 @@ function todayWorkout() {
       <div><div class="eyebrow accent">${esc(d.name)} · ${esc(today.name)}</div><h2 class="detail-title">${esc(today.focus)}</h2>
         <div class="small muted">${today.workout.items.length} drills · ${today.runs} runs · about ${Math.round(today.minutes)} min</div></div>
       <span class="chips"><button class="btn" type="button" data-action="list-tab-open" data-tab="browse">Something else</button>
-        <button class="btn primary" type="button" data-action="play-program" data-day="${today.day}" ${playing ? "disabled" : ""}>${playIcon}${done ? "Play again" : started ? "Continue" : "Start"}</button></span>
+        <button class="btn primary" type="button" data-action="play-program" data-day="${today.day}" ${playing ? "disabled" : ""}>${playIcon}${done ? "Repeat session" : started ? "Continue session" : "Start session"}</button></span>
     </div>
     ${stat && stat.planned ? `<div class="day-progress"><div class="small muted"><span>${stat.done} of ${stat.planned} runs</span><span>${stat.minutes ? `${Math.round(stat.minutes)} min in` : ""}</span></div>
       <div class="bar-track"><div class="bar-fill" style="width:${(share * 100).toFixed(0)}%"></div></div></div>` : ""}
@@ -77,7 +77,7 @@ function weekStrip() {
   </section>`;
 }
 
-// A row that opens the item, with Play or Start (playButton, on Scenarios).
+// A row that opens the item, with its play button (playButton, on Scenarios).
 function playRow(x, sub) {
   const play = playButton(x);
   return `<div class="list-row"><a class="main" href="${scenarioHref(x.key)}" style="color:inherit">
