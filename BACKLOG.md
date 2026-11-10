@@ -6,7 +6,7 @@ AimAdapt is an aim trainer for Windows. It rates you in real units, keeps each d
 
 **Status:** `todo` · `doing` · `done` · `spike` (research before committing)
 
-Last reviewed: Nov 4, 2026 (after the first playtest session).
+Last reviewed: Nov 10, 2026 (after the layout review and the adaptive review; their changes are planned in [the review plan](docs/plans/2026-11-review-changes.md)).
 
 ---
 
@@ -39,7 +39,7 @@ Last reviewed: Nov 4, 2026 (after the first playtest session).
 - [ ] `todo` P2 Measure input-to-photon latency and frame pacing; optional frame cap.
 - [ ] `todo` P2 List the monitor's real video modes in Settings instead of free-typed resolutions (the engine can already read them).
 - [ ] `todo` P2 More crosshair options: outline, and a color change on hit.
-- [ ] `todo` P2 In-game results: a small chart of recent ratings for the scenario.
+- [ ] `todo` P1 In-game results: a small chart of recent ratings for the scenario, the most relevant note, and keys for the replay and the scenario's page (plan L3a).
 - [ ] `todo` P3 Game font with a degree sign; speeds read "deg/s" in game for now.
 
 ## 2. Scenarios
@@ -89,8 +89,14 @@ Last reviewed: Nov 4, 2026 (after the first playtest session).
 
 ### To do
 - [ ] `spike` P1 Tune against real play. The default easy/hard ranges, first guesses and the "consistent vs. fades gradually" cut-off are educated guesses that have only been checked with the bot.
-- [ ] `todo` P2 Show the stretch/near/easy split and breakthroughs per run in Insights.
-- [ ] `todo` P2 Offer (not force) another calibration run when a rating has become very uncertain, e.g. after a long break. From [playtesting](PLAYTEST.md).
+- [ ] `todo` P1 Steadier ratings: carry the slope's uncertainty between runs and apply the carried uncertainty to the goal point (plan A1).
+- [ ] `todo` P1 Program figures and Insights keep a scenario's versions apart, as the trainer does (plan A3, a bug found by reading).
+- [ ] `todo` P1 Stricter breakthroughs: 30 targets at the goal rate, or a margin on a shorter run (plan A8).
+- [ ] `todo` P1 Name the kind of run before it starts and judge it against its plan afterwards (plan A2).
+- [ ] `todo` P2 Planned order inside a block: first run at your level, stretch runs in the middle, an easy run last (plan A5).
+- [ ] `todo` P2 Planned against actual success by kind of run, with each run's kind and breakthroughs in the Runs table (plan A6).
+- [ ] `todo` P2 Ranges on gains, carry-over and the skill profile; changes inside the noise greyed; weak spots named only after three sessions (plan A7).
+- [ ] `todo` P2 A calibration run after a break of three days or more, once the rating has become uncertain, with a line on screen saying why (plan A4). The playtest note asked for an offer; the adaptive review recommended doing it automatically, since an offer needs a prompt in the middle of a session.
 
 ## 4. Programs and workouts
 
@@ -112,7 +118,7 @@ Last reviewed: Nov 4, 2026 (after the first playtest session).
 - [ ] `todo` P2 Pick the active program, and add more programs (e.g. a clicking-heavy or tracking-heavy week).
 - [ ] `todo` P2 Program editor and weekly calendar: edit the plan in the app (each day's workout, drills, runs and blocks) and set your week (which days you train, which are rest days, which day is weak spots), instead of Core Week's fixed Mon–Sat. Goes with the scenario and workout manager (section 2).
 - [ ] `todo` P2 Weak-spots day from Insights detail, not just sub-skills: e.g. your weakest flick direction, distance band or tracking speed.
-- [ ] `todo` P3 Hide Core Week's day workouts from the general Workouts list, or group them under the program.
+- [ ] `todo` P2 A Program tab on Scenarios with the week, each day's drills and a start button; Core Week's day workouts move there from the Workouts list (plan L4).
 
 ## 5. Insights and analytics
 
@@ -145,7 +151,7 @@ Last reviewed: Nov 4, 2026 (after the first playtest session).
 
 ### To do
 - [ ] `todo` P2 More games (Fortnite, Rainbow Six Siege, Marvel Rivals, The Finals) once their sensitivity formulas are checked.
-- [ ] `todo` P2 Editable goals and training-time rules (daily and weekly goal, session gap, day start) in Settings › Goals and time, which shows fixed defaults today.
+- [ ] `todo` P2 Settings › Training: the mix, an editable daily goal and advice on session length in one tab (plan L5). The other training-time rules (session gap, day start) stay fixed for now.
 
 ## 7. App screens
 
@@ -157,7 +163,12 @@ Last reviewed: Nov 4, 2026 (after the first playtest session).
 - [x] Help: the user guide (`ui/guide.md`) with contents, search and What's new. Every page's header links to its section. A test keeps it in step with the pages, built-ins, ratings, trainer keys and version.
 
 ### To do (second step of the simpler layout)
-- [ ] `todo` P1 Today: "Since your last session" (rating changes and breakthroughs since the session before) and each drill's change against the same day last week.
+- [ ] `todo` P1 Today: "Since your last session" (rating changes and breakthroughs since the session before) and each drill's change against the same day last week, with a session summary when the trainer closes (plan L3b).
+- [ ] `todo` P1 Play always means an adaptive run of one scenario; workouts and program days say Start session and Continue session (plan L1).
+- [ ] `todo` P1 Scenario page tabs (Overview, Last run, Runs) under one header, with the same layout for KovaaK's scenarios (plan L2).
+- [ ] `todo` P2 Progress trimmed: Skills leads with the profile and carry-over, Benchmarks says it comes from KovaaK's, Time folds its extra cards, and notes are ranked once (plan L4).
+- [ ] `todo` P3 Scenarios tabs become Browse, Workouts and Program, with Recent and Yours as Browse filters, and the rating in the Best score column (plan L6a).
+- [ ] `todo` P3 Help contents rail with a filter, icon-only sidebar on narrow windows, and editor sections that hold defaults start folded (plan L6b).
 - [ ] `todo` P2 One streak: the program streak and the all-runs streak still differ (Today shows the all-runs one).
 - [ ] `todo` P2 Settings save as you change them, instead of Save and Undo.
 - [ ] `todo` P3 Folder picker for the KovaaK's stats folder.
