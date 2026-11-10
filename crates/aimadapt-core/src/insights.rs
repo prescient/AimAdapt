@@ -18,6 +18,7 @@
 //! "Recent" means the last [`RECENT_RUNS`] runs of the scenario; "before" is the same
 //! number of runs before those, for comparison.
 
+use crate::knob::Knob;
 use std::collections::HashMap;
 
 use crate::db::{Db, DbError};
@@ -39,20 +40,6 @@ pub struct ScenarioSummary {
     pub latest_rating: Option<f64>,
     pub best_rating: Option<f64>,
     pub fastest: Option<f64>,
-}
-
-/// Whether a bigger value of this knob is harder.
-pub fn higher_is_harder(knob: &str) -> bool {
-    knob == "target_speed"
-}
-
-/// Formats a knob value with its unit.
-pub fn format_value(knob: &str, v: f64) -> String {
-    match knob {
-        "lifetime" | "kill_pace" => format!("{v:.2} s"),
-        "target_speed" => format!("{v:.1} °/s"),
-        _ => format!("{v:.3} m"),
-    }
 }
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
@@ -361,7 +348,7 @@ pub fn overview(db: &Db) -> Result<Vec<ScenarioSummary>, DbError> {
     let mut out: Vec<ScenarioSummary> = rows.collect::<Result<_, _>>()?;
     for s in &mut out {
         if let Some(last) = db.last_rating(&s.scenario)? {
-            let agg = if higher_is_harder(&last.knob) { "MAX" } else { "MIN" };
+            let agg = if Knob::from_id(&last.knob).higher_is_harder() { "MAX" } else { "MIN" };
             s.best_rating = db.conn().query_row(
                 &format!("SELECT {agg}(rating) FROM engine_runs WHERE base_scenario = ?1 AND knob = ?2"),
                 [&s.scenario, &last.knob],
@@ -541,12 +528,11 @@ pub fn scenario(db: &Db, base_scenario: &str) -> Result<Option<Insights>, DbErro
 pub const LAPSE: f64 = 0.04;
 
 fn knob_h(knob: &str, v: f64) -> f64 {
-    let l = v.max(1e-4).ln();
-    if higher_is_harder(knob) { l } else { -l }
+    Knob::from_id(knob).h(v)
 }
 
 fn knob_value(knob: &str, h: f64) -> f64 {
-    if higher_is_harder(knob) { h.exp() } else { (-h).exp() }
+    Knob::from_id(knob).value(h)
 }
 
 fn speed_curve(knob: &str, theta: f64, slope: f64, decided: &[&T]) -> Curve {
@@ -879,26 +865,42 @@ fn segment_stats(ts: &[&T]) -> Vec<Segment> {
 /// Plain-language takeaways, strongest first.
 fn notes(i: &Insights) -> Vec<Note> {
     let mut out = Vec::new();
-    let mut push = |title: String, body: String| out.push(Note { title, body });
+    for section in [
+        rating_notes,
+        switching_notes,
+        curve_notes,
+        direction_notes,
+        shot_notes,
+        entry_notes,
+        reaction_notes,
+        fitts_notes,
+        tracking_notes,
+        segment_notes,
+    ] {
+        section(i, &mut out);
+    }
+    out
+}
 
-    let rated: Vec<&RunPoint> = i.runs.iter().filter(|r| r.adaptive && r.rating.is_some()).collect();
-    if let (Some(knob), Some(last)) = (&i.knob, rated.last()) {
-        let fmt = |v: f64| format_value(knob, v);
+/// The rating, how it moved since the first one, and the best held.
+fn rating_notes(i: &Insights, out: &mut Vec<Note>) {
+    let mut push = |title: String, body: String| out.push(Note { title, body });
+    // Ratings in other knobs (a scenario can change what it rates) aren't comparable.
+    let rated: Vec<&RunPoint> =
+        i.runs.iter().filter(|r| r.adaptive && r.rating.is_some() && r.knob == i.knob).collect();
+    if let (Some(knob), Some(last)) = (i.knob.as_deref().map(Knob::from_id), rated.last()) {
+        let fmt = |v: f64| knob.format(v);
         let now = last.rating.unwrap_or(0.0);
-        let unit_word = match knob.as_str() {
-            "target_speed" => "tracking speed",
-            "lifetime" => "speed",
-            "kill_pace" => "kill pace",
-            _ => "size",
-        };
+        let unit_word = knob.word();
         let mut body = format!("You hit {:.0}% at {}.", 85.0, fmt(now));
         if rated.len() >= 2 {
             let first = rated[0].rating.unwrap_or(now);
-            let better = if higher_is_harder(knob) { now > first } else { now < first };
+            let better = knob.better(now, first);
             body = format!(
-                "{body} Your first rating was {} {} runs ago, so you're {} by {}.",
+                "{body} Your first rating was {} {} run{} ago, so you're {} by {}.",
                 fmt(first),
                 rated.len() - 1,
+                if rated.len() == 2 { "" } else { "s" },
                 if better { "better" } else { "behind" },
                 fmt((now - first).abs())
             );
@@ -906,7 +908,7 @@ fn notes(i: &Insights) -> Vec<Note> {
         push(format!("85% {unit_word}: {}", fmt(now)), body);
         // A lifetime includes your reaction time, which practice barely moves, so
         // the part you control improves by more than the rating shows.
-        if knob == "lifetime" {
+        if knob == Knob::Lifetime {
             let (react, whose) = match &i.reaction {
                 Some(r) => (r.median_ms / 1000.0, "your median reaction"),
                 None => (0.25, "a typical reaction"),
@@ -928,11 +930,7 @@ fn notes(i: &Insights) -> Vec<Note> {
                 push(format!("Of that, {react:.2} s is reaction"), body);
             }
         }
-        if let Some(f) = rated
-            .iter()
-            .filter_map(|r| r.fastest)
-            .reduce(|a, b| if higher_is_harder(knob) { a.max(b) } else { a.min(b) })
-        {
+        if let Some(f) = rated.iter().filter_map(|r| r.fastest).reduce(|a, b| if knob.better(b, a) { b } else { a }) {
             push(
                 format!("Best held: {}", fmt(f)),
                 "The hardest difficulty you've held the goal rate at for a whole run. Stretch runs give you the chance to beat it."
@@ -940,6 +938,11 @@ fn notes(i: &Insights) -> Vec<Note> {
             );
         }
     }
+}
+
+/// Kills a minute on switching scenarios.
+fn switching_notes(i: &Insights, out: &mut Vec<Note>) {
+    let mut push = |title: String, body: String| out.push(Note { title, body });
     if let Some(sw) = &i.switching
         && let Some(kpm) = sw.kills_per_min
     {
@@ -953,8 +956,13 @@ fn notes(i: &Insights) -> Vec<Note> {
         body += "Faster switching comes from both: getting to the next target sooner, and not slipping off the one you're killing.";
         push(format!("Switching: {kpm:.0} kills a minute"), body);
     }
+}
+
+/// How sharply success drops off with difficulty.
+fn curve_notes(i: &Insights, out: &mut Vec<Note>) {
+    let mut push = |title: String, body: String| out.push(Note { title, body });
     if let Some(c) = &i.curve {
-        let fmt = |v: f64| format_value(&c.knob, v);
+        let fmt = |v: f64| Knob::from_id(&c.knob).format(v);
         // Spread between reliable (95%) and coin-flip (50%) on a relative scale.
         let spread = (knob_h(&c.knob, c.at50) - knob_h(&c.knob, c.at95)).abs();
         let (title, advice) = if spread < 0.25 {
@@ -970,7 +978,11 @@ fn notes(i: &Insights) -> Vec<Note> {
         };
         push(title.into(), format!("Reliable (95%) at {}, coin-flip (50%) at {}. {advice}", fmt(c.at95), fmt(c.at50)));
     }
+}
 
+/// Weak and strong flick directions.
+fn direction_notes(i: &Insights, out: &mut Vec<Note>) {
+    let mut push = |title: String, body: String| out.push(Note { title, body });
     if i.directions.len() >= 4 {
         let worst = i.directions.iter().min_by(|a, b| a.success.total_cmp(&b.success)).unwrap();
         let best = i.directions.iter().max_by(|a, b| a.success.total_cmp(&b.success)).unwrap();
@@ -1011,7 +1023,11 @@ fn notes(i: &Insights) -> Vec<Note> {
             );
         }
     }
+}
 
+/// Where misses land: overshoot and a vertical bias.
+fn shot_notes(i: &Insights, out: &mut Vec<Note>) {
+    let mut push = |title: String, body: String| out.push(Note { title, body });
     if let Some(m) = &i.shots
         && let Some(share) = m.overshoot_share
     {
@@ -1045,7 +1061,11 @@ fn notes(i: &Insights) -> Vec<Note> {
             );
         }
     }
+}
 
+/// How often the crosshair enters a target before the kill.
+fn entry_notes(i: &Insights, out: &mut Vec<Note>) {
+    let mut push = |title: String, body: String| out.push(Note { title, body });
     if let Some(e) = i.entries_per_kill
         && e >= 1.5
     {
@@ -1056,7 +1076,11 @@ fn notes(i: &Insights) -> Vec<Note> {
             ),
         );
     }
+}
 
+/// Reaction time.
+fn reaction_notes(i: &Insights, out: &mut Vec<Note>) {
+    let mut push = |title: String, body: String| out.push(Note { title, body });
     if let Some(r) = &i.reaction {
         let change = r
             .median_before_ms
@@ -1070,7 +1094,11 @@ fn notes(i: &Insights) -> Vec<Note> {
             ),
         );
     }
+}
 
+/// Flick time against distance and size.
+fn fitts_notes(i: &Insights, out: &mut Vec<Note>) {
+    let mut push = |title: String, body: String| out.push(Note { title, body });
     if let Some(f) = &i.fitts {
         let change = f
             .throughput_before
@@ -1084,7 +1112,11 @@ fn notes(i: &Insights) -> Vec<Note> {
             ),
         );
     }
+}
 
+/// Tracking: error, lead and the stretches on target.
+fn tracking_notes(i: &Insights, out: &mut Vec<Note>) {
+    let mut push = |title: String, body: String| out.push(Note { title, body });
     if let Some(t) = &i.tracking {
         if t.lead_deg <= -0.3 {
             push(
@@ -1123,7 +1155,11 @@ fn notes(i: &Insights) -> Vec<Note> {
             );
         }
     }
+}
 
+/// Tracking segments over the run.
+fn segment_notes(i: &Insights, out: &mut Vec<Note>) {
+    let mut push = |title: String, body: String| out.push(Note { title, body });
     let seg: Vec<f64> = i.segments.iter().filter_map(|s| s.success).collect();
     if seg.len() >= 4 {
         let start = (seg[0] + seg[1]) / 2.0;
@@ -1148,7 +1184,6 @@ fn notes(i: &Insights) -> Vec<Note> {
             );
         }
     }
-    out
 }
 
 #[cfg(test)]

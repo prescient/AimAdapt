@@ -193,7 +193,7 @@ pub fn to_engine_run(info: &RunInfo) -> EngineRun {
         rep: info.rep.map(i64::from),
         reps: info.reps.map(i64::from),
         block: info.block.filter(|b| *b != aimadapt_sim::workout::Block::None).map(|b| b.id().into()),
-        trace: tel.trace_bytes(),
+        trace: aimadapt_core::telemetry::encode_trace(&tel.trace),
         frames: tel
             .frames
             .iter()
@@ -305,10 +305,13 @@ pub fn prior(db: &Db, scenario: &Scenario, now: chrono::NaiveDateTime) -> Option
     Some(Prior { theta: last.theta as f32, slope: last.slope as f32, sd: last.sd as f32, days, fastest, last_run })
 }
 
-/// The best rating so far for a scenario's knob (lowest lifetime or size, highest speed).
+/// The best rating so far on this version of a scenario, for its knob (lowest
+/// lifetime or size, highest speed).
 pub fn best_rating(db: &Db, scenario: &Scenario) -> Option<f64> {
     let knob = scenario.adaptive.resolve(scenario).knob;
-    db.best_trainer_rating(&scenario.name, knob_id(knob), knob.higher_is_harder()).ok().flatten()
+    db.best_trainer_rating(&scenario.name, &scenario.fingerprint(), aimadapt_core::knob::Knob::from_id(knob_id(knob)))
+        .ok()
+        .flatten()
 }
 
 pub fn save(db_path: &Path, info: &RunInfo) -> Result<(), String> {
@@ -445,6 +448,24 @@ mod tests {
         let mut reworded = scenario.clone();
         reworded.description = "Same drill, new words.".into();
         assert!(prior(&db, &reworded, later).is_some());
+    }
+
+    /// Bug: the results screen's "best" came from every version of a scenario,
+    /// while the rating itself starts over when the scenario changes, so the
+    /// first run of an edited scenario was measured against the old version.
+    #[test]
+    fn the_best_rating_is_this_versions() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("t.db");
+        let scenario = Scenario { name: "Timed Flicks".into(), ..Default::default() };
+        let settings = PlayerSettings::default();
+        let first = play(&scenario, true, None);
+        save(&path, &info(&scenario, &first, &settings, 1)).unwrap();
+        let db = Db::open(&path).unwrap();
+        assert!(best_rating(&db, &scenario).is_some());
+        let mut changed = scenario.clone();
+        changed.targets.radius *= 0.7;
+        assert_eq!(best_rating(&db, &changed), None);
     }
 
     #[test]

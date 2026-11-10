@@ -160,11 +160,13 @@ fn an_imported_scenario_plays_in_the_sim() {
 fn scenarios_the_trainer_cant_play_yet_say_why() {
     // The drifting pair move, which plays, but they nudge and dash, which doesn't yet.
     let moving = import(&path("Drifting Pair")).unwrap_err();
-    assert_eq!(moving, vec!["bots that use abilities (dashes and knockbacks)".to_string()]);
-    // Reflex maps play; this one's projectile weapon doesn't.
+    let text: Vec<String> = moving.iter().map(ToString::to_string).collect();
+    assert_eq!(text, vec!["bots that use abilities (dashes and knockbacks)".to_string()]);
+    assert!(!moving[0].beyond_plan, "abilities are in the plan");
+    // Reflex maps play; this one's projectile weapon doesn't, and isn't planned.
     let old = import(&path("Old Room")).unwrap_err();
-    assert!(!old.iter().any(|r| r.contains("Reflex")), "{old:?}");
-    assert!(old.iter().any(|r| r.starts_with("projectile weapon")), "{old:?}");
+    assert!(!old.iter().any(|r| r.to_string().contains("Reflex")), "{old:?}");
+    assert!(old.iter().any(|r| r.feature == "projectile weapon" && r.beyond_plan), "{old:?}");
 }
 
 /// Reads every `.sce` file in your KovaaK's folders. Run by hand with

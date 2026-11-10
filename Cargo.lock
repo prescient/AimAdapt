@@ -125,6 +125,7 @@ dependencies = [
 name = "aimadapt-core"
 version = "0.1.0"
 dependencies = [
+ "aimadapt-core",
  "chrono",
  "rusqlite",
  "serde",

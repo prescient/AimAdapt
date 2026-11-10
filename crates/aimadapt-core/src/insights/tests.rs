@@ -1,12 +1,13 @@
 //! Tests for Insights.
 
 use super::*;
+use crate::knob::Knob;
 
 /// Playtest: whole degrees per second were too coarse for changes.
 #[test]
 fn target_speed_and_its_changes_show_one_decimal() {
-    assert_eq!(format_value("target_speed", 48.46), "48.5 °/s");
-    assert_eq!(format_value("target_speed", (48.9f64 - 48.4).abs()), "0.5 °/s");
+    assert_eq!(Knob::TargetSpeed.format(48.46), "48.5 °/s");
+    assert_eq!(Knob::TargetSpeed.format((48.9f64 - 48.4).abs()), "0.5 °/s");
 }
 use crate::parse::RunFile;
 use crate::telemetry::{EngineRun, SampleRow, ShotRow, TargetRow};
@@ -104,6 +105,23 @@ fn clicking_run(rating: f64) -> EngineRun {
         shots,
         ..Default::default()
     }
+}
+
+/// Bug: the notes compared the latest rating with the first one of any knob, so
+/// after a scenario moved from lifetime to kill pace it said you were better
+/// "than your first rating" in a different measure.
+#[test]
+fn notes_compare_ratings_of_the_same_knob() {
+    let mut db = Db::open_in_memory().unwrap();
+    save(&mut db, 1, &clicking_run(1.2));
+    for (n, rating) in [(2, 0.8), (3, 0.7)] {
+        let mut run = clicking_run(rating);
+        run.knob = Some("kill_pace".into());
+        save(&mut db, n, &run);
+    }
+    let i = scenario(&db, "Timed Flicks").unwrap().unwrap();
+    let note = i.notes.iter().find(|n| n.title.starts_with("85% kill pace")).expect("the rating note");
+    assert!(note.body.contains("Your first rating was 0.80 s 1 run ago"), "{}", note.body);
 }
 
 /// Bug: the chart was meant to keep the most recent 400 flicks but kept the
@@ -292,4 +310,48 @@ fn tracking_insights_measure_lag_and_recovery() {
     let titles: Vec<&str> = i.notes.iter().map(|n| n.title.as_str()).collect();
     assert!(titles.contains(&"You trail the target"), "{titles:?}");
     assert!(titles.iter().any(|t| t.starts_with("Direction changes cost you 200 ms")), "{titles:?}");
+}
+
+/// How long a scenario's insights take to load with a long tracking history: 200
+/// runs of 60 s, 360,000 samples. Run by hand with
+/// `cargo test -p aimadapt-core --release -- --ignored insights_load_time`.
+#[test]
+#[ignore = "timing; run by hand"]
+fn insights_load_time() {
+    let mut db = Db::open_in_memory().unwrap();
+    for n in 0..200u32 {
+        let mut run = clicking_run(0.8);
+        run.samples = (0..1800)
+            .map(|k| crate::telemetry::SampleRow {
+                t: f64::from(k) / 30.0,
+                on_target: k % 3 != 0,
+                error_deg: 0.5,
+                target_speed_dps: 40.0,
+                lead_deg: 0.1,
+                since_change_s: 0.4,
+                engaged: true,
+            })
+            .collect();
+        let at = chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap().and_hms_opt(8, 0, 0).unwrap()
+            + chrono::Duration::minutes(i64::from(n) * 2);
+        let mut fields = BTreeMap::new();
+        fields.insert("Score".to_string(), "50".to_string());
+        fields.insert("Source".to_string(), "rustyaim".to_string());
+        let file_name = format!("rustyaim/timing/{n}");
+        let file = RunFile {
+            file_name: file_name.clone(),
+            scenario: run.base_scenario.clone(),
+            mode: "RustyAim".into(),
+            finished_at: at,
+            fields,
+            kills: vec![],
+            weapons: vec![],
+        };
+        db.save_trainer_run(&file, &run, at).unwrap();
+    }
+    let start = std::time::Instant::now();
+    let i = scenario(&db, "Timed Flicks").unwrap().unwrap();
+    let ms = start.elapsed().as_secs_f64() * 1000.0;
+    println!("insights for {} runs: {ms:.0} ms", i.runs.len());
+    assert!(ms < 1000.0, "{ms:.0} ms");
 }

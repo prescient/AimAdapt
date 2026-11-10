@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use rusqlite::OptionalExtension;
 
 use crate::db::{Db, DbError, MODE_IMPORTED, SOURCE_ENGINE};
+use crate::knob::Knob;
 
 /// How much a scenario has been played: runs, best score, last finish time.
 pub type Played = (i64, Option<f64>, Option<String>);
@@ -52,18 +53,17 @@ impl Db {
         )?)
     }
 
-    /// Best adaptive rating on a scenario with this knob: the highest when a higher
-    /// value is harder, otherwise the lowest.
-    pub fn best_trainer_rating(
-        &self,
-        scenario: &str,
-        knob: &str,
-        higher_is_harder: bool,
-    ) -> Result<Option<f64>, DbError> {
-        let agg = if higher_is_harder { "MAX" } else { "MIN" };
+    /// Best adaptive rating on this version of a scenario (its fingerprint, `hash`)
+    /// with this knob: the highest when a higher value is harder, otherwise the
+    /// lowest. Other versions rate on another scale, as the prior does.
+    pub fn best_trainer_rating(&self, scenario: &str, hash: &str, knob: Knob) -> Result<Option<f64>, DbError> {
+        let agg = if knob.higher_is_harder() { "MAX" } else { "MIN" };
         Ok(self.conn().query_row(
-            &format!("SELECT {agg}(rating) FROM engine_runs WHERE base_scenario = ?1 AND knob = ?2"),
-            [scenario, knob],
+            &format!(
+                "SELECT {agg}(e.rating) FROM engine_runs e JOIN runs r ON r.id = e.run_id
+                 WHERE e.base_scenario = ?1 AND r.scenario_hash = ?2 AND e.knob = ?3"
+            ),
+            [scenario, hash, knob.id()],
             |r| r.get(0),
         )?)
     }
@@ -100,7 +100,7 @@ mod tests {
         assert!(db.trainer_played().unwrap().is_empty());
         assert_eq!(db.imported_played("x").unwrap(), (0, None, None));
         assert_eq!(db.best_trainer_score("x", "h").unwrap(), None);
-        assert_eq!(db.best_trainer_rating("x", "lifetime", false).unwrap(), None);
+        assert_eq!(db.best_trainer_rating("x", "h", Knob::Lifetime).unwrap(), None);
         assert_eq!(db.latest_game_info().unwrap(), None);
     }
 }

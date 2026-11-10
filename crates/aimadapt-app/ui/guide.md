@@ -10,7 +10,7 @@ The app has four pages, in the sidebar: **Today** (what to play now), **Scenario
 2. **Choose a display mode.** Borderless full screen is the default. See [Settings](#help/settings) for exclusive full screen, a window, and a smaller play area on a big monitor.
 3. **Play today's workout.** Today shows today's day of the Core Week program. Press **Start** and the trainer opens over the app.
 4. **Expect a calibration run.** Your first adaptive run on each scenario finds your level as you play, so it gets harder and easier along the way. After that, every run plays at one difficulty.
-5. **Check your progress.** Progress shows your week and your skill profile. Each scenario's page on Scenarios breaks it down: where you miss, how fast you react, how steady your tracking is, with a replay of every run.
+5. **Check your progress.** Progress shows your week and your skill profile. Each scenario's page on Scenarios breaks it down: where you miss, how fast you react, how steady your tracking is, with replays of your recent runs.
 
 Train most days, keep sessions to about half an hour, and take Sunday off. Day-to-day changes under about 5% are mostly luck. Look at the trend over a week or two.
 
@@ -55,7 +55,7 @@ While the trainer is open, the page says so and the start buttons are disabled. 
   - **Reaction time:** how long before your crosshair starts moving toward a new target, as a histogram. It counts flicks of 3° or more, since on a tiny correction "started moving" hardly means anything. The Reaction column in the runs table counts the same flicks.
   - **Tracking:** time on target by target speed, how long you take to recover after the target changes direction, whether you trail or lead it, your unbroken stretches on target (half your time on target came in stretches at least this long), and centering (how far from the center you sit while on target).
   - **Within a run:** success in 10-second segments, which shows slow starts or fading late.
-- **Runs:** your latest 30 runs with their rating, hit rate, flick speed, reaction and time on target, the workout they were part of, and a **Replay** link to watch each one again (see [Replay](#help/replay)).
+- **Runs:** your latest 30 runs with their rating, hit rate, flick speed, reaction and time on target, the workout they were part of, and a **Replay** link to watch each one again (see [Replay](#help/replay)). **Show all** lists every run.
 
 **Reaction time and lifetime ratings.** A lifetime rating includes your reaction time, which practice barely changes. A note splits the rating into your reaction and the part you control. That part improves by more than the rating shows: going from 0.80 s to 0.62 s is 23% on the rating, but with a 0.22 s reaction the part you control fell 31%.
 
@@ -247,7 +247,7 @@ AimAdapt is learning to play your own KovaaK's scenarios (`.sce` files) in its t
 
 ## Replay {#replay}
 
-Every run in the trainer can be watched again. On Scenarios, pick a scenario and click **Replay** next to a run in its **Runs**. **Back to** returns to the scenario.
+Your recent runs in the trainer can be watched again. On Scenarios, pick a scenario and click **Replay** next to a run in its **Runs**. **Back to** returns to the scenario.
 
 The replay shows your own view: the crosshair stays in the middle and the view turns with it, as it did in the game, at the field of view you played at. The faint dots are a fixed grid, so you can see the view move even with no targets near.
 
@@ -258,6 +258,8 @@ The replay shows your own view: the crosshair stays in the middle and the view t
 - **Controls:** **Play**/**Pause**, the bar to jump anywhere, and **Speed** (0.25× to 2×). Keys: Space plays or pauses, ← and → skip a second (with Shift, five), `,` and `.` step one frame, Home and End go to the start and the end.
 
 A replay is redrawn from what the run recorded: your aim 240 times a second and the targets 60 times a second. It isn't a video, so it takes little space and records nothing outside the trainer. Runs from before replays were added, and KovaaK's runs, have none.
+
+**Which runs keep one:** each scenario keeps the replays of its latest 50 runs and of your best run (the first to reach your top score, or your best rating in adaptive mode; after a change to the scenario's settings, the best on each version). When an older run drops out of the 50, only its replay goes: its rating, score and insights stay.
 
 ## Settings {#settings}
 
@@ -317,6 +319,12 @@ Nothing is sent anywhere. Deleting one of your scenarios or workouts removes the
 ## What's new {#whats-new}
 
 **November 2026**
+- Fixed: a scenario's insights compared your rating with your first rating even when it was in another measure (after a scenario changed what it rates, say from target lifetime to kill pace).
+- Fixed: the trainer's results screen compared your rating with your best on any version of the scenario. Like the rating itself, the best now starts over when a scenario's settings change.
+- Fixed: when two runs tie for your best score, Progress now names the first one to reach it, as the history's PB marker does.
+- Fixed: your sensitivity history started a new period when KovaaK's recorded the same sensitivity in other units (cm/360 one run, a game's units the next).
+- Replays of new runs take half the space.
+- Each scenario now keeps the replays of its latest 50 runs and of your best run; older runs keep everything but the replay (see [Replay](#help/replay)). A scenario's **Runs** has **Show all** to list every run.
 - Fixed: holding fire shot slower than the scenario's fire rate when your frame rate was low (a 9 shots a second weapon fired 8.6 at 60 FPS, and fast full-auto weapons in KovaaK's scenarios fired once a frame at most). Fire rate is now the same at any frame rate, so hold-to-fire runs at a low frame rate score a little higher than before.
 - When the trainer stops with an error, the app now says why, and if AimAdapt can't open your history it opens and tells you instead of not starting. Crashes are written to `crash.log` (see [Your data](#help/data)).
 - Fixed: a settings file AimAdapt couldn't read was replaced with the defaults the next time you saved. It's now kept as `engine (unusable).toml`, and Settings tells you. A settings file whose active profile is missing now loads, on its first profile.

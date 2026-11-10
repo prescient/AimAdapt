@@ -11,6 +11,8 @@ serde = { workspace = true, optional = true }
 thiserror.workspace = true
 
 [dev-dependencies]
+# Its own integration tests read the database directly, as other crates' tests do.
+aimadapt-core = { workspace = true, features = ["test-util"] }
 tempfile.workspace = true
 
 [features]

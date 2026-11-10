@@ -235,14 +235,18 @@ The plan is in [TESTING.md](TESTING.md).
 
 From the code review of 9 November 2026. Fixed then: two scenario-file panics, fire rate depending on frame rate, trainer and startup errors that never reached the screen, a settings file overwritten with defaults, files written in place, the dev snapshot inside a local exe, same-second runs a day long, the Fitts chart's oldest points, no guard against a newer database, a run saved in two halves, the CLI hiding refusals, several UI bugs, shared dependency versions, lint caps, a pinned toolchain, tests that tie hand-kept lists together, and SQL kept in aimadapt-core (`Db::conn()` is private to it outside tests).
 
+### Done
+- [x] Split the longest functions: insights `notes` (273 lines) into one function per section, convert `convert` (240) and `world` (207) into named steps, sim `move_targets` (183) with its free movement apart. Each import of the local KovaaK's files and each scripted run of every scenario came out identical before and after. Caps in `clippy.toml` lowered from 280 lines and complexity 40 to 165 and 36.
+- [x] `Sim`'s jobs in their own files under `sim/` (firing, spawning, movement, rating, record; `sim.rs` went from 2,948 lines to about 820). The engine's `Game` keeps its session and its current run in their own structs, and a new run replaces the run state whole, so a per-run field can't be missed in the reset.
+- [x] One list of what an imported scenario can't play: every reason is a `Gap` with its feature, its detail and whether it's beyond the plan; the CLI counts refusals by feature too.
+- [x] Knob rules as one type in aimadapt-core (`knob::Knob`), checked against the sim's by a test.
+- [x] The replay aim trace has a format marker and takes 6 bytes a sample instead of 12 (about 86 KB a minute); older traces still play.
+- [x] The results screen's best rating is per scenario version, as the rating is.
+- [x] Old replays are pruned: each scenario keeps the trace and frames of its latest 50 trainer runs and of its best run on each version (top score, or best rating for the knob, first to reach it). Older runs keep their stats, targets, shots and samples. The Runs table has Show all, so every kept replay can be opened.
+- [x] Report bugs confirmed with tests and fixed: insights notes compared ratings across knobs, sensitivity periods split on the units at the same cm/360, tied best scores named different runs, and programs kept their own 4 AM day start. Insights reading every tracking sample was measured instead: 59 ms for 200 one-minute runs, so it stays (`insights_load_time`, run by hand).
+
 ### To do
-- [ ] `todo` P2 Split the longest functions and lower the caps in `clippy.toml` as they go: insights `notes` (273 lines), convert `convert` (240) and `world` (207), sim `move_targets` (183) and `spawn` (139), insights `scenario` (160), engine `parse_and_run` (144) and `rebuild_world` (122).
-- [ ] `todo` P2 Split `Sim` (targets, firing, adaptive, telemetry, spawning, world) and the engine's 22-field `Game` resource.
-- [ ] `todo` P2 One list of what an imported scenario can't play: `inventory.rs` and `convert.rs` each keep one, as free text.
-- [ ] `todo` P2 Knob rules as one type in aimadapt-core instead of string comparisons in insights, telemetry and programs.
-- [ ] `todo` P3 Version the replay aim trace format and prune old traces (about 173 KB per minute of play, kept forever).
-- [ ] `todo` P3 Check whether the best rating should be per scenario version (`record.rs` ignores the fingerprint; the prior and best score use it).
-- [ ] `todo` P3 Small report bugs to confirm with a test first: insights notes compare ratings across knobs, sensitivity periods split on the scale name at the same cm/360, tied best scores pick different runs in two places, programs use a fixed 4 AM day start while Time uses the setting, and insights read every tracking sample on each page load.
+- [ ] `todo` P3 Keep splitting long functions and lower the caps again: insights `scenario` (160 lines), engine `parse_and_run` (144), sim `spawn` (139), scenario `problems` (133), engine `rebuild_world` (122) and inventory `gaps` (120, complexity 35).
 
 ## 11. Later
 

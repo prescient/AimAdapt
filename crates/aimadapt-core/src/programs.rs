@@ -34,8 +34,9 @@ pub const SKILLS: [(&str, &str); 9] = [
     ("stability_switching", "switching"),
 ];
 
-const DAY_START_HOUR: i64 = 4;
 use crate::db::TIME_FORMAT;
+use crate::knob::Knob;
+use crate::training::TimeSettings;
 
 /// A day counts as done at this share of its planned runs.
 pub const DONE_SHARE: f64 = 0.75;
@@ -87,6 +88,8 @@ impl SkillProfile {
 struct Row {
     run_id: i64,
     finished: NaiveDateTime,
+    /// The training day it counts for (see [`TimeSettings::day_start_hour`]).
+    date: NaiveDate,
     duration_s: f64,
     scenario: String,
     knob: Option<String>,
@@ -99,17 +102,7 @@ struct Row {
     block: Option<String>,
 }
 
-/// "Better" on a log scale: positive is better for every knob.
-fn h(knob: &str, v: f64) -> f64 {
-    let l = v.max(1e-6).ln();
-    if knob == "target_speed" { l } else { -l }
-}
-
-fn training_day(t: NaiveDateTime) -> NaiveDate {
-    (t - Duration::hours(DAY_START_HOUR)).date()
-}
-
-fn load(db: &Db) -> Result<Vec<Row>, DbError> {
+fn load(db: &Db, time: &TimeSettings) -> Result<Vec<Row>, DbError> {
     let mut stmt = db.conn().prepare(
         "SELECT r.id, r.finished_at, COALESCE(r.duration_s, 60), e.base_scenario, e.knob, e.rating, e.adaptive,
                 e.skill, e.program, e.program_day, e.rep, e.block
@@ -122,6 +115,7 @@ fn load(db: &Db) -> Result<Vec<Row>, DbError> {
             Row {
                 run_id: r.get(0)?,
                 finished: NaiveDateTime::MIN,
+                date: NaiveDate::MIN,
                 duration_s: r.get(2)?,
                 scenario: r.get(3)?,
                 knob: r.get(4)?,
@@ -140,6 +134,7 @@ fn load(db: &Db) -> Result<Vec<Row>, DbError> {
         let (f, mut r) = row?;
         let Ok(t) = NaiveDateTime::parse_from_str(&f, TIME_FORMAT) else { continue };
         r.finished = t;
+        r.date = time.training_day(t);
         out.push(r);
     }
     Ok(out)
@@ -150,8 +145,8 @@ fn mean(v: &[f64]) -> Option<f64> {
 }
 
 /// The skill profile from runs finished up to `as_of` (all runs if `None`).
-pub fn skill_profile(db: &Db, as_of: Option<NaiveDateTime>) -> Result<SkillProfile, DbError> {
-    Ok(profile_from(&load(db)?, as_of))
+pub fn skill_profile(db: &Db, as_of: Option<NaiveDateTime>, time: &TimeSettings) -> Result<SkillProfile, DbError> {
+    Ok(profile_from(&load(db, time)?, as_of))
 }
 
 fn profile_from(rows: &[Row], as_of: Option<NaiveDateTime>) -> SkillProfile {
@@ -178,14 +173,14 @@ fn profile_from(rows: &[Row], as_of: Option<NaiveDateTime>) -> SkillProfile {
         *runs.entry(skill).or_default() += rs.len();
         // Baseline: the last three runs of the first day. Now: the last three runs
         // of the latest day. Each is after that day's first run has found the level.
-        let first_day = training_day(kept[0].finished);
-        let last_day = training_day(kept[kept.len() - 1].finished);
+        let first_day = kept[0].date;
+        let last_day = kept[kept.len() - 1].date;
         if first_day != last_day {
             let tail = |day: NaiveDate| {
                 let v: Vec<f64> = kept
                     .iter()
-                    .filter(|r| training_day(r.finished) == day)
-                    .map(|r| h(knob, r.rating.unwrap_or(1.0)))
+                    .filter(|r| r.date == day)
+                    .map(|r| Knob::from_id(knob).h(r.rating.unwrap_or(1.0)))
                     .collect();
                 mean(&v[v.len().saturating_sub(3)..])
             };
@@ -292,9 +287,10 @@ pub fn progress(
     program: &str,
     now: NaiveDateTime,
     plan: &[(String, u32)],
+    time: &TimeSettings,
 ) -> Result<ProgramProgress, DbError> {
-    let rows = load(db)?;
-    let today = training_day(now);
+    let rows = load(db, time)?;
+    let today = time.training_day(now);
     let week_start = today - Duration::days(i64::from(today.weekday().num_days_from_monday()));
     let planned = |day: &str| plan.iter().find(|(d, _)| d == day).map_or(0, |(_, n)| *n);
     let ids = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
@@ -303,7 +299,7 @@ pub fn progress(
     // Sessions: program runs grouped by training date.
     let mut by_date: BTreeMap<NaiveDate, Vec<&Row>> = BTreeMap::new();
     for r in &in_program {
-        by_date.entry(training_day(r.finished)).or_default().push(r);
+        by_date.entry(r.date).or_default().push(r);
     }
     let sessions = drill_sessions(&by_date);
 
@@ -328,7 +324,7 @@ pub fn progress(
         } else {
             "missed"
         };
-        let session_date = runs.iter().map(|r| training_day(r.finished)).max();
+        let session_date = runs.iter().map(|r| r.date).max();
         let focus_change = session_date.and_then(|d| focus_change(&sessions, &d.to_string(), id));
         week.push(DayStat {
             day: id.to_string(),
@@ -399,7 +395,9 @@ fn drill_sessions(by_date: &BTreeMap<NaiveDate, Vec<&Row>>) -> Vec<DrillSession>
             let knob = rs[0].knob.clone().unwrap_or_default();
             let first = rs[0].rating.unwrap_or(0.0);
             let last = rs[rs.len() - 1].rating.unwrap_or(0.0);
-            let carryover = last_seen.get(scenario).map(|prev| (h(&knob, first) - h(&knob, *prev)).exp() - 1.0);
+            let carryover = last_seen
+                .get(scenario)
+                .map(|prev| (Knob::from_id(&knob).h(first) - Knob::from_id(&knob).h(*prev)).exp() - 1.0);
             sessions.push((
                 rs[0].run_id,
                 DrillSession {
@@ -411,7 +409,7 @@ fn drill_sessions(by_date: &BTreeMap<NaiveDate, Vec<&Row>>) -> Vec<DrillSession>
                     reps: rs.len(),
                     first,
                     last,
-                    within: (h(&knob, last) - h(&knob, first)).exp() - 1.0,
+                    within: (Knob::from_id(&knob).h(last) - Knob::from_id(&knob).h(first)).exp() - 1.0,
                     carryover,
                 },
             ));
@@ -436,7 +434,7 @@ fn focus_change(sessions: &[DrillSession], date: &str, day: &str) -> Option<f64>
         .iter()
         .filter_map(|s| {
             let p = sessions.iter().find(|p| p.date == prev_date && p.scenario == s.scenario)?;
-            Some(h(&s.knob, s.last) - h(&s.knob, p.last))
+            Some(Knob::from_id(&s.knob).h(s.last) - Knob::from_id(&s.knob).h(p.last))
         })
         .collect();
     mean(&diffs).map(|x| x.exp() - 1.0)
@@ -448,7 +446,7 @@ fn day_runs<'a>(rows: &[&'a Row], week_start: NaiveDate, id: &str) -> Vec<&'a Ro
     rows.iter()
         .filter(|r| r.day.as_deref() == Some(id))
         .filter(|r| {
-            let d = training_day(r.finished);
+            let d = r.date;
             d >= week_start && d < end
         })
         .copied()
@@ -580,7 +578,7 @@ mod tests {
 
     #[test]
     fn skill_profile_counts_faster_lifetimes_and_higher_speeds_as_gains() {
-        let p = skill_profile(&db(), None).unwrap();
+        let p = skill_profile(&db(), None, &TimeSettings::default()).unwrap();
         let s = |id: &str| p.skills.iter().find(|s| s.skill == id).unwrap();
         // Timed Flicks: the first day ends around 0.72 s (last three runs), the
         // latest around 0.62 s (geometric means): 0.72/0.62 − 1.
@@ -600,7 +598,7 @@ mod tests {
 
     #[test]
     fn week_shows_progress_against_last_week() {
-        let p = progress(&db(), "Core Week", at(2026, 11, 10, 12, 0), &plan()).unwrap();
+        let p = progress(&db(), "Core Week", at(2026, 11, 10, 12, 0), &plan(), &TimeSettings::default()).unwrap();
         assert_eq!(p.week_start, "2026-11-09");
         let mon = &p.week[0];
         assert_eq!((mon.status.as_str(), mon.done, mon.planned), ("done", 5, 5));
@@ -617,7 +615,7 @@ mod tests {
 
     #[test]
     fn sessions_measure_reps_and_carryover() {
-        let p = progress(&db(), "Core Week", at(2026, 11, 10, 12, 0), &plan()).unwrap();
+        let p = progress(&db(), "Core Week", at(2026, 11, 10, 12, 0), &plan(), &TimeSettings::default()).unwrap();
         let s = p.sessions.iter().find(|s| s.date == "2026-11-09").unwrap();
         assert_eq!(s.reps, 5);
         // 0.68 s after rep 1, 0.60 s after rep 5.
@@ -645,7 +643,7 @@ mod tests {
             };
             save(&mut db, &r);
         }
-        let p = progress(&db, "Core Week", at(2026, 11, 12, 20, 0), &plan()).unwrap();
+        let p = progress(&db, "Core Week", at(2026, 11, 12, 20, 0), &plan(), &TimeSettings::default()).unwrap();
         assert_eq!(p.week[1].status, "done", "{:?}", p.week[1]);
         // 30 °/s at the end vs. 25 °/s last Tuesday.
         assert!((p.week[1].focus_change.unwrap() - (31.0 / 25.0 - 1.0)).abs() < 1e-6, "{:?}", p.week[1]);
@@ -655,7 +653,30 @@ mod tests {
 
     #[test]
     fn early_morning_counts_as_the_day_before() {
-        assert_eq!(training_day(at(2026, 11, 10, 3, 59)).to_string(), "2026-11-09");
-        assert_eq!(training_day(at(2026, 11, 10, 4, 0)).to_string(), "2026-11-10");
+        let time = TimeSettings::default();
+        assert_eq!(time.training_day(at(2026, 11, 10, 3, 59)).to_string(), "2026-11-09");
+        assert_eq!(time.training_day(at(2026, 11, 10, 4, 0)).to_string(), "2026-11-10");
+    }
+
+    /// Programs kept their own 4 AM day start while Time used the setting, so the
+    /// two could disagree on which day a run belongs to. (The app has no control
+    /// for the day start yet, so players couldn't hit this.)
+    #[test]
+    fn programs_use_the_day_start_setting() {
+        let mut db = Db::open_in_memory().unwrap();
+        let r = Run {
+            at: at(2026, 11, 10, 5, 0),
+            scenario: "Timed Flicks",
+            skill: "static_clicking",
+            knob: "lifetime",
+            rating: 0.7,
+            day: "tue",
+            rep: 1,
+            block: "main",
+        };
+        save(&mut db, &r);
+        let six = TimeSettings { day_start_hour: 6, ..TimeSettings::default() };
+        assert_eq!(load(&db, &six).unwrap()[0].date.to_string(), "2026-11-09");
+        assert_eq!(load(&db, &TimeSettings::default()).unwrap()[0].date.to_string(), "2026-11-10");
     }
 }

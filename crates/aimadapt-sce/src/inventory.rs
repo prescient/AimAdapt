@@ -17,11 +17,29 @@ const WEAPON_ABILITY: &str = crate::scenario::ABILITY_KINDS[0];
 /// Hitbox shapes the world sim will have.
 const SHAPES: &[&str] = &["Spheroid", "Cylindrical", "Cuboid"];
 
-/// One feature outside the plan, with what in the file uses it.
+/// Why the trainer can't play a scenario: a feature, with what in the file uses
+/// it. [`gaps`] lists the ones beyond the plan; the converter adds the ones the
+/// plan covers but the trainer doesn't play yet, and problems with the file, so
+/// every reason is one of these.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Gap {
     pub feature: &'static str,
     pub detail: String,
+    /// Outside the plan (BACKLOG section 9), so it won't play soon.
+    pub beyond_plan: bool,
+}
+
+impl Gap {
+    /// A reason the plan covers (or a problem with the file).
+    pub fn planned(feature: &'static str, detail: impl Into<String>) -> Gap {
+        Gap { feature, detail: detail.into(), beyond_plan: false }
+    }
+}
+
+impl std::fmt::Display for Gap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.detail.is_empty() { f.write_str(self.feature) } else { write!(f, "{} ({})", self.feature, self.detail) }
+    }
 }
 
 /// A scenario's gaps; empty means covered.
@@ -29,7 +47,7 @@ pub fn gaps(sce: &Sce) -> Vec<Gap> {
     let mut out: Vec<Gap> = Vec::new();
     let mut gap = |feature: &'static str, detail: String| {
         if !out.iter().any(|g| g.feature == feature && g.detail == detail) {
-            out.push(Gap { feature, detail });
+            out.push(Gap { feature, detail, beyond_plan: true });
         }
     };
     let top = &sce.settings.top;
@@ -254,7 +272,7 @@ Name=Zap
         assert_eq!(features(&with("Push.abilmelee;Dash.abilmov;;")), Vec::<&str>::new());
         assert_eq!(
             gaps(&Sce::parse(&with("Push.abilmelee;Zap.abilwep;;"))),
-            vec![Gap { feature: "weapon abilities", detail: "Zap".into() }]
+            vec![Gap { feature: "weapon abilities", detail: "Zap".into(), beyond_plan: true }]
         );
     }
 
@@ -265,7 +283,7 @@ Name=Zap
             "\"location\": \"0, 0, 0\"}, {\"type\": \"gameObject\", \"name\": \"Teleporter\"}, {\"type\": \"gameObject\", \"name\": \"Teleporter\"}, {\"type\": \"gameObject\", \"name\": \"Hurt\"}",
         );
         let g = gaps(&Sce::parse(&text));
-        assert_eq!(g, vec![Gap { feature: "map objects", detail: "Hurt, Teleporter ×2".into() }]);
+        assert_eq!(g, vec![Gap { feature: "map objects", detail: "Hurt, Teleporter ×2".into(), beyond_plan: true }]);
     }
 
     #[test]

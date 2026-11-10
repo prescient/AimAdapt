@@ -53,15 +53,22 @@ function insightKpis(d) {
   ].filter(Boolean);
 }
 
-// The latest 30 runs, each with a Replay link when it has one.
+// Rows the Runs table shows until Show all.
+const RUNS_SHOWN = 30;
+
+// The latest runs (all of them after Show all), each with a Replay link when it
+// still has one: the latest 50 and the best keep theirs.
 function insightRunsTable(d) {
+  const rows = [...d.runs].reverse();
+  const shown = ui.allRuns ? rows : rows.slice(0, RUNS_SHOWN);
   return `<div class="card-head"><h2>Runs</h2><span class="small muted">${d.runs.length} in all · newest first</span></div>
     <div class="table-wrap"><table><thead><tr><th>When</th><th>Mode</th><th class="r">85% rating</th><th class="r">Hit</th><th class="r">Score</th><th class="r">Flick speed</th><th class="r">Reaction</th><th class="r">On target</th><th>Played in</th><th></th></tr></thead><tbody>
-      ${[...d.runs].reverse().slice(0, 30).map((r) => `<tr><td style="white-space:nowrap">${esc(fmtShort(dt(r.finished_at)))}, ${esc(fmtTime(dt(r.finished_at)))}</td><td>${r.adaptive ? "Adaptive" : "Standard"}</td>
+      ${shown.map((r) => `<tr><td style="white-space:nowrap">${esc(fmtShort(dt(r.finished_at)))}, ${esc(fmtTime(dt(r.finished_at)))}</td><td>${r.adaptive ? "Adaptive" : "Standard"}</td>
         <td class="r num">${r.rating !== null ? esc(fmtKnob(r.knob, r.rating)) : "–"}</td><td class="r mono">${share(r.success_rate ?? r.accuracy)}</td><td class="r mono">${r.adaptive ? "–" : num(r.score)}</td>
         <td class="r mono">${r.throughput ? `${r.throughput.toFixed(1)}` : "–"}</td><td class="r mono">${ms(r.reaction_ms)}</td><td class="r mono">${share(r.on_target)}</td><td class="muted">${esc(r.workout ?? "")}</td>
         <td>${r.replay ? `<a href="#replay/${r.run_id}" title="Watch this run again">Replay</a>` : ""}</td></tr>`).join("")}
-    </tbody></table></div>`;
+    </tbody></table></div>
+    ${rows.length > RUNS_SHOWN ? `<button type="button" class="link-btn" data-action="all-runs">${ui.allRuns ? `Show the latest ${RUNS_SHOWN}` : `Show all ${rows.length} runs`}</button>` : ""}`;
 }
 
 // ---------- charts ----------

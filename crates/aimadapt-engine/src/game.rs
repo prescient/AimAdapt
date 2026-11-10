@@ -93,25 +93,20 @@ pub fn run(opts: PlayOptions) -> AppExit {
         ..default()
     };
     let mut game = Game {
-        steps: opts.steps,
-        index: 0,
+        session: Session {
+            steps: opts.steps,
+            index: 0,
+            seed: opts.seed,
+            workout: opts.workout,
+            program: opts.program,
+            settings: opts.settings,
+            db_path: opts.db_path,
+            done: Vec::new(),
+        },
         sim: Sim::new(Scenario::default(), opts.seed),
-        seed: opts.seed,
-        workout: opts.workout,
-        program: opts.program,
-        settings: opts.settings,
-        db_path: opts.db_path,
         look: Look::default(),
-        started_at: None,
-        frames: 0,
-        run_time: 0.0,
+        run: Run::default(),
         fps: 0.0,
-        best: None,
-        saved: None,
-        result: None,
-        flashes: HashMap::new(),
-        banner: None,
-        done: Vec::new(),
         world_dirty: true,
         display_note: None,
         video_mode_set: false,
@@ -157,23 +152,27 @@ struct Done {
     line: String,
 }
 
-#[derive(Resource)]
-struct Game {
+/// What this trainer window plays: the steps (one scenario, or a workout's runs),
+/// with the settings and database they use.
+struct Session {
     steps: Vec<PlayStep>,
     index: usize,
-    sim: Sim,
     seed: u64,
     workout: Option<String>,
     program: Option<(String, String)>,
     settings: PlayerSettings,
     db_path: Option<PathBuf>,
-    look: Look,
+    /// A line for each finished step, for the workout summary.
+    done: Vec<Done>,
+}
+
+/// Everything about one run that starts over with the next.
+#[derive(Default)]
+struct Run {
     /// Wall-clock start of the timed part of the run.
     started_at: Option<NaiveDateTime>,
     frames: u64,
     run_time: f32,
-    /// Smoothed frames per second.
-    fps: f32,
     /// Best earlier score (standard) or level (adaptive) for this scenario.
     best: Option<f64>,
     /// What happened when the finished run was saved.
@@ -185,7 +184,17 @@ struct Game {
     flashes: HashMap<u64, f32>,
     /// A message shown mid-screen for a moment (breakthroughs), and seconds left.
     banner: Option<(String, f32)>,
-    done: Vec<Done>,
+}
+
+#[derive(Resource)]
+struct Game {
+    session: Session,
+    sim: Sim,
+    look: Look,
+    /// The run being played. Replaced whole when the next step begins.
+    run: Run,
+    /// Smoothed frames per second.
+    fps: f32,
     world_dirty: bool,
     display_note: Option<String>,
     video_mode_set: bool,
@@ -203,39 +212,33 @@ struct Smoke {
 
 impl Game {
     fn step_info(&self) -> &PlayStep {
-        &self.steps[self.index]
+        &self.session.steps[self.session.index]
     }
 
     fn is_last(&self) -> bool {
-        self.index + 1 >= self.steps.len()
+        self.session.index + 1 >= self.session.steps.len()
     }
 
     /// Starts step `i` (or restarts the current one), reading the last adaptive
     /// level and the best so far from the database.
     fn begin_step(&mut self, i: usize) {
-        let changed = *self.sim.scenario() != self.steps[i].scenario;
-        self.index = i;
-        self.seed = self.seed.wrapping_add(1);
-        let step = self.steps[i].clone();
-        let db = self.db_path.as_deref().and_then(|p| aimadapt_core::Db::open(p).ok());
+        let changed = *self.sim.scenario() != self.session.steps[i].scenario;
+        self.session.index = i;
+        self.session.seed = self.session.seed.wrapping_add(1);
+        let step = self.session.steps[i].clone();
+        let db = self.session.db_path.as_deref().and_then(|p| aimadapt_core::Db::open(p).ok());
         let s = step.scenario.clone();
+        self.run = Run::default();
         self.sim = if step.adaptive {
             let now = Local::now().naive_local();
             let prior = db.as_ref().and_then(|db| record::prior(db, &s, now));
-            self.best = db.as_ref().and_then(|db| record::best_rating(db, &s));
-            Sim::adaptive(s, self.seed, prior, self.settings.challenge)
+            self.run.best = db.as_ref().and_then(|db| record::best_rating(db, &s));
+            Sim::adaptive(s, self.session.seed, prior, self.session.settings.challenge)
         } else {
-            self.best = db.as_ref().and_then(|db| record::best_score(db, &s));
-            Sim::new(s, self.seed)
+            self.run.best = db.as_ref().and_then(|db| record::best_score(db, &s));
+            Sim::new(s, self.session.seed)
         };
         self.look = Look::default();
-        self.started_at = None;
-        self.frames = 0;
-        self.run_time = 0.0;
-        self.saved = None;
-        self.result = None;
-        self.flashes.clear();
-        self.banner = None;
         if changed {
             self.world_dirty = true;
         }
@@ -269,7 +272,7 @@ impl Game {
                 r.stats.accuracy().map_or("-".into(), |a| format!("{:.0}%", a * 100.0))
             ),
         };
-        self.done.push(Done { name: self.sim.scenario().name.clone(), line });
+        self.session.done.push(Done { name: self.sim.scenario().name.clone(), line });
     }
 }
 
@@ -412,7 +415,7 @@ fn setup_cameras(mut commands: Commands, game: Res<Game>) {
         Camera3d::default(),
         Camera { order: 0, ..default() },
         IsDefaultUiCamera,
-        Projection::from(PerspectiveProjection { fov: game.settings.vertical_fov(), near: 0.05, ..default() }),
+        Projection::from(PerspectiveProjection { fov: game.session.settings.vertical_fov(), near: 0.05, ..default() }),
         Transform::IDENTITY,
     ));
 }
@@ -551,12 +554,12 @@ fn exclusive_video_mode(
     mut window: Single<&mut Window>,
     monitors: Query<&Monitor, With<PrimaryMonitor>>,
 ) {
-    if game.video_mode_set || game.settings.display.mode != DisplayMode::Exclusive {
+    if game.video_mode_set || game.session.settings.display.mode != DisplayMode::Exclusive {
         return;
     }
     let Some(monitor) = monitors.iter().next() else { return };
     game.video_mode_set = true;
-    let d = &game.settings.display;
+    let d = &game.session.settings.display;
     let want = d.resolution.unwrap_or([monitor.physical_width, monitor.physical_height]);
     let fits: Vec<&VideoMode> =
         monitor.video_modes.iter().filter(|m| m.physical_size.x == want[0] && m.physical_size.y == want[1]).collect();
@@ -578,7 +581,7 @@ fn exclusive_video_mode(
 /// Keeps the 3D view (and the HUD with it) in the centered play area, if one is set.
 fn play_area(game: Res<Game>, window: Single<&Window>, mut camera: Single<&mut Camera, With<PlayerCamera>>) {
     let size = [window.physical_width(), window.physical_height()];
-    let viewport = game.settings.display.play_area_in(size).map(|(pos, area)| Viewport {
+    let viewport = game.session.settings.display.play_area_in(size).map(|(pos, area)| Viewport {
         physical_position: UVec2::new(pos[0], pos[1]),
         physical_size: UVec2::new(area[0], area[1]),
         ..default()
@@ -647,7 +650,7 @@ fn setup_hud(mut commands: Commands, game: Res<Game>) {
         })
         .with_child((CenterText, Text::new(""), text(64.0), TextLayout::justify(Justify::Center), shadow));
 
-    spawn_crosshair(&mut commands, &game.settings);
+    spawn_crosshair(&mut commands, &game.session.settings);
 
     // Results, hidden until the run ends.
     commands
@@ -712,12 +715,12 @@ fn keys(keys: Res<ButtonInput<KeyCode>>, mut game: ResMut<Game>, mut exit: Messa
         exit.write(AppExit::Success);
     }
     let finished = game.sim.phase() == Phase::Finished;
-    let i = game.index;
+    let i = game.session.index;
     if keys.just_pressed(KeyCode::KeyR) {
         game.begin_step(i);
     } else if finished && keys.just_pressed(KeyCode::Space) {
         if game.is_last() {
-            if game.steps.len() == 1 {
+            if game.session.steps.len() == 1 {
                 game.begin_step(i);
             } else {
                 exit.write(AppExit::Success);
@@ -727,7 +730,7 @@ fn keys(keys: Res<ButtonInput<KeyCode>>, mut game: ResMut<Game>, mut exit: Messa
         }
     }
     if keys.just_pressed(KeyCode::F2) {
-        game.settings.show_fps = !game.settings.show_fps;
+        game.session.settings.show_fps = !game.session.settings.show_fps;
     }
 }
 
@@ -803,7 +806,7 @@ fn look(
     mut camera: Single<&mut Transform, With<PlayerCamera>>,
 ) {
     if cursor.grab_mode == CursorGrabMode::Locked && game.sim.phase() != Phase::Finished {
-        let k = f64::from(game.settings.degrees_per_count());
+        let k = f64::from(game.session.settings.degrees_per_count());
         let d = motion.delta;
         game.look.yaw = (game.look.yaw + f64::from(d.x) * k).rem_euclid(360.0);
         if game.look.yaw > 180.0 {
@@ -842,68 +845,68 @@ fn step(
     let events = game.sim.step(dt, input);
     let now = game.sim.phase();
     if was == Phase::Countdown && now != Phase::Countdown {
-        game.started_at = Some(Local::now().naive_local());
+        game.run.started_at = Some(Local::now().naive_local());
     }
     if now == Phase::Running {
-        game.frames += 1;
-        game.run_time += dt;
+        game.run.frames += 1;
+        game.run.run_time += dt;
     }
     for e in events {
         match e {
             Event::Hit { id } => {
-                game.flashes.insert(id, 0.06);
+                game.run.flashes.insert(id, 0.06);
             }
             Event::Breakthrough { value } => {
                 if let Some((knob, _, _)) = game.sim.rating() {
-                    game.banner = Some((format!("Breakthrough: held it at {}!", fmt_value(knob, value)), 3.0));
+                    game.run.banner = Some((format!("Breakthrough: held it at {}!", fmt_value(knob, value)), 3.0));
                 }
             }
             Event::Finished => {
                 let size = camera
                     .physical_viewport_size()
                     .unwrap_or(UVec2::new(window.physical_width(), window.physical_height()));
-                game.result = Some(game.sim.result());
+                game.run.result = Some(game.sim.result());
                 save_run(&mut game, format!("{}x{}", size.x, size.y));
                 game.record_done();
             }
             _ => {}
         }
     }
-    for f in game.flashes.values_mut() {
+    for f in game.run.flashes.values_mut() {
         *f -= dt;
     }
-    if let Some((_, left)) = &mut game.banner {
+    if let Some((_, left)) = &mut game.run.banner {
         *left -= dt;
         if *left <= 0.0 {
-            game.banner = None;
+            game.run.banner = None;
         }
     }
-    game.flashes.retain(|_, f| *f > 0.0);
+    game.run.flashes.retain(|_, f| *f > 0.0);
 }
 
 fn save_run(game: &mut Game, resolution: String) {
-    let Some(path) = game.db_path.clone() else {
-        game.saved = Some(Err("not saved (no database)".into()));
+    let Some(path) = game.session.db_path.clone() else {
+        game.run.saved = Some(Err("not saved (no database)".into()));
         return;
     };
     let finished_at = Local::now().naive_local();
-    let result = game.result.clone().unwrap_or_else(|| game.sim.result());
-    let avg_fps = (game.run_time > 0.0).then(|| game.frames as f32 / game.run_time);
+    let result = game.run.result.clone().unwrap_or_else(|| game.sim.result());
+    let avg_fps = (game.run.run_time > 0.0).then(|| game.run.frames as f32 / game.run.run_time);
     let info = RunInfo {
         scenario: game.sim.scenario(),
-        settings: &game.settings,
+        settings: &game.session.settings,
         result: &result,
-        started_at: game.started_at.unwrap_or(finished_at),
+        started_at: game.run.started_at.unwrap_or(finished_at),
         finished_at,
         avg_fps,
         resolution: Some(resolution),
-        workout: game.workout.clone(),
-        program: game.program.clone(),
+        workout: game.session.workout.clone(),
+        program: game.session.program.clone(),
         rep: Some(game.step_info().rep),
         reps: Some(game.step_info().reps),
         block: Some(game.step_info().block),
     };
-    game.saved = Some(record::save(&path, &info));
+    game.run.saved = Some(record::save(&path, &info));
 }
 
 fn sync_targets(
@@ -928,7 +931,8 @@ fn sync_targets(
         tf.translation = t.pos;
         tf.scale = Vec3::splat(t.radius / body_of(&assets, t).1);
         if let Some(mut m) = materials.get_mut(&view.material) {
-            m.base_color = target_color(base_color(&assets, t), t.health_fraction(), game.flashes.contains_key(&t.id));
+            m.base_color =
+                target_color(base_color(&assets, t), t.health_fraction(), game.run.flashes.contains_key(&t.id));
         }
     }
     for t in game.sim.targets() {
@@ -1097,16 +1101,16 @@ fn update_hud(
     }
     texts.p3().0 = match sim.phase() {
         Phase::Countdown => format!("{}", sim.countdown_left().ceil() as u32),
-        _ => game.banner.as_ref().map(|b| b.0.clone()).unwrap_or_default(),
+        _ => game.run.banner.as_ref().map(|b| b.0.clone()).unwrap_or_default(),
     };
-    texts.p4().0 = if game.settings.show_fps { format!("{:.0} fps", game.fps) } else { String::new() };
+    texts.p4().0 = if game.session.settings.show_fps { format!("{:.0} fps", game.fps) } else { String::new() };
     let step = game.step_info();
     let mut line = format!("{} | {}", sim.scenario().name, mode_name(step.adaptive));
     if let Some(l) = &step.label {
         line = format!("{line} | {l}");
     }
-    if let Some(w) = &game.workout {
-        line = format!("{w} | {} of {} | {line}", game.index + 1, game.steps.len());
+    if let Some(w) = &game.session.workout {
+        line = format!("{w} | {} of {} | {line}", game.session.index + 1, game.session.steps.len());
     }
     texts.p5().0 = line;
 }
@@ -1118,7 +1122,7 @@ fn update_overlay(
 ) {
     let finished = game.sim.phase() == Phase::Finished;
     **overlay = if finished { Visibility::Visible } else { Visibility::Hidden };
-    let Some(r) = game.result.as_ref().filter(|_| finished) else {
+    let Some(r) = game.run.result.as_ref().filter(|_| finished) else {
         return;
     };
     let st = &r.stats;
@@ -1128,7 +1132,7 @@ fn update_overlay(
         Some(a) => {
             let k = a.knob;
             let better = |x: f32, y: f64| if k.higher_is_harder() { f64::from(x) > y } else { f64::from(x) < y };
-            let best = match game.best {
+            let best = match game.run.best {
                 None => "First adaptive run on this scenario".to_string(),
                 Some(b) if better(a.value, b) => format!("Your best yet! (was {})", fmt_value(k, b as f32)),
                 Some(b) => format!("Best {}", fmt_value(k, b as f32)),
@@ -1165,7 +1169,7 @@ fn update_overlay(
         }
         None => {
             let score = f64::from(r.score);
-            let best = match game.best {
+            let best = match game.run.best {
                 None => "First run of this scenario".to_string(),
                 Some(b) if score > b => format!("New best! (was {b:.0})"),
                 Some(b) => format!("Best {b:.0}"),
@@ -1173,23 +1177,23 @@ fn update_overlay(
             format!("Score {:.0}\n{best}", r.score)
         }
     };
-    let saved = match &game.saved {
+    let saved = match &game.run.saved {
         Some(Ok(())) => "Saved to your history".to_string(),
         Some(Err(e)) => format!("Couldn't save: {e}"),
         None => String::new(),
     };
     let note = game.display_note.as_deref().map(|n| format!("\n{n}")).unwrap_or_default();
-    let keys = if game.steps.len() == 1 {
+    let keys = if game.session.steps.len() == 1 {
         "Space: play again    R: restart    Esc: quit".to_string()
     } else if game.is_last() {
-        let summary: Vec<String> = game.done.iter().map(|d| format!("{}: {}", d.name, d.line)).collect();
+        let summary: Vec<String> = game.session.done.iter().map(|d| format!("{}: {}", d.name, d.line)).collect();
         format!("Workout complete\n{}\n\nSpace or Esc: finish    R: replay this one", summary.join("\n"))
     } else {
-        let next = &game.steps[game.index + 1];
+        let next = &game.session.steps[game.session.index + 1];
         format!(
             "Next ({} of {}): {} | {}\n\nSpace: continue    R: replay this one    Esc: end workout",
-            game.index + 2,
-            game.steps.len(),
+            game.session.index + 2,
+            game.session.steps.len(),
             next.scenario.name,
             mode_name(next.adaptive)
         )
@@ -1208,7 +1212,7 @@ fn smoke_capture(mut commands: Commands, time: Res<Time>, mut game: ResMut<Game>
     use bevy::render::view::screenshot::{Screenshot, save_to_disk};
     let elapsed = game.sim.elapsed();
     let finished = game.sim.phase() == Phase::Finished;
-    let (i, last) = (game.index, game.is_last());
+    let (i, last) = (game.session.index, game.is_last());
     let Some(smoke) = game.smoke.as_mut() else { return };
     let suffix = if i == 0 { String::new() } else { format!("-{}", i + 1) };
     let mut shot = |name: &str, smoke: &mut Smoke| {

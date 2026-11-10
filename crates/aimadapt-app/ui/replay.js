@@ -37,7 +37,7 @@ function replayPage(arg) {
   if (rp.error) return `<div class="page">${title("Replay")}<div class="card error">${esc(rp.error)}</div></div>`;
   if (rp.data === undefined) return `<div class="empty-state">Loading replay…</div>`;
   if (rp.data === null) {
-    return `<div class="page">${title("Replay")}<div class="card note-body">This run has no replay. Replays are recorded for runs played in AimAdapt's trainer from version 0.1.0 on; older runs and KovaaK's runs don't have one.</div></div>`;
+    return `<div class="page">${title("Replay")}<div class="card note-body">This run has no replay. Each scenario keeps the replays of its latest 50 runs in AimAdapt's trainer and of your best one; older runs keep their stats without one. Runs from before version 0.1.0 and KovaaK's runs have none.</div></div>`;
   }
   const d = rp.data;
   const base = d.scenario.replace(/ \(Adaptive\)$/, "");

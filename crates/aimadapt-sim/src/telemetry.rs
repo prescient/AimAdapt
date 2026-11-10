@@ -125,13 +125,6 @@ pub struct Telemetry {
     pub frames: Vec<TargetFrame>,
 }
 
-impl Telemetry {
-    /// The aim trace packed as little-endian f32 triples.
-    pub fn trace_bytes(&self) -> Vec<u8> {
-        self.trace.iter().flatten().flat_map(|v| v.to_le_bytes()).collect()
-    }
-}
-
 /// Right and up unit vectors of a view looking along `d`.
 pub fn basis(d: Vec3) -> (Vec3, Vec3) {
     let right = d.cross(Vec3::Y).normalize_or(Vec3::X);
@@ -168,11 +161,5 @@ mod tests {
         let view = from_angles(-30.0, 20.0);
         let (x, _) = screen_offset(view, from_angles(-40.0, 20.0));
         assert!(x < -8.0, "{x}");
-    }
-
-    #[test]
-    fn trace_packs_three_floats_per_sample() {
-        let t = Telemetry { trace: vec![[0.0, 1.0, 2.0], [0.1, 1.5, 2.5]], ..Default::default() };
-        assert_eq!(t.trace_bytes().len(), 24);
     }
 }

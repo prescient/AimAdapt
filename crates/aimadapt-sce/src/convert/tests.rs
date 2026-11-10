@@ -16,7 +16,7 @@ fn a_team_above_32_has_no_bit() {
 fn a_zero_map_scale_is_refused() {
     let text = VOLUME_SCE.replace("MapScale=1.0", "MapScale=0");
     let err = convert(&Sce::parse(&text), "x.sce", "0").unwrap_err();
-    assert!(err.iter().any(|r| r.contains("map scale")), "{err:?}");
+    assert!(err.iter().any(|r| r.feature == "a map scale of 0 or below"), "{err:?}");
 }
 
 #[test]
@@ -169,7 +169,7 @@ fn a_brushs_own_triangles_are_scaled_like_a_cube() {
 }
 
 fn reasons(text: &str) -> Vec<String> {
-    convert(&Sce::parse(text), "box.sce", "0").err().unwrap_or_default()
+    convert(&Sce::parse(text), "box.sce", "0").err().unwrap_or_default().iter().map(ToString::to_string).collect()
 }
 
 /// Bug: "4BK - SYV Easy Slow Regen Edit" played as a still ball. Its bot has no

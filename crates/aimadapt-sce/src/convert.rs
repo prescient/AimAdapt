@@ -21,6 +21,7 @@ use aimadapt_sim::scenario::{Category, Scoring, Shape, Skill, Timing, Trigger, W
 use aimadapt_sim::world::{AccuracyMult, PlayerBlock, World, WorldBox, WorldKind, WorldMesh, WorldSpawn};
 use aimadapt_sim::{Scenario, Vec3};
 
+use crate::inventory::Gap;
 use crate::map::{Map, MapFormat, Placement, Solid, Teams};
 use crate::scenario::{BotChoice, Sce};
 use crate::settings::Section;
@@ -42,8 +43,9 @@ pub struct Imported {
 
 /// Reads and converts a `.sce` file. The scenario's world records the file name
 /// and a hash of its bytes.
-pub fn import(path: &Path) -> Result<Imported, Vec<String>> {
-    let bytes = std::fs::read(path).map_err(|e| vec![format!("couldn't read {}: {e}", path.display())])?;
+pub fn import(path: &Path) -> Result<Imported, Vec<Gap>> {
+    let bytes = std::fs::read(path)
+        .map_err(|e| vec![Gap::planned("an unreadable file", format!("{}: {e}", path.display()))])?;
     let sce = Sce::parse(&crate::scenario::decode(&bytes));
     let source = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     convert(&sce, &source, &hash(&bytes))
@@ -90,11 +92,8 @@ fn team_can_use(teams: Teams, team: u32) -> bool {
     }
 }
 
-pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, Vec<String>> {
-    let mut reasons: Vec<String> = crate::inventory::gaps(sce)
-        .into_iter()
-        .map(|g| if g.detail.is_empty() { g.feature.to_string() } else { format!("{} ({})", g.feature, g.detail) })
-        .collect();
+pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, Vec<Gap>> {
+    let mut reasons: Vec<Gap> = crate::inventory::gaps(sce);
     let mut notes = Vec::new();
     let top = &sce.settings.top;
     let r = sce.resolve();
@@ -104,73 +103,17 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
     let player_team = top.f32_or("PlayerTeam", 1.0).max(1.0) as u32;
     let other_team = if player_team == 1 { 2 } else { 1 };
 
-    // Rules that decide the score or when a run ends, not played yet: Air Pure ends
-    // when its bot runs out of lives and scores the time left.
-    if top.f32_or("BotMaxLives", 0.0) > 0.0 && !top.is("InvincibleBots") {
-        push_once(&mut reasons, "bots with a set number of lives (the run ends when they run out)");
-    }
-    if top.f32_or("ScorePerTime", 0.0) != 0.0 {
-        push_once(&mut reasons, "a score for time");
-    }
-    for (key, what) in
-        [("ScoreMultDamageEfficiency", "damage efficiency"), ("ScoreMultKillEfficiency", "kill efficiency")]
-    {
-        if top.is(key) {
-            reasons.push(format!("a score multiplied by {what}"));
-        }
-    }
+    rule_reasons(top, &mut reasons);
 
-    // The bots. Each bot that looks or moves differently is a kind of its own; each
-    // entry of `AddedBots` is a slot, filled by one of its kinds by weight, or in turn
-    // from a rotation that isn't randomized (slots naming the same one share turns).
-    let mut kinds: Vec<(&Section, Option<Motion>)> = Vec::new();
-    let mut slots: Vec<Vec<(u32, f32)>> = Vec::new();
-    let mut rotations: Vec<Option<u32>> = Vec::new();
-    let mut rotation_names: Vec<String> = Vec::new();
-    let mut teams = Vec::new();
-    for slot in &r.bots {
-        // Team 0 (some Pasu files) plays as the player's opponents.
-        let team = slot.team.and_then(|t| t.trim().parse::<u32>().ok()).filter(|t| *t > 0);
-        teams.push(team.unwrap_or(other_team));
-        let mut choices = Vec::new();
-        for c in &slot.choices {
-            let Some(ch) = c.character else { continue };
-            if !c.abilities.is_empty() {
-                // Dashes, and the knockbacks helper bots use to push targets around
-                // (Raw Control, Controlsphere): without them these play too easy.
-                push_once(&mut reasons, "bots that use abilities (dashes and knockbacks)");
-            }
-            let m = moves(c, ch).then(|| bot_motion(c, ch));
-            let k = match kinds.iter().position(|(k, km)| same_kind(k, ch) && *km == m) {
-                Some(k) => k,
-                None => {
-                    kinds.push((ch, m));
-                    kinds.len() - 1
-                }
-            };
-            choices.push((k as u32, c.weight.max(0.0)));
-        }
-        if !choices.is_empty() {
-            let in_turn = (slot.in_order && choices.len() > 1).then(|| {
-                let name = slot.reference.trim().to_ascii_lowercase();
-                let at = rotation_names.iter().position(|n| *n == name).unwrap_or_else(|| {
-                    rotation_names.push(name);
-                    rotation_names.len() - 1
-                });
-                at as u32
-            });
-            rotations.push(in_turn);
-            slots.push(choices);
-        }
-    }
+    let Bots { kinds, slots, rotations, teams } = bots(&r, other_team, &mut reasons);
     let kind = kinds.first().map(|(ch, _)| *ch);
     let motion = kinds.first().and_then(|(_, m)| m.clone());
     let moving = kinds.iter().any(|(_, m)| m.is_some());
     if r.bots.is_empty() {
-        reasons.push("no bots".into());
+        reasons.push(Gap::planned("no bots", ""));
     }
     if r.bots.len() > 50 {
-        reasons.push(format!("{} bots at once (the trainer allows 50)", r.bots.len()));
+        reasons.push(Gap::planned("too many bots", format!("{} at once; the trainer allows 50", r.bots.len())));
     }
     let shape = kind.map(|k| hitbox(k, &mut reasons, &mut notes));
     // The other kinds' hitboxes, checked the same way.
@@ -180,14 +123,14 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
     let mut seen = std::collections::HashSet::new();
     notes.retain(|n| seen.insert(n.clone()));
     if !top.f32("MapScale").is_none_or(|s| s > 0.0) {
-        reasons.push("a map scale of 0 or below".into());
+        reasons.push(Gap::planned("a map scale of 0 or below", ""));
     }
 
     let (Some(map), Some(bot), Some(weapon), Some((shape, radius, height)), true) =
         (map, kind, r.weapon, shape, reasons.is_empty())
     else {
         if reasons.is_empty() {
-            reasons.push("no player, weapon or bot to play with".into());
+            reasons.push(Gap::planned("no player, weapon or bot to play with", ""));
         }
         return Err(reasons);
     };
@@ -223,36 +166,13 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
     } else if all_hidden(&world, radius) {
         // Bots that stand still where they can't be seen: something in KovaaK's
         // brings them out that isn't modelled (Skeet Tracking's, behind its walls).
-        return Err(vec!["every place a bot appears is behind a wall".into()]);
+        return Err(vec![Gap::planned("every place a bot appears is behind a wall", "")]);
     }
     if kinds.len() > 1 {
         // Several kinds: each with its own hitbox, health, look and movement, on the
         // spawn points its character may use.
         let sizes = std::iter::once((shape, radius, height)).chain(others);
-        for ((ch, m), (shape, radius, height)) in kinds.iter().zip(sizes) {
-            let spawns: Vec<u32> = spawn_characters
-                .iter()
-                .enumerate()
-                .filter(|(_, names)| names.is_empty() || names.iter().any(|n| n.eq_ignore_ascii_case(ch.name())))
-                .map(|(i, _)| i as u32)
-                .collect();
-            if spawns.is_empty() {
-                return Err(vec![format!("the map has no spawn point the bot \"{}\" can use", ch.name())]);
-            }
-            let all = spawns.len() == world.spawns.len();
-            world.kinds.push(WorldKind {
-                shape,
-                radius,
-                height,
-                health: ch.f32_or("MaxHealth", 100.0).max(0.001),
-                color: body_color(ch).unwrap_or_else(|| WorldKind::default().color),
-                regen_per_s: ch.f32_or("HealthRegenPerSec", 0.0),
-                regen_delay_s: ch.f32_or("HealthRegenDelay", 0.0).clamp(0.0, 10.0),
-                respawn_delay_s: respawn_delay(ch),
-                motion: m.clone(),
-                spawns: if all { Vec::new() } else { spawns },
-            });
-        }
+        add_kinds(&mut world, &kinds, sizes, &spawn_characters)?;
         world.slots = slots;
         if rotations.iter().any(Option::is_some) {
             world.rotations = rotations;
@@ -260,6 +180,147 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
     } else {
         world.motion = motion;
     }
+    world_rules(&mut world, top, source, source_hash);
+
+    let mut scenario = Scenario { world: Some(world), ..base_scenario(sce, top, weapon) };
+    let t = &mut scenario.targets;
+    t.count = r.bots.len() as u32;
+    t.shape = shape;
+    t.radius = radius;
+    t.height = height;
+    t.health = bot.f32_or("MaxHealth", 100.0).max(0.001);
+    t.respawn_delay_s = respawn_delay(bot);
+    let damage = scenario.weapon.damage;
+    t.health_bar =
+        !top.is("BlockHealthbars") && characters.iter().any(|ch| ch.f32_or("MaxHealth", 100.0).max(0.001) > damage);
+    if let Some(c) = body_color(bot) {
+        t.color = c;
+    }
+    // Regen counts from the last hit. Negative regen drains the bot until it goes
+    // (VT Aether's last 19 s).
+    t.regen_per_s = bot.f32_or("HealthRegenPerSec", 0.0);
+    t.regen_delay_s = bot.f32_or("HealthRegenDelay", 0.0).clamp(0.0, 10.0);
+    if weapon.f32_or("HitscanRadius", 0.0) > 1.0 {
+        notes.push("the weapon's hit radius is left out".into());
+    }
+    let problems = scenario.problems();
+    if !problems.is_empty() {
+        return Err(problems.into_iter().map(|p| Gap::planned("a value the trainer doesn't allow", p)).collect());
+    }
+    Ok(Imported { scenario, notes })
+}
+
+/// Rules that decide the score or when a run ends, not played yet: Air Pure ends
+/// when its bot runs out of lives and scores the time left.
+fn rule_reasons(top: &Section, reasons: &mut Vec<Gap>) {
+    if top.f32_or("BotMaxLives", 0.0) > 0.0 && !top.is("InvincibleBots") {
+        push_once(reasons, Gap::planned("bots with a set number of lives", "the run ends when they run out"));
+    }
+    if top.f32_or("ScorePerTime", 0.0) != 0.0 {
+        push_once(reasons, Gap::planned("a score for time", ""));
+    }
+    for (key, feature) in [
+        ("ScoreMultDamageEfficiency", "a score multiplied by damage efficiency"),
+        ("ScoreMultKillEfficiency", "a score multiplied by kill efficiency"),
+    ] {
+        if top.is(key) {
+            reasons.push(Gap::planned(feature, ""));
+        }
+    }
+}
+
+// The bots. Each bot that looks or moves differently is a kind of its own; each
+// entry of `AddedBots` is a slot, filled by one of its kinds by weight, or in turn
+// from a rotation that isn't randomized (slots naming the same one share turns).
+struct Bots<'a> {
+    kinds: Vec<(&'a Section, Option<Motion>)>,
+    slots: Vec<Vec<(u32, f32)>>,
+    rotations: Vec<Option<u32>>,
+    teams: Vec<u32>,
+}
+
+fn bots<'a>(r: &crate::scenario::Resolved<'a>, other_team: u32, reasons: &mut Vec<Gap>) -> Bots<'a> {
+    let mut kinds: Vec<(&Section, Option<Motion>)> = Vec::new();
+    let mut slots: Vec<Vec<(u32, f32)>> = Vec::new();
+    let mut rotations: Vec<Option<u32>> = Vec::new();
+    let mut rotation_names: Vec<String> = Vec::new();
+    let mut teams = Vec::new();
+    for slot in &r.bots {
+        // Team 0 (some Pasu files) plays as the player's opponents.
+        let team = slot.team.and_then(|t| t.trim().parse::<u32>().ok()).filter(|t| *t > 0);
+        teams.push(team.unwrap_or(other_team));
+        let mut choices = Vec::new();
+        for c in &slot.choices {
+            let Some(ch) = c.character else { continue };
+            if !c.abilities.is_empty() {
+                // Dashes, and the knockbacks helper bots use to push targets around
+                // (Raw Control, Controlsphere): without them these play too easy.
+                push_once(reasons, Gap::planned("bots that use abilities", "dashes and knockbacks"));
+            }
+            let m = moves(c, ch).then(|| bot_motion(c, ch));
+            let k = match kinds.iter().position(|(k, km)| same_kind(k, ch) && *km == m) {
+                Some(k) => k,
+                None => {
+                    kinds.push((ch, m));
+                    kinds.len() - 1
+                }
+            };
+            choices.push((k as u32, c.weight.max(0.0)));
+        }
+        if !choices.is_empty() {
+            let in_turn = (slot.in_order && choices.len() > 1).then(|| {
+                let name = slot.reference.trim().to_ascii_lowercase();
+                let at = rotation_names.iter().position(|n| *n == name).unwrap_or_else(|| {
+                    rotation_names.push(name);
+                    rotation_names.len() - 1
+                });
+                at as u32
+            });
+            rotations.push(in_turn);
+            slots.push(choices);
+        }
+    }
+    Bots { kinds, slots, rotations, teams }
+}
+
+/// The kinds of bot, each on the spawn points its character may use (all of them
+/// when the map doesn't say).
+fn add_kinds(
+    world: &mut World,
+    kinds: &[(&Section, Option<Motion>)],
+    sizes: impl Iterator<Item = (Shape, f32, f32)>,
+    spawn_characters: &[Vec<String>],
+) -> Result<(), Vec<Gap>> {
+    for ((ch, m), (shape, radius, height)) in kinds.iter().zip(sizes) {
+        let spawns: Vec<u32> = spawn_characters
+            .iter()
+            .enumerate()
+            .filter(|(_, names)| names.is_empty() || names.iter().any(|n| n.eq_ignore_ascii_case(ch.name())))
+            .map(|(i, _)| i as u32)
+            .collect();
+        if spawns.is_empty() {
+            return Err(vec![Gap::planned("the map has no spawn point a bot can use", ch.name())]);
+        }
+        let all = spawns.len() == world.spawns.len();
+        world.kinds.push(WorldKind {
+            shape,
+            radius,
+            height,
+            health: ch.f32_or("MaxHealth", 100.0).max(0.001),
+            color: body_color(ch).unwrap_or_else(|| WorldKind::default().color),
+            regen_per_s: ch.f32_or("HealthRegenPerSec", 0.0),
+            regen_delay_s: ch.f32_or("HealthRegenDelay", 0.0).clamp(0.0, 10.0),
+            respawn_delay_s: respawn_delay(ch),
+            motion: m.clone(),
+            spawns: if all { Vec::new() } else { spawns },
+        });
+    }
+    Ok(())
+}
+
+/// The scenario-wide rules the world keeps: where it came from, accuracy scoring,
+/// invincible bots and a locked field of view.
+fn world_rules(world: &mut World, top: &Section, source: &str, source_hash: &str) {
     world.source = source.into();
     world.source_hash = source_hash.into();
     world.accuracy_mult = match (top.is("ScoreMultAccuracy"), top.is("MultSqrtAcc")) {
@@ -275,15 +336,17 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
             world.fov_range = Some([lo, hi]);
         }
     }
+}
 
+/// The scenario without its world or targets: name, timing, weapon and scoring.
+fn base_scenario(sce: &Sce, top: &Section, weapon: &Section) -> Scenario {
     let interval = weapon.f32_or("TimeBetweenShots", 0.0);
     let category = match top.str("AimTypeTag") {
         "Tracking" => Category::Tracking,
         "Target Switching" => Category::Switching,
         _ => Category::Clicking,
     };
-    let respawn = respawn_delay(bot);
-    let mut scenario = Scenario {
+    Scenario {
         name: sce.name().trim().to_string(),
         description: top.str("Description").replace("[nl]", "\n"),
         author: top.str("Author").to_string(),
@@ -306,34 +369,127 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
             per_miss: -top.f32_or("ScoreLossPerMiss", 0.0),
             per_timeout: 0.0,
         },
-        world: Some(world),
         ..Scenario::default()
-    };
-    let t = &mut scenario.targets;
-    t.count = r.bots.len() as u32;
-    t.shape = shape;
-    t.radius = radius;
-    t.height = height;
-    t.health = bot.f32_or("MaxHealth", 100.0).max(0.001);
-    t.respawn_delay_s = respawn;
-    let damage = scenario.weapon.damage;
-    t.health_bar =
-        !top.is("BlockHealthbars") && characters.iter().any(|ch| ch.f32_or("MaxHealth", 100.0).max(0.001) > damage);
-    if let Some(c) = body_color(bot) {
-        t.color = c;
     }
-    // Regen counts from the last hit. Negative regen drains the bot until it goes
-    // (VT Aether's last 19 s).
-    t.regen_per_s = bot.f32_or("HealthRegenPerSec", 0.0);
-    t.regen_delay_s = bot.f32_or("HealthRegenDelay", 0.0).clamp(0.0, 10.0);
-    if weapon.f32_or("HitscanRadius", 0.0) > 1.0 {
-        notes.push("the weapon's hit radius is left out".into());
+}
+
+/// How far above the point it appears at KovaaK's puts a character's middle: its
+/// whole height, on both map formats. Measured with test maps for players 2 to 300
+/// units tall, radius 1 to 55, map scale 1 and 4, standing or floating, and still
+/// bots on spawn points and volumes. So its feet are half its height above the point.
+fn rise(height: f32) -> Vec3 {
+    Vec3::Y * height
+}
+
+/// A map's solids as the world's meshes and wall boxes, with the shapes it had to
+/// leave out or guess at.
+struct MapWalls {
+    meshes: Vec<WorldMesh>,
+    walls: Vec<WorldBox>,
+    skipped: std::collections::BTreeSet<String>,
+    guessed: std::collections::BTreeSet<String>,
+}
+
+fn map_walls(map: &Map, map_scale: f32) -> MapWalls {
+    let mut meshes = Vec::new();
+    let mut walls = Vec::new();
+    let mut skipped = std::collections::BTreeSet::new();
+    let mut guessed = std::collections::BTreeSet::new();
+    let same = |p: Vec3| p;
+    for solid in &map.solids {
+        match solid {
+            Solid::Primitive { mesh, place: p, name } if mesh.eq_ignore_ascii_case("Cube") => {
+                let Some((decor, clip)) = brush_kind(name) else { continue };
+                meshes.push(WorldMesh { decor, clip, ..cube(p, map_scale, &same) });
+                if !decor {
+                    walls.push(cube_box(p, map_scale, &same));
+                }
+            }
+            Solid::Primitive { mesh, place: p, name } => {
+                let Some((decor, clip)) = brush_kind(name) else { continue };
+                let Some(shape) = crate::shapes::primitive(mesh) else {
+                    if !clip {
+                        skipped.insert(mesh.clone());
+                    }
+                    continue;
+                };
+                if !shape.solid && !decor && !clip {
+                    guessed.insert(mesh.clone());
+                }
+                let positions =
+                    shape.vertices.iter().map(|v| map_point(transform(p, *v), map_scale).to_array()).collect();
+                meshes.push(WorldMesh {
+                    positions,
+                    triangles: shape.triangles,
+                    color: WALL_COLOR.into(),
+                    decor: decor || !shape.solid,
+                    clip,
+                });
+            }
+            Solid::Mesh { place: p, vertices, triangles, name } => {
+                let Some((decor, clip)) = brush_kind(name) else { continue };
+                // The editor saves a brush's own triangles divided by the map scale
+                // (a cube's run 0 to 100 / MapScale), so they're scaled back first.
+                let positions = vertices
+                    .iter()
+                    .map(|v| map_point(transform(p, v.map(|c| c * map_scale)), map_scale).to_array())
+                    .collect();
+                meshes.push(WorldMesh {
+                    positions,
+                    triangles: triangles.clone(),
+                    color: WALL_COLOR.into(),
+                    decor,
+                    clip,
+                });
+            }
+            Solid::Polyhedron { vertices, faces, materials } => {
+                // A convex brush: each face is a fan of triangles. Clip brushes are
+                // invisible walls that keep characters in; weapon clips only stop
+                // shots, which these scenarios don't need, so they're left out.
+                let all = |f: &dyn Fn(&str) -> bool| !materials.is_empty() && materials.iter().all(|m| f(m));
+                if all(&|m| m.ends_with("editor_weaponclip")) {
+                    continue;
+                }
+                let clip = all(&|m| m.contains("editor_") && m.ends_with("clip"));
+                let positions = vertices.iter().map(|v| reflex_point(*v, map_scale).to_array()).collect();
+                let triangles = faces
+                    .iter()
+                    .flat_map(|f| (1..f.len().saturating_sub(1)).map(|k| [f[0], f[k], f[k + 1]].map(|i| i as u32)))
+                    .collect();
+                meshes.push(WorldMesh { positions, triangles, color: WALL_COLOR.into(), decor: false, clip });
+            }
+        }
     }
-    let problems = scenario.problems();
-    if !problems.is_empty() {
-        return Err(problems);
+    MapWalls { meshes, walls, skipped, guessed }
+}
+
+// Where the player stands: lifted onto a floor it overlaps, or pulled down onto
+// one within its step-up height, as Unreal's walking movement does (both measured
+// in KovaaK's). The eye is the camera offset above its middle, or with a head, above
+// the top of its body (and half the head's offset higher: one measurement).
+fn player_eye(player: Option<&Section>, start: Vec3, meshes: &[WorldMesh]) -> Vec3 {
+    let mut body = start;
+    let mut camera = Vec3::ZERO;
+    if let Some(p) = player {
+        let lo = axes(p.vec3("SpawnOffsetMin").unwrap_or_default());
+        let hi = axes(p.vec3("SpawnOffsetMax").unwrap_or_default());
+        let height = p.f32_or("MainBBHeight", 0.0).max(0.0) / UU_PER_M;
+        let head = p.is("MainBBHasHead");
+        // The capsule Unreal stands on floors: a head reaches its radius further each way.
+        let head_radius = if head { p.f32_or("MainBBHeadRadius", 0.0).max(0.0) / UU_PER_M } else { 0.0 };
+        let half = height / 2.0 + head_radius;
+        let radius = (p.f32_or("MainBBRadius", 0.0).max(0.0) / UU_PER_M).min(half);
+        let step_up = p.f32_or("StepUpHeight", 0.0).max(0.0) / UU_PER_M;
+        body += (lo + hi) / 2.0 / UU_PER_M + rise(height);
+        if radius > 0.0 {
+            body = aimadapt_sim::collide::Collider::for_bots(meshes).stand(body, half - radius, radius, step_up);
+        }
+        camera = axes(p.vec3("CameraOffset").unwrap_or_default()) / UU_PER_M;
+        if head {
+            camera.y += height / 2.0 + p.f32_or("MainBBHeadOffset", 0.0) / 2.0 / UU_PER_M;
+        }
     }
-    Ok(Imported { scenario, notes })
+    body + camera
 }
 
 /// Whether a bot moves, unless `NoDodging` keeps it still: it runs (`MaxSpeed`),
@@ -456,9 +612,9 @@ fn dodge(d: &Section, weight: f32) -> Dodge {
     }
 }
 
-fn push_once(v: &mut Vec<String>, s: &str) {
-    if !v.iter().any(|x| x == s) {
-        v.push(s.into());
+fn push_once(v: &mut Vec<Gap>, g: Gap) {
+    if !v.contains(&g) {
+        v.push(g);
     }
 }
 
@@ -487,11 +643,11 @@ fn respawn_delay(ch: &Section) -> f32 {
 }
 
 /// The bot's hitbox as the sim's shape, radius and height, in meters.
-fn hitbox(ch: &Section, reasons: &mut Vec<String>, notes: &mut Vec<String>) -> (Shape, f32, f32) {
+fn hitbox(ch: &Section, reasons: &mut Vec<Gap>, notes: &mut Vec<String>) -> (Shape, f32, f32) {
     let radius = ch.f32_or("MainBBRadius", 0.0) / UU_PER_M;
     let height = ch.f32_or("MainBBHeight", 0.0) / UU_PER_M;
     if !(0.01..=10.0).contains(&radius) {
-        reasons.push(format!("a bot radius of {:.2} m (the trainer allows 0.01–10 m)", radius));
+        reasons.push(Gap::planned("bot size", format!("a radius of {radius:.2} m; the trainer allows 0.01–10 m")));
     }
     match ch.str("MainBBType") {
         "Spheroid" => {
@@ -509,7 +665,7 @@ fn hitbox(ch: &Section, reasons: &mut Vec<String>, notes: &mut Vec<String>) -> (
             }
         }
         other => {
-            reasons.push(format!("{other} hitboxes"));
+            reasons.push(Gap::planned("hitbox shape", other));
             (Shape::Sphere, radius, 2.0 * radius)
         }
     }
@@ -527,7 +683,7 @@ fn world(
     player_team: u32,
     teams: &[u32],
     spawn_characters: &mut Vec<Vec<String>>,
-    reasons: &mut Vec<String>,
+    reasons: &mut Vec<Gap>,
     notes: &mut Vec<String>,
 ) -> Option<World> {
     let reflex = map.format == MapFormat::Reflex;
@@ -535,113 +691,15 @@ fn world(
     let mut starts: Vec<_> = map.spawns.iter().filter(|s| team_can_use(s.teams, player_team)).collect();
     starts.sort_by_key(|s| !s.initial);
     let Some(start) = starts.first().copied() else {
-        reasons.push("the map has no spawn point for the player".into());
+        reasons.push(Gap::planned("the map has no spawn point for the player", ""));
         return None;
     };
     let point = |v: [f32; 3]| if reflex { reflex_point(v, map_scale) } else { map_point(v, map_scale) };
-    // KovaaK's puts a character's middle its whole height above the point it appears
-    // at, on both map formats: measured with test maps for players 2 to 300 units
-    // tall, radius 1 to 55, map scale 1 and 4, standing or floating, and still bots
-    // on spawn points and volumes. So its feet are half its height above the point.
-    let rise = |height: f32| Vec3::Y * height;
 
     // The walls, first where the map has them: where the player stands depends on them.
-    let mut meshes = Vec::new();
-    let mut walls = Vec::new();
-    let mut skipped = std::collections::BTreeSet::new();
-    let mut guessed = std::collections::BTreeSet::new();
-    let same = |p: Vec3| p;
-    for solid in &map.solids {
-        match solid {
-            Solid::Primitive { mesh, place: p, name } if mesh.eq_ignore_ascii_case("Cube") => {
-                let Some((decor, clip)) = brush_kind(name) else { continue };
-                meshes.push(WorldMesh { decor, clip, ..cube(p, map_scale, &same) });
-                if !decor {
-                    walls.push(cube_box(p, map_scale, &same));
-                }
-            }
-            Solid::Primitive { mesh, place: p, name } => {
-                let Some((decor, clip)) = brush_kind(name) else { continue };
-                let Some(shape) = crate::shapes::primitive(mesh) else {
-                    if !clip {
-                        skipped.insert(mesh.clone());
-                    }
-                    continue;
-                };
-                if !shape.solid && !decor && !clip {
-                    guessed.insert(mesh.clone());
-                }
-                let positions =
-                    shape.vertices.iter().map(|v| map_point(transform(p, *v), map_scale).to_array()).collect();
-                meshes.push(WorldMesh {
-                    positions,
-                    triangles: shape.triangles,
-                    color: WALL_COLOR.into(),
-                    decor: decor || !shape.solid,
-                    clip,
-                });
-            }
-            Solid::Mesh { place: p, vertices, triangles, name } => {
-                let Some((decor, clip)) = brush_kind(name) else { continue };
-                // The editor saves a brush's own triangles divided by the map scale
-                // (a cube's run 0 to 100 / MapScale), so they're scaled back first.
-                let positions = vertices
-                    .iter()
-                    .map(|v| map_point(transform(p, v.map(|c| c * map_scale)), map_scale).to_array())
-                    .collect();
-                meshes.push(WorldMesh {
-                    positions,
-                    triangles: triangles.clone(),
-                    color: WALL_COLOR.into(),
-                    decor,
-                    clip,
-                });
-            }
-            Solid::Polyhedron { vertices, faces, materials } => {
-                // A convex brush: each face is a fan of triangles. Clip brushes are
-                // invisible walls that keep characters in; weapon clips only stop
-                // shots, which these scenarios don't need, so they're left out.
-                let all = |f: &dyn Fn(&str) -> bool| !materials.is_empty() && materials.iter().all(|m| f(m));
-                if all(&|m| m.ends_with("editor_weaponclip")) {
-                    continue;
-                }
-                let clip = all(&|m| m.contains("editor_") && m.ends_with("clip"));
-                let positions = vertices.iter().map(|v| reflex_point(*v, map_scale).to_array()).collect();
-                let triangles = faces
-                    .iter()
-                    .flat_map(|f| (1..f.len().saturating_sub(1)).map(|k| [f[0], f[k], f[k + 1]].map(|i| i as u32)))
-                    .collect();
-                meshes.push(WorldMesh { positions, triangles, color: WALL_COLOR.into(), decor: false, clip });
-            }
-        }
-    }
+    let MapWalls { mut meshes, mut walls, skipped, guessed } = map_walls(map, map_scale);
 
-    // Where the player stands: lifted onto a floor it overlaps, or pulled down onto
-    // one within its step-up height, as Unreal's walking movement does (both measured
-    // in KovaaK's). The eye is the camera offset above its middle, or with a head, above
-    // the top of its body (and half the head's offset higher: one measurement).
-    let mut body = point(start.position);
-    let mut camera = Vec3::ZERO;
-    if let Some(p) = player {
-        let lo = axes(p.vec3("SpawnOffsetMin").unwrap_or_default());
-        let hi = axes(p.vec3("SpawnOffsetMax").unwrap_or_default());
-        let height = p.f32_or("MainBBHeight", 0.0).max(0.0) / UU_PER_M;
-        let head = p.is("MainBBHasHead");
-        // The capsule Unreal stands on floors: a head reaches its radius further each way.
-        let head_radius = if head { p.f32_or("MainBBHeadRadius", 0.0).max(0.0) / UU_PER_M } else { 0.0 };
-        let half = height / 2.0 + head_radius;
-        let radius = (p.f32_or("MainBBRadius", 0.0).max(0.0) / UU_PER_M).min(half);
-        let step_up = p.f32_or("StepUpHeight", 0.0).max(0.0) / UU_PER_M;
-        body += (lo + hi) / 2.0 / UU_PER_M + rise(height);
-        if radius > 0.0 {
-            body = aimadapt_sim::collide::Collider::for_bots(&meshes).stand(body, half - radius, radius, step_up);
-        }
-        camera = axes(p.vec3("CameraOffset").unwrap_or_default()) / UU_PER_M;
-        if head {
-            camera.y += height / 2.0 + p.f32_or("MainBBHeadOffset", 0.0) / 2.0 / UU_PER_M;
-        }
-    }
-    let eye = body + camera;
+    let eye = player_eye(player, point(start.position), &meshes);
     // JSON rotations are written roll, pitch, yaw, and Reflex ones yaw first; turn
     // the map so the player's starting yaw looks along -Z.
     let yaw_of = |a: [f32; 3]| if reflex { a[0] } else { a[2] };
@@ -694,7 +752,7 @@ fn world(
         });
     }
     if spawns.is_empty() {
-        reasons.push("the map has no spawn point the bots can use".into());
+        reasons.push(Gap::planned("the map has no spawn point the bots can use", ""));
         return None;
     }
     // Each axis of the offset is picked between the two values, so their order

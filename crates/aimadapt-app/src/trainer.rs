@@ -415,7 +415,7 @@ pub fn sce_info(state: State<'_, AppData>, name: String) -> Result<SceInfo, Stri
     let (playable, reasons, notes) = match path.as_deref().map(aimadapt_sce::import) {
         None => (false, Vec::new(), Vec::new()),
         Some(Ok(i)) => (true, Vec::new(), i.notes),
-        Some(Err(r)) => (false, r, Vec::new()),
+        Some(Err(r)) => (false, r.iter().map(ToString::to_string).collect(), Vec::new()),
     };
     let db = state.db.lock().map_err(err)?;
     let (runs, best, last_played) = db.imported_played(&name).map_err(err)?;
@@ -484,7 +484,9 @@ pub fn play_sce(
     t: State<'_, TrainerState>,
     path: String,
 ) -> Result<(), String> {
-    aimadapt_sce::import(std::path::Path::new(&path)).map_err(|r| format!("Can't play this yet: {}", r.join("; ")))?;
+    aimadapt_sce::import(std::path::Path::new(&path)).map_err(|r| {
+        format!("Can't play this yet: {}", r.iter().map(ToString::to_string).collect::<Vec<_>>().join("; "))
+    })?;
     launch(app, &state, &t, &sce_args(&path))
 }
 
@@ -568,7 +570,7 @@ pub fn build_program(state: &AppData, t: &TrainerState) -> Result<ProgramPage, S
         .collect();
     let plan: Vec<(String, u32)> = days.iter().map(|d| (d.day.to_string(), d.runs)).collect();
     let now = chrono::Local::now().naive_local();
-    let progress = aimadapt_core::programs::progress(&db, &prog.name, now, &plan).map_err(err)?;
+    let progress = aimadapt_core::programs::progress(&db, &prog.name, now, &plan, &state.time).map_err(err)?;
     Ok(ProgramPage {
         id: id.into(),
         name: prog.name.clone(),

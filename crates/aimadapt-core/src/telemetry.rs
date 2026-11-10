@@ -49,7 +49,7 @@ pub struct EngineRun {
     pub rep: Option<i64>,
     pub reps: Option<i64>,
     pub block: Option<String>,
-    /// Little-endian f32 triples (seconds, yaw°, pitch°).
+    /// The aim trace, packed by [`encode_trace`].
     pub trace: Vec<u8>,
     /// Where the targets were, for replays (stored packed, see [`encode_frames`]).
     pub frames: Vec<Frame>,
@@ -185,17 +185,69 @@ pub fn decode_frames(bytes: &[u8]) -> Vec<Frame> {
     frames
 }
 
-/// Unpacks the aim trace: (seconds, yaw°, pitch°).
+/// Starts a packed aim trace (format 2). As a little-endian f32 it's a NaN, which
+/// can't start a format 1 trace: that begins with its first sample's time.
+const TRACE_V2: [u8; 4] = [0x02, 0x00, 0xC0, 0x7F];
+/// Time steps in 0.1 ms; this one says a full time follows (a step too long for u16).
+const TRACE_FULL_TIME: u16 = u16::MAX;
+
+/// Packs the aim trace, (seconds, yaw°, pitch°) at 240 Hz, in 6 bytes a sample
+/// where format 1 took 12: the time since the previous sample in 0.1 ms (u16),
+/// then yaw and pitch in 0.01° (i16). Times are rounded from the start, so the
+/// steps don't add up rounding errors.
+pub fn encode_trace(trace: &[[f32; 3]]) -> Vec<u8> {
+    let mut out = TRACE_V2.to_vec();
+    let angle = |v: f32| ((f64::from(v) * 100.0).round().clamp(-32768.0, 32767.0) as i16).to_le_bytes();
+    let mut prev = 0u32;
+    for [t, yaw, pitch] in trace {
+        let at = (f64::from(*t) * 10_000.0).round().clamp(0.0, f64::from(u32::MAX)) as u32;
+        match u16::try_from(at.saturating_sub(prev)) {
+            Ok(step) if step != TRACE_FULL_TIME => out.extend(step.to_le_bytes()),
+            _ => {
+                out.extend(TRACE_FULL_TIME.to_le_bytes());
+                out.extend(at.to_le_bytes());
+            }
+        }
+        prev = at;
+        out.extend(angle(*yaw));
+        out.extend(angle(*pitch));
+    }
+    out
+}
+
+/// Unpacks the aim trace, (seconds, yaw°, pitch°), in either format: 2 from
+/// [`encode_trace`], or 1 (before November 2026), little-endian f32 triples.
 pub fn decode_trace(bytes: &[u8]) -> Vec<[f32; 3]> {
-    bytes
-        .as_chunks::<12>()
-        .0
-        .iter()
-        .map(|c| {
-            let f = |i: usize| f32::from_le_bytes([c[i], c[i + 1], c[i + 2], c[i + 3]]);
-            [f(0), f(4), f(8)]
-        })
-        .collect()
+    let Some(mut rest) = bytes.strip_prefix(&TRACE_V2) else {
+        return bytes
+            .as_chunks::<12>()
+            .0
+            .iter()
+            .map(|c| {
+                let f = |i: usize| f32::from_le_bytes([c[i], c[i + 1], c[i + 2], c[i + 3]]);
+                [f(0), f(4), f(8)]
+            })
+            .collect();
+    };
+    let mut out = Vec::new();
+    let mut at = 0u32;
+    let angle = |b: &[u8]| f32::from(i16::from_le_bytes([b[0], b[1]])) / 100.0;
+    while rest.len() >= 6 {
+        let step = u16::from_le_bytes([rest[0], rest[1]]);
+        if step == TRACE_FULL_TIME {
+            let Some(b) = rest.get(2..6) else { break };
+            at = u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
+            rest = &rest[4..];
+            if rest.len() < 6 {
+                break;
+            }
+        } else {
+            at += u32::from(step);
+        }
+        out.push([(f64::from(at) / 10_000.0) as f32, angle(&rest[2..4]), angle(&rest[4..6])]);
+        rest = &rest[6..];
+    }
+    out
 }
 
 /// A rating as stored, for starting the next run.
@@ -364,7 +416,8 @@ impl Db {
     }
 }
 
-/// Inserts an engine run's details for the run saved as `file_name`, inside `tx`.
+/// Inserts an engine run's details for the run saved as `file_name`, inside `tx`,
+/// and drops the replays its scenario no longer keeps ([`crate::replay::prune`]).
 /// Returns false if there's no such run or it already has details.
 pub(crate) fn insert_engine_run(tx: &rusqlite::Transaction, file_name: &str, e: &EngineRun) -> Result<bool, DbError> {
     {
@@ -470,6 +523,7 @@ pub(crate) fn insert_engine_run(tx: &rusqlite::Transaction, file_name: &str, e: 
                 ])?;
             }
         }
+        crate::replay::prune(tx, &e.base_scenario)?;
         Ok(true)
     }
 }
@@ -530,7 +584,7 @@ impl Db {
     /// single-target bests instead, so they're left out.
     /// With `hash`, only runs of that exact version of the scenario count.
     pub fn fastest_hit(&self, base_scenario: &str, knob: &str, hash: Option<&str>) -> Result<Option<f64>, DbError> {
-        let agg = if knob == "target_speed" { "MAX" } else { "MIN" };
+        let agg = if crate::knob::Knob::from_id(knob).higher_is_harder() { "MAX" } else { "MIN" };
         Ok(self.conn().query_row(
             &format!(
                 "SELECT {agg}(e.fastest) FROM engine_runs e JOIN runs r ON r.id = e.run_id
@@ -581,10 +635,34 @@ mod tests {
         assert_eq!(back[1].targets[0].health, 1.0, "still full health right up to the hit");
     }
 
+    /// Traces saved before the packed format still play.
     #[test]
-    fn trace_unpacks_three_floats_per_sample() {
+    fn old_traces_unpack_as_three_floats_per_sample() {
         let bytes: Vec<u8> = [0.5f32, -10.0, 2.25].iter().flat_map(|v| v.to_le_bytes()).collect();
         assert_eq!(decode_trace(&bytes), vec![[0.5, -10.0, 2.25]]);
+    }
+
+    /// The aim trace took 12 bytes a sample (173 KB a minute) with no format
+    /// marker; it's now 6, marked, and round-trips within its rounding.
+    #[test]
+    fn traces_pack_to_six_bytes_a_sample_and_round_trip() {
+        let trace: Vec<[f32; 3]> =
+            (0..14_400).map(|i| [i as f32 / 240.0 + 0.0003, (i as f32 * 0.37).sin() * 170.0, -12.345]).collect();
+        let bytes = encode_trace(&trace);
+        assert_eq!(bytes.len(), 4 + 6 * trace.len());
+        let back = decode_trace(&bytes);
+        assert_eq!(back.len(), trace.len());
+        for (a, b) in trace.iter().zip(&back) {
+            assert!((a[0] - b[0]).abs() <= 0.000_06, "{a:?} {b:?}");
+            assert!((a[1] - b[1]).abs() <= 0.0051 && (a[2] - b[2]).abs() <= 0.0051, "{a:?} {b:?}");
+        }
+        // A gap longer than a u16 of 0.1 ms steps (6.5 s) keeps its time.
+        let gap = [[0.0, 1.0, 2.0], [10.0, 3.0, 4.0], [10.004, 5.0, 6.0]];
+        let back = decode_trace(&encode_trace(&gap));
+        assert_eq!(back.iter().map(|s| (s[0] * 1000.0).round()).collect::<Vec<_>>(), vec![0.0, 10_000.0, 10_004.0]);
+        // A cut-off trace gives the samples before the cut.
+        let bytes = encode_trace(&trace[..3]);
+        assert_eq!(decode_trace(&bytes[..bytes.len() - 1]).len(), 2);
     }
 
     #[test]

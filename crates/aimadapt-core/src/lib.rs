@@ -5,6 +5,7 @@ pub mod db;
 pub mod discover;
 pub mod import;
 pub mod insights;
+pub mod knob;
 pub mod parse;
 pub mod programs;
 pub mod progress;

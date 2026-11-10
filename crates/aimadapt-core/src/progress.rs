@@ -53,10 +53,12 @@ impl SensSettings {
             (Some(a), Some(b)) => (a - b).abs() < 1e-6,
             (a, b) => a.is_none() && b.is_none(),
         };
-        self.sens_scale == other.sens_scale
-            && self.dpi == other.dpi
-            && close(self.horiz_sens, other.horiz_sens)
-            && close(self.fov, other.fov)
+        // The same turn in other units (cm/360 or a game's) is the same sensitivity.
+        let same_turn = match (self.cm_per_360(), other.cm_per_360()) {
+            (Some(a), Some(b)) => (a - b).abs() <= a * 1e-4,
+            _ => self.sens_scale == other.sens_scale && close(self.horiz_sens, other.horiz_sens),
+        };
+        same_turn && self.dpi == other.dpi && close(self.fov, other.fov)
     }
 }
 
@@ -277,7 +279,11 @@ fn pct_change(from: f64, to: f64) -> f64 {
 fn scenario_stats(history: &[&ScenarioRun], settings: &ProgressSettings) -> ScenarioStats {
     let counted: Vec<&ScenarioRun> = history.iter().copied().filter(|r| counts(r)).collect();
     let scores: Vec<f64> = counted.iter().filter_map(|r| r.score).collect();
-    let best = counted.iter().filter_map(|r| r.score.map(|s| (s, r.finished_at))).max_by(|a, b| a.0.total_cmp(&b.0));
+    // The first run to reach the best score, as the history's PB marks it.
+    let best = counted
+        .iter()
+        .filter_map(|r| r.score.map(|s| (s, r.finished_at)))
+        .reduce(|a, b| if b.0.total_cmp(&a.0).is_gt() { b } else { a });
     let first_score = scores.first().copied();
     let last_pb = counted.iter().rposition(|r| r.is_pb);
     let runs_since_pb = last_pb.map_or(counted.len(), |i| counted.len() - 1 - i);
@@ -420,6 +426,36 @@ pub fn load(db: &Db, time: &TimeSettings) -> Result<Progress, DbError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Bug: two runs at the same sensitivity, one recorded in cm/360 and one in
+    /// Overwatch units, started a new sensitivity period.
+    #[test]
+    fn the_same_cm_per_360_in_other_units_is_the_same_period() {
+        let cm = SensSettings {
+            sens_scale: Some("cm/360".into()),
+            horiz_sens: Some(30.0),
+            dpi: Some(800),
+            fov: Some(103.0),
+        };
+        let ow_sens = 360.0 / (yaw_degrees("Overwatch").unwrap() * (30.0 / 2.54 * 800.0));
+        let ow = SensSettings { sens_scale: Some("Overwatch".into()), horiz_sens: Some(ow_sens), ..cm.clone() };
+        assert!((ow.cm_per_360().unwrap() - 30.0).abs() < 1e-9);
+        assert!(cm.same_as(&ow));
+        let faster = SensSettings { horiz_sens: Some(ow_sens * 1.1), ..ow.clone() };
+        assert!(!cm.same_as(&faster));
+        let other_dpi = SensSettings { dpi: Some(1600), horiz_sens: Some(ow_sens / 2.0), ..ow.clone() };
+        assert!(!cm.same_as(&other_dpi), "a DPI change is still a change of setup");
+    }
+
+    /// Bug: with two runs on the best score, the stats named the later one as the
+    /// best while the history marked the earlier one as the PB.
+    #[test]
+    fn a_tied_best_is_the_first_run_to_reach_it() {
+        let p = with_pbs(vec![run(2, 10, 0, 5000.0), run(2, 11, 0, 5000.0)]);
+        let s = p.stats_for("s", &ProgressSettings::default()).unwrap();
+        let pb = p.runs.iter().find(|r| r.is_pb && r.score == Some(5000.0)).unwrap();
+        assert_eq!(s.best_at, Some(pb.finished_at));
+    }
     use chrono::Duration;
 
     fn t(day: u32, h: u32, m: u32) -> NaiveDateTime {

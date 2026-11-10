@@ -119,7 +119,7 @@ fn parse_and_run(args: &[String]) -> Result<(), String> {
             if adaptive {
                 return Err("imported KovaaK's scenarios play in standard mode for now".into());
             }
-            let imported = aimadapt_sce::import(path).map_err(|r| format!("can't play this yet: {}", r.join("; ")))?;
+            let imported = aimadapt_sce::import(path).map_err(|r| format!("can't play this yet: {}", join(&r)))?;
             for n in &imported.notes {
                 eprintln!("aimadapt: note: {n}");
             }
@@ -241,12 +241,14 @@ fn workout_for_day_any_week(
     let d = prog.day(day).ok_or(format!("{} is a rest day in {}", day.name(), prog.name))?;
     if d.weak_spots {
         let ranked: Vec<Skill> = match db {
-            Some(db) => aimadapt_core::programs::skill_profile(db, None)
-                .map_err(|e| e.to_string())?
-                .ranked()
-                .iter()
-                .filter_map(|id| Skill::from_id(id))
-                .collect(),
+            Some(db) => {
+                aimadapt_core::programs::skill_profile(db, None, &aimadapt_core::training::TimeSettings::default())
+                    .map_err(|e| e.to_string())?
+                    .ranked()
+                    .iter()
+                    .filter_map(|id| Skill::from_id(id))
+                    .collect()
+            }
             None => Skill::ALL.to_vec(),
         };
         return Ok(program::weak_spots(&format!("{}: {}", prog.name, day.name()), &ranked));
@@ -306,6 +308,10 @@ mod tests {
 
 /// aimadapt-core can't depend on the sim, so it keeps copies of a few of its numbers
 /// and lists. This crate has both, so it checks they still agree.
+fn join(reasons: &[aimadapt_sce::Gap]) -> String {
+    reasons.iter().map(ToString::to_string).collect::<Vec<_>>().join("; ")
+}
+
 #[cfg(test)]
 mod core_copies {
     /// Insights rebuild success chances with the sim's lapse rate and read tracking
@@ -315,6 +321,21 @@ mod core_copies {
         assert!((aimadapt_core::insights::LAPSE - f64::from(aimadapt_sim::adaptive::LAPSE)).abs() < 1e-6);
         let sample_s = 1.0 / f64::from(aimadapt_sim::sim::SAMPLE_HZ);
         assert!((aimadapt_core::insights::SAMPLE_S - sample_s).abs() < 1e-9);
+    }
+
+    /// Core reads stored ratings with its own `Knob`: same ids, same direction,
+    /// same units as the sim's.
+    #[test]
+    fn core_knobs_are_the_sims_knobs() {
+        use aimadapt_sim::adaptive::Knob;
+        for k in [Knob::Lifetime, Knob::TargetSpeed, Knob::KillPace, Knob::Radius] {
+            let id = crate::record::knob_id(k);
+            let core = aimadapt_core::knob::Knob::from_id(id);
+            assert_eq!(core.id(), id);
+            assert_eq!(core.higher_is_harder(), k.higher_is_harder(), "{id}");
+            assert_eq!(core.format(0.625), k.format(0.625), "{id}");
+            assert!((core.h(0.625) - f64::from(k.h(0.625))).abs() < 1e-6, "{id}");
+        }
     }
 
     /// The Skills page groups scenarios with core's list of sub-skills.

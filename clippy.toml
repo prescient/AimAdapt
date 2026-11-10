@@ -1,3 +1,5 @@
-# See [workspace.lints.clippy] in Cargo.toml.
-too-many-lines-threshold = 280
-cognitive-complexity-threshold = 40
+# See [workspace.lints.clippy] in Cargo.toml. Caps just above the longest and most
+# tangled functions today (insights `scenario`, 160 lines; inventory `gaps`,
+# complexity 35). Lower them as those are split up.
+too-many-lines-threshold = 165
+cognitive-complexity-threshold = 36

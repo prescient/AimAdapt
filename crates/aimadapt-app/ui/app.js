@@ -52,6 +52,7 @@ const ui = {
   scenarioCache: new Map(), // a KovaaK's scenario's history by name (see scenarioDetail)
   calMonth: null, // Date for the first of the month shown on Progress › Time
   sessionsShown: 20,
+  allRuns: false, // a scenario's Runs table shows every run, not the latest 30
   rescanning: false,
   rescanError: null, // why the last Rescan failed, shown by the button until the next one
 };
@@ -753,6 +754,7 @@ document.addEventListener("click", (e) => {
   const action = e.target.closest("[data-action]")?.dataset.action;
   if (action === "rescan") rescan();
   else if (action === "more-sessions") { ui.sessionsShown += 20; render(); }
+  else if (action === "all-runs") { ui.allRuns = !ui.allRuns; render(); }
   else if (action === "cal-prev" || action === "cal-next") {
     const today = day(ui.snap.training.today);
     const m = ui.calMonth ?? new Date(today.getFullYear(), today.getMonth(), 1);

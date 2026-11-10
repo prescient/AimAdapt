@@ -164,18 +164,17 @@ enum Status {
     /// It plays, as this.
     Plays(Box<aimadapt_sce::Imported>),
     /// Covered by the plan, but the importer refuses it, for these reasons.
-    Refused(Vec<String>),
+    Refused(Vec<aimadapt_sce::Gap>),
     /// It uses features outside the plan.
     Gaps(Vec<aimadapt_sce::Gap>),
 }
 
-fn status(path: &Path, sce: &aimadapt_sce::Sce) -> Status {
-    let gaps = aimadapt_sce::gaps(sce);
-    if !gaps.is_empty() {
-        return Status::Gaps(gaps);
-    }
+fn status(path: &Path) -> Status {
     match aimadapt_sce::import(path) {
         Ok(i) => Status::Plays(Box::new(i)),
+        Err(reasons) if reasons.iter().any(|g| g.beyond_plan) => {
+            Status::Gaps(reasons.into_iter().filter(|g| g.beyond_plan).collect())
+        }
         Err(reasons) => Status::Refused(reasons),
     }
 }
@@ -206,7 +205,7 @@ fn print_sce(filter: Option<&str>, from: &[PathBuf], summary_only: bool) -> Resu
                 if needle.as_ref().is_some_and(|n| !name.to_lowercase().contains(n)) {
                     continue;
                 }
-                rows.push((name, status(f, &sce)));
+                rows.push((name, status(f)));
             }
             Err(e) => unreadable.push(format!("{}: {e}", f.display())),
         }
@@ -245,11 +244,11 @@ fn print_sce(filter: Option<&str>, from: &[PathBuf], summary_only: bool) -> Resu
         "{} scenarios: {playable} play in the trainer now (>>), {refused} are covered by the plan but don't play yet (!!), {gapped} use features it won't have yet (--)",
         rows.len(),
     );
+    // Each reason once per scenario; refusals (!!) and gaps (--) alike.
     let mut by_feature: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
     for (_, s) in &rows {
-        let Status::Gaps(gaps) = s else { continue };
-        // Each feature once per scenario.
-        let seen: std::collections::BTreeSet<&str> = gaps.iter().map(|g| g.feature).collect();
+        let (Status::Gaps(reasons) | Status::Refused(reasons)) = s else { continue };
+        let seen: std::collections::BTreeSet<&str> = reasons.iter().map(|g| g.feature).collect();
         for f in seen {
             *by_feature.entry(f).or_default() += 1;
         }
@@ -674,14 +673,18 @@ mod tests {
     /// printed it as "ok" and counted it as covered.
     #[test]
     fn a_refused_file_says_why() {
-        let path = fixture("Drifting Pair");
-        let sce = aimadapt_sce::Sce::read(&path).unwrap();
-        match status(&path, &sce) {
-            Status::Refused(reasons) => assert!(reasons.iter().any(|r| r.contains("abilities")), "{reasons:?}"),
+        match status(&fixture("Drifting Pair")) {
+            Status::Refused(reasons) => {
+                assert!(reasons.iter().any(|r| r.feature == "bots that use abilities"), "{reasons:?}");
+            }
             _ => panic!("expected a refusal with reasons"),
         }
-        let path = fixture("Still Wall");
-        assert!(matches!(status(&path, &aimadapt_sce::Sce::read(&path).unwrap()), Status::Plays(_)));
+        assert!(matches!(status(&fixture("Still Wall")), Status::Plays(_)));
+        // Features beyond the plan come back as gaps, without the planned reasons.
+        match status(&fixture("Old Room")) {
+            Status::Gaps(gaps) => assert!(gaps.iter().all(|g| g.beyond_plan), "{gaps:?}"),
+            _ => panic!("expected gaps"),
+        }
     }
 
     /// Bug: `--from` a folder that doesn't exist found nothing and still succeeded.
