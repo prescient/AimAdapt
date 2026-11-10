@@ -682,7 +682,15 @@ fn adaptive_runs_start_rotations_on_their_first_bot() {
     w.kinds = (0..3).map(|_| crate::world::WorldKind { health: 1.0, ..Default::default() }).collect();
     w.slots = vec![vec![(0, 1.0), (1, 1.0), (2, 1.0)]];
     w.rotations = vec![Some(0)];
-    let prior = crate::adaptive::Prior { theta: 0.0, slope: 0.12, sd: 0.05, days: 0.0, fastest: None, last_run: None };
+    let prior = crate::adaptive::Prior {
+        theta: 0.0,
+        slope: 0.12,
+        sd: 0.05,
+        slope_sd: None,
+        days: 0.0,
+        fastest: None,
+        last_run: None,
+    };
     let sim = Sim::adaptive(s, 7, Some(prior), crate::adaptive::Mix::default());
     assert_eq!(sim.targets()[0].kind(), Some(0));
 }
@@ -809,6 +817,7 @@ fn prior_at(knob: Knob, value: f32, fastest: Option<f32>) -> Prior {
         theta: knob.h(value) + 0.12 * (0.85f32 / 0.15).ln(),
         slope: 0.12,
         sd: 0.08,
+        slope_sd: None,
         days: 1.0,
         fastest,
         last_run: Some((Pick::Near, 0.85)),

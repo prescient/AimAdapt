@@ -117,6 +117,8 @@ The mix (Steady, Balanced or Push) is a setting in your profile. A stretch run n
 
 **How the rating moves.** The rating is an estimate with an uncertainty, much like a chess rating. A surprising result moves it more than an expected one: succeeding on a stretch run counts for a lot, failing on one costs little. The uncertainty grows with the days since you last played, so after a break your rating moves faster again.
 
+The estimate also covers how consistent you are, meaning how quickly your success falls off as a drill gets harder. One run can't settle that, so the rating carries what it has learned about it from run to run. That keeps a steady player's rating from wobbling. The cost is a slower answer to a real change: in tests with a simulated player who improves by 10%, a little under half of the gain shows after one run and about nine tenths after five.
+
 **Ratings belong to one version of a scenario.** Changing anything that affects play (speed, size, timers, movement) starts the rating over with a calibration run, because the old rating isn't on the same scale. Changing only the name or description keeps it.
 
 ## Built-in scenarios {#builtins}
@@ -319,6 +321,7 @@ Nothing is sent anywhere. Deleting one of your scenarios or workouts removes the
 ## What's new {#whats-new}
 
 **November 2026**
+- Steadier ratings: when your skill hasn't changed, your rating moves about half as much from run to run. It now remembers between runs how well it knows your consistency. A real improvement takes a few runs to show in full. Your ratings are kept. On each scenario the full effect starts with your second run after updating.
 - One meaning for Play: **Play** always starts an adaptive run of one scenario, and a scenario's page has a small line under it saying what it will do. Workouts and program days say **Start session**, **Continue session** and **Repeat session**. **Standard run** is the secondary button, and a KovaaK's scenario that plays here says **Play in AimAdapt**.
 - Fixed: a scenario's insights compared your rating with your first rating even when it was in another measure (after a scenario changed what it rates, say from target lifetime to kill pace).
 - Fixed: the trainer's results screen compared your rating with your best on any version of the scenario. Like the rating itself, the best now starts over when a scenario's settings change.

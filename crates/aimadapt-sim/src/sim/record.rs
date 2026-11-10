@@ -25,6 +25,7 @@ impl Sim {
                 start_value: r.start_value,
                 theta: e.theta,
                 slope: e.slope,
+                slope_sd: e.slope_sd,
                 sd: e.sd,
                 goal: r.cfg.goal,
                 success_rate: r.success_rate(),

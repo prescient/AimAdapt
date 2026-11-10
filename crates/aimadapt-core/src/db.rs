@@ -115,6 +115,7 @@ CREATE INDEX runs_source ON runs (source, scenario);
     crate::telemetry::MIGRATION_PROGRAMS,
     crate::telemetry::MIGRATION_RUN_LEVEL,
     crate::telemetry::MIGRATION_REPLAY,
+    crate::telemetry::MIGRATION_SLOPE_SD,
 ];
 
 /// Value of the `Source` field (and `runs.source`) for runs played in AimAdapt's
@@ -457,6 +458,35 @@ mod tests {
         let err = Db::open(&path).err().expect("refused");
         assert!(matches!(err, DbError::Newer { .. }), "{err}");
         assert!(err.to_string().contains("newer version of AimAdapt"), "{err}");
+    }
+
+    /// The eighth migration (plan A1) adds the slope's uncertainty to engine runs. A
+    /// database saved by the version before it must open, keep its runs, and read an
+    /// old rating back with no slope uncertainty.
+    #[test]
+    fn a_version_7_database_upgrades_and_keeps_its_ratings() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.db");
+        let conn = Connection::open(&path).unwrap();
+        for sql in &MIGRATIONS[..7] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 7).unwrap();
+        conn.execute_batch(
+            "INSERT INTO runs (id, file_name, scenario, mode, finished_at, imported_at)
+             VALUES (1, 'aimadapt/test/1', 'Timed Flicks', 'AimAdapt',
+                     '2026-11-01T07:00:00.000', '2026-11-01T07:00:00.000');
+             INSERT INTO engine_runs (run_id, base_scenario, category, adaptive, knob, rating, theta, slope, rating_sd)
+             VALUES (1, 'Timed Flicks', 'clicking', 1, 'lifetime', 0.6, 0.7, 0.12, 0.05);",
+        )
+        .unwrap();
+        drop(conn);
+
+        let db = Db::open(&path).unwrap();
+        assert!(db.schema_version().unwrap() >= 8);
+        let stored = db.last_rating("Timed Flicks").unwrap().expect("the old run is still there");
+        assert_eq!((stored.rating, stored.theta, stored.slope, stored.sd), (0.6, 0.7, 0.12, 0.05));
+        assert_eq!(stored.slope_sd, None, "an old run has no slope uncertainty");
     }
 
     fn put(p: &std::path::Path, text: &str) {

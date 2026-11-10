@@ -38,7 +38,7 @@ Requirements: Windows 10 or 11 with the WebView2 runtime (included with Windows 
 
 Each scenario has one difficulty setting, chosen for what it trains: target lifetime for timed clicking, kill pace for grids, untimed flicks and speed switching, target size for precision (Micro Flicks, Precise Track), and target speed for tracking and strafe clicking. Adaptive mode estimates the value you succeed at 85% of the time, along with how certain that estimate is.
 
-- **How it updates:** a Bayesian estimate similar to Glicko. A surprising result moves the rating more than an expected one. The next run starts from your last rating on the same version of the scenario, and the uncertainty grows with the days since you last played. Changing a scenario's settings starts it over.
+- **How it updates:** a Bayesian estimate similar to Glicko. A surprising result moves the rating more than an expected one. The next run starts from your last rating on the same version of the scenario, including how well your consistency is known, so a steady player's rating holds still between runs. The uncertainty grows with the days since you last played. Changing a scenario's settings starts it over.
 - **Calibration run:** your first adaptive run on a scenario changes difficulty as you play, to find your level within the run.
 - **One difficulty per run after that:** every later run plays at a single value for the whole run, shown at the start ("This run: 0.62 s"). The value is picked by chance of success:
 

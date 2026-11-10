@@ -24,6 +24,9 @@ pub struct EngineRun {
     /// Model parameters (log scale), to start the next run from.
     pub theta: Option<f64>,
     pub slope: Option<f64>,
+    /// Standard deviation of ln(slope), so the next run knows how well the slope is
+    /// known. `None` for runs saved before it was recorded.
+    pub slope_sd: Option<f64>,
     pub rating_sd: Option<f64>,
     /// This run's value if it held the goal rate for the whole run.
     pub fastest: Option<f64>,
@@ -257,6 +260,8 @@ pub struct StoredRating {
     pub rating: f64,
     pub theta: f64,
     pub slope: f64,
+    /// `None` for runs saved before it was recorded.
+    pub slope_sd: Option<f64>,
     pub sd: f64,
     pub finished_at: String,
     /// That run's pick and success rate, for the next run's guard rails.
@@ -349,6 +354,11 @@ CREATE TABLE engine_samples (
 CREATE INDEX engine_samples_run ON engine_samples (run_id);
 "#;
 
+/// Schema v8: how well the slope is known after a run, in log units.
+pub(crate) const MIGRATION_SLOPE_SD: &str = r#"
+ALTER TABLE engine_runs ADD COLUMN slope_sd REAL;
+"#;
+
 /// Schema v7: replay frames (where every target was, 60 times a second).
 pub(crate) const MIGRATION_REPLAY: &str = r#"
 ALTER TABLE engine_runs ADD COLUMN frames BLOB;
@@ -430,9 +440,9 @@ pub(crate) fn insert_engine_run(tx: &rusqlite::Transaction, file_name: &str, e: 
             "INSERT OR IGNORE INTO engine_runs (run_id, base_scenario, category, adaptive, goal, success_rate,
                 level_timeline, workout, trace, knob, rating, rating_low, rating_high, start_rating, theta, slope,
                 rating_sd, fastest, mix, skill, program, program_day, rep, reps, block, run_value, run_pick,
-                planned_chance, frames)
+                planned_chance, frames, slope_sd)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
-                     ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)",
+                     ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30)",
             params![
                 run_id,
                 e.base_scenario,
@@ -463,6 +473,7 @@ pub(crate) fn insert_engine_run(tx: &rusqlite::Transaction, file_name: &str, e: 
                 e.run_pick,
                 e.planned_chance,
                 (!e.frames.is_empty()).then(|| encode_frames(&e.frames)),
+                e.slope_sd,
             ],
         )?;
         if changed == 0 {
@@ -555,7 +566,8 @@ impl Db {
     fn last_rating_where(&self, base_scenario: &str, hash: Option<&str>) -> Result<Option<StoredRating>, DbError> {
         self.conn()
             .query_row(
-                "SELECT e.knob, e.rating, e.theta, e.slope, e.rating_sd, r.finished_at, e.run_pick, e.success_rate
+                "SELECT e.knob, e.rating, e.theta, e.slope, e.rating_sd, r.finished_at, e.run_pick, e.success_rate,
+                        e.slope_sd
                  FROM engine_runs e JOIN runs r ON r.id = e.run_id
                  WHERE e.base_scenario = ?1 AND e.adaptive = 1 AND e.rating IS NOT NULL AND e.theta IS NOT NULL
                    AND (?2 IS NULL OR r.scenario_hash = ?2)
@@ -571,6 +583,7 @@ impl Db {
                         finished_at: r.get(5)?,
                         run_pick: r.get(6)?,
                         success_rate: r.get(7)?,
+                        slope_sd: r.get(8)?,
                     })
                 },
             )
@@ -702,6 +715,71 @@ mod tests {
         assert_eq!(last.len(), 2, "runs outside a workout don't count: {last:?}");
         assert!(last["Quick Warm-up"].starts_with("2026-11-04"), "the latest of its runs: {last:?}");
         assert!(last["Core Week: Thursday"].starts_with("2026-11-05"));
+    }
+
+    /// Saves a one-run adaptive history named `n`, with this slope uncertainty.
+    fn save_rated(db: &mut Db, n: u32, slope_sd: Option<f64>) {
+        use crate::parse::RunFile;
+        use chrono::NaiveDate;
+        use std::collections::BTreeMap;
+        let at = NaiveDate::from_ymd_opt(2026, 11, n).unwrap().and_hms_opt(7, 0, 0).unwrap();
+        let name = format!("rustyaim/test/{n}");
+        let run = RunFile {
+            file_name: name.clone(),
+            scenario: "Timed Flicks".into(),
+            mode: "RustyAim".into(),
+            finished_at: at,
+            fields: BTreeMap::from([
+                ("Source".to_string(), "rustyaim".to_string()),
+                ("Hash".to_string(), "abc123".to_string()),
+            ]),
+            kills: vec![],
+            weapons: vec![],
+        };
+        db.insert_runs(&[run], at).unwrap();
+        let e = EngineRun {
+            base_scenario: "Timed Flicks".into(),
+            category: "clicking".into(),
+            adaptive: true,
+            knob: Some("lifetime".into()),
+            rating: Some(0.6),
+            theta: Some(0.7),
+            slope: Some(0.12),
+            slope_sd,
+            rating_sd: Some(0.05),
+            ..Default::default()
+        };
+        assert!(db.save_engine_run(&name, &e).unwrap());
+    }
+
+    /// A1 (steadier ratings): the slope's uncertainty is saved with each run. The
+    /// column is new, so a run saved without it reads back as `None` and the rating
+    /// falls back to its old fixed width; a run saved with it reads back as saved.
+    #[test]
+    fn slope_sd_is_saved_and_old_runs_read_back_without_it() {
+        let mut db = Db::open_in_memory().unwrap();
+        let columns: Vec<String> = db
+            .conn()
+            .prepare("SELECT name FROM pragma_table_info('engine_runs')")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(columns.iter().any(|c| c == "slope_sd"), "{columns:?}");
+        save_rated(&mut db, 2, None);
+        assert_eq!(db.last_rating("Timed Flicks").unwrap().unwrap().slope_sd, None);
+        save_rated(&mut db, 3, Some(0.21));
+        assert_eq!(db.last_rating("Timed Flicks").unwrap().unwrap().slope_sd, Some(0.21));
+    }
+
+    #[test]
+    fn slope_sd_comes_back_through_last_rating_for() {
+        let mut db = Db::open_in_memory().unwrap();
+        save_rated(&mut db, 4, Some(0.18));
+        let stored = db.last_rating_for("Timed Flicks", "abc123").unwrap().expect("matches the fingerprint");
+        assert_eq!(stored.slope_sd, Some(0.18));
+        assert!(db.last_rating_for("Timed Flicks", "other").unwrap().is_none());
     }
 
     #[test]

@@ -177,6 +177,7 @@ pub fn to_engine_run(info: &RunInfo) -> EngineRun {
         start_rating: a.map(|a| f(a.start_value)),
         theta: a.map(|a| f(a.theta)),
         slope: a.map(|a| f(a.slope)),
+        slope_sd: a.map(|a| f(a.slope_sd)),
         rating_sd: a.map(|a| f(a.sd)),
         fastest: a.and_then(|a| a.fastest).map(f),
         run_value: a.and_then(|a| a.run_value).map(f),
@@ -302,7 +303,15 @@ pub fn prior(db: &Db, scenario: &Scenario, now: chrono::NaiveDateTime) -> Option
     let days = ((now - then).num_minutes() as f32 / 1440.0).max(0.0);
     let fastest = db.fastest_hit(&scenario.name, knob, Some(&hash)).ok().flatten().map(|v| v as f32);
     let last_run = last.run_pick.as_deref().and_then(Pick::parse).zip(last.success_rate.map(|r| r as f32));
-    Some(Prior { theta: last.theta as f32, slope: last.slope as f32, sd: last.sd as f32, days, fastest, last_run })
+    Some(Prior {
+        theta: last.theta as f32,
+        slope: last.slope as f32,
+        sd: last.sd as f32,
+        slope_sd: last.slope_sd.map(|s| s as f32),
+        days,
+        fastest,
+        last_run,
+    })
 }
 
 /// The best rating so far on this version of a scenario, for its knob (lowest
@@ -488,6 +497,11 @@ mod tests {
         assert!(first.adaptive.as_ref().unwrap().calibration(), "the first adaptive run calibrates");
         assert_eq!(p.fastest, None, "a calibration run sets no best");
         assert_eq!(p.last_run.map(|r| r.0), Some(Pick::Calibrate));
+        // How well the slope was known comes back too, so the next run starts from it
+        // (A1: the rating used to forget this between runs and jitter).
+        let saved = first.adaptive.as_ref().unwrap();
+        let slope_sd = p.slope_sd.expect("the saved run carries the slope's uncertainty");
+        assert!(slope_sd > 0.0 && (slope_sd - saved.slope_sd).abs() < 1e-4, "{slope_sd} vs {}", saved.slope_sd);
         let second = play(&scenario, true, Some(p));
         let a2 = second.adaptive.as_ref().unwrap();
         let start = a2.start_value;

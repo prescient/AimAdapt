@@ -322,6 +322,8 @@ pub struct AdaptiveSummary {
     /// Model parameters, kept to start the next run (log scale).
     pub theta: f32,
     pub slope: f32,
+    /// Standard deviation of ln(slope).
+    pub slope_sd: f32,
     pub sd: f32,
     pub goal: f32,
     pub success_rate: Option<f32>,

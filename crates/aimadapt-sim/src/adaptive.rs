@@ -282,6 +282,9 @@ pub struct Prior {
     pub slope: f32,
     /// Uncertainty of the goal-rate point, in log units.
     pub sd: f32,
+    /// Uncertainty of the slope, as the standard deviation of ln(slope). `None` for
+    /// runs saved before it was recorded; the old fixed width is used then.
+    pub slope_sd: Option<f32>,
     /// Days since that rating was set.
     pub days: f32,
     /// Hardest value the goal rate was held at for a whole run, in knob units.
@@ -317,6 +320,8 @@ pub struct Estimate {
     pub sd: f32,
     pub theta: f32,
     pub slope: f32,
+    /// Standard deviation of ln(slope).
+    pub slope_sd: f32,
 }
 
 fn logistic(x: f32) -> f32 {
@@ -334,18 +339,23 @@ impl Rating {
         let (lo, hi) = (he.min(hh) - 1.0, he.max(hh) + 1.0);
         let thetas: Vec<f32> = (0..GRID).map(|i| lo + (hi - lo) * i as f32 / (GRID - 1) as f32).collect();
         let logit_goal = (cfg.goal / (1.0 - cfg.goal)).ln();
-        let (theta0, sd0, slope0, slope_sd) = match prior {
+        let (theta0, sd0, slope0, slope_sd, anchored) = match prior {
             Some(p) => {
                 // Skill drifts: widen the prior with time away, like Glicko.
                 let sd = (p.sd * p.sd + (0.02 * p.days).powi(2)).sqrt().clamp(0.05, 0.6);
-                (p.theta, sd, p.slope, 0.3)
+                (p.theta, sd, p.slope, p.slope_sd.unwrap_or(0.3).clamp(0.15, 1.0), true)
             }
-            None => (k.h(cfg.start) + 0.12 * logit_goal, 0.6, 0.12, 1.0),
+            None => (k.h(cfg.start) + 0.12 * logit_goal, 0.6, 0.12, 1.0, false),
         };
         let mut logp = Vec::with_capacity(GRID * SLOPES.len());
         for &t in &thetas {
             for &s in &SLOPES {
-                let zt = (t - theta0) / sd0;
+                // With a prior, `sd` was measured on the goal-rate point, so apply it there.
+                let zt = if anchored {
+                    ((t - s * logit_goal) - (theta0 - slope0 * logit_goal)) / sd0
+                } else {
+                    (t - theta0) / sd0
+                };
                 let zs = (s / slope0).ln() / slope_sd;
                 logp.push(f64::from(-0.5 * zt * zt - 0.5 * zs * zs));
             }
@@ -378,7 +388,7 @@ impl Rating {
     pub fn estimate(&self) -> Estimate {
         let logit_goal = (self.cfg.goal / (1.0 - self.cfg.goal)).ln();
         let w = self.weights();
-        let (mut mh, mut mh2, mut mt, mut ms) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
+        let (mut mh, mut mh2, mut mt, mut ms, mut ms2) = (0.0f64, 0.0f64, 0.0f64, 0.0f64, 0.0f64);
         for (i, &t) in self.thetas.iter().enumerate() {
             for (j, &s) in SLOPES.iter().enumerate() {
                 let p = w[i * SLOPES.len() + j];
@@ -386,7 +396,9 @@ impl Rating {
                 mh += p * h;
                 mh2 += p * h * h;
                 mt += p * f64::from(t);
-                ms += p * f64::from(s).ln();
+                let ls = f64::from(s).ln();
+                ms += p * ls;
+                ms2 += p * ls * ls;
             }
         }
         Estimate {
@@ -394,6 +406,7 @@ impl Rating {
             sd: (mh2 - mh * mh).max(0.0).sqrt() as f32,
             theta: mt as f32,
             slope: ms.exp() as f32,
+            slope_sd: (ms2 - ms * ms).max(0.0).sqrt() as f32,
         }
     }
 
@@ -582,6 +595,7 @@ mod tests {
             theta: Knob::Lifetime.h(0.6) + 0.1 * 1.7346,
             slope: 0.1,
             sd: 0.05,
+            slope_sd: None,
             days: 0.0,
             fastest: None,
             last_run: None,
@@ -594,7 +608,15 @@ mod tests {
     }
 
     fn rated(at: f32, sd: f32, fastest: Option<f32>, last_run: Option<(Pick, f32)>) -> Prior {
-        Prior { theta: Knob::Lifetime.h(at) + 0.12 * 1.7346, slope: 0.12, sd, days: 0.0, fastest, last_run }
+        Prior {
+            theta: Knob::Lifetime.h(at) + 0.12 * 1.7346,
+            slope: 0.12,
+            sd,
+            slope_sd: None,
+            days: 0.0,
+            fastest,
+            last_run,
+        }
     }
 
     #[test]
@@ -697,10 +719,92 @@ mod tests {
 
     #[test]
     fn time_away_widens_the_prior() {
-        let p = |days| Prior { theta: 0.0, slope: 0.12, sd: 0.05, days, fastest: None, last_run: None };
+        let p = |days| Prior { theta: 0.0, slope: 0.12, sd: 0.05, slope_sd: None, days, fastest: None, last_run: None };
         let fresh = Rating::new(cfg(), Some(p(0.0))).estimate().sd;
         let later = Rating::new(cfg(), Some(p(30.0))).estimate().sd;
         assert!(later > fresh * 2.0, "{fresh} -> {later}");
+    }
+
+    /// A player of fixed skill plays `runs` runs in a row, each started from the
+    /// previous run's rating the way the trainer does. `change` is (run number,
+    /// factor): from that run on the true goal-rate value is multiplied by the factor.
+    /// Returns the rating's value after each run.
+    fn run_chain(seed: u64, runs: usize, change: Option<(usize, f32)>) -> Vec<f32> {
+        let mut rng = Rng::new(seed);
+        let mut values = Vec::new();
+        let mut prior: Option<Prior> = None;
+        for run in 0..runs {
+            let true85 = match change {
+                Some((at, f)) if run >= at => 0.6 * f,
+                _ => 0.6,
+            };
+            let p = player(true85, 0.12);
+            let mut r = Rating::new(cfg(), prior);
+            // The first run is a calibration run, later ones play at one value.
+            let (value, kind) = if prior.is_some() {
+                let (v, _, kind) = r.pick_run(&mut rng, Mix::Balanced);
+                (Some(v), kind)
+            } else {
+                (None, Pick::Calibrate)
+            };
+            for i in 0..60 {
+                let v = value.unwrap_or_else(|| r.pick(&mut rng, Mix::Balanced).0);
+                let ok = rng.next_f32() < p(v);
+                r.update(i as f32, v, if ok { 1.0 } else { 0.0 }, false);
+            }
+            if let Some(v) = value {
+                r.finish_run(v);
+            }
+            let e = r.estimate();
+            values.push(r.value());
+            prior = Some(Prior {
+                theta: e.theta,
+                slope: e.slope,
+                sd: e.sd,
+                slope_sd: Some(e.slope_sd),
+                days: 1.0,
+                fastest: None,
+                last_run: Some((kind, r.success_rate().unwrap_or(0.0))),
+            });
+        }
+        values
+    }
+
+    /// Bug: between runs the rating forgot how sure it was about the slope (every run
+    /// restarted with the same wide guess) and applied the carried uncertainty to the
+    /// wrong point of the curve, so a player whose skill never changed saw the rating
+    /// move about 4.5% from run to run in this test. It is about 2.2% with the fix.
+    #[test]
+    fn rating_of_a_steady_player_barely_moves_between_runs() {
+        let (mut total, mut n) = (0.0f32, 0u32);
+        for seed in 1..=24 {
+            let v = run_chain(seed, 30, None);
+            for i in 5..v.len() {
+                total += (v[i] / v[i - 1]).ln().abs();
+                n += 1;
+            }
+        }
+        let movement = total / n as f32;
+        assert!(movement < 0.034, "average run-to-run movement {:.2}%", movement * 100.0);
+    }
+
+    /// The steadier rating must still follow a real change: after the true goal-rate
+    /// value drops 10% (the player improves), most of that step shows within five runs.
+    #[test]
+    fn rating_still_follows_a_real_improvement() {
+        let step = 0.9f32;
+        let mut share = [0.0f32; 5];
+        let seeds = 24;
+        for seed in 1..=seeds {
+            let v = run_chain(seed, 25, Some((15, step)));
+            let before = v[14];
+            for (k, s) in share.iter_mut().enumerate() {
+                *s += (v[15 + k] / before).ln() / step.ln();
+            }
+        }
+        let share = share.map(|s| s / seeds as f32);
+        eprintln!("step shown after runs 1..5: {share:?}");
+        assert!(share[4] > 0.7, "share of a 10% step shown after five runs: {share:?}");
     }
 
     #[test]
