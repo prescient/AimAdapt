@@ -578,3 +578,27 @@ fn switching_tabs_does_not_shift_the_page_sideways() {
     let html = css.lines().find(|l| l.starts_with("html {")).expect("a rule for html alone");
     assert!(html.contains("scrollbar-gutter: stable"), "{html}");
 }
+
+/// Bug (plan A3): the scenario page took its rating line, best, best held and rating
+/// chart from every rated run, so after you edited a scenario they mixed in ratings
+/// from the old settings, which are on another scale. They now come from one list,
+/// `ratedRuns`, that keeps only the current version's runs, and the run tables grey
+/// the ratings that list leaves out.
+#[test]
+fn rating_figures_use_only_the_current_versions_runs() {
+    let insights = ui("insights.js");
+    let rated = decl(&insights, "ratedRuns");
+    assert!(rated.contains("r.current") && rated.contains("r.knob === d.knob"), "{rated}");
+    assert!(decl(&insights, "insightKpis").contains("ratedRuns(d)"));
+    assert!(decl(&ui("scenarios.js"), "trainerDetail").contains("ratedRuns(d)"));
+    // No page builds its own list of rated runs.
+    for (file, src) in scripts() {
+        assert_eq!(src.matches("r.rating !== null && r.knob").count(), usize::from(file == "insights.js"), "{file}");
+    }
+    // Both run tables draw ratings through one cell, which greys another version's.
+    let cell = decl(&insights, "ratingCell");
+    assert!(cell.contains("r.current") && cell.contains("muted"), "{cell}");
+    for table in ["insightRunsTable", "latestRunsCard"] {
+        assert!(decl(&insights, table).contains("ratingCell(r)"), "{table}");
+    }
+}

@@ -513,7 +513,7 @@ function trainerDetail(e, askedTab) {
   const played = (e.runs || 0) + (e.adaptive_runs || 0) > 0 || ui.insights.overview.some((o) => o.scenario === s.name);
   const data = played ? insightsFor(s.name) : undefined;
   const d = data && !data.error ? data : null;
-  const adaptive = d ? d.runs.filter((r) => r.adaptive && r.rating !== null && r.knob === d.knob) : [];
+  const adaptive = d ? ratedRuns(d) : [];
   const figures = d ? ratingLine(d, adaptive) : "";
   const header = `<section class="card detail-head">
       <div class="card-head" style="align-items:flex-start">

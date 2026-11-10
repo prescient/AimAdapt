@@ -33,10 +33,21 @@ const delta = (now, before, unit = "", better = 1) => {
   return `<span class="${good ? "pos" : "neg"}">${d > 0 ? "+" : ""}${unit === "%" ? Math.round(d * 100) : d.toFixed(unit === "bits/s" ? 1 : 0)}${unit === "%" ? " pts" : unit ? ` ${unit}` : ""}</span> vs. runs before`;
 };
 
+// The scenario's ratings that are on one scale: adaptive runs with its current rated
+// setting and its current version. A rating from before the scenario's settings changed
+// (`current` false) is on another scale, so the bests and the chart leave it out.
+const ratedRuns = (d) => d.runs.filter((r) => r.current && r.adaptive && r.rating !== null && r.knob === d.knob);
+
+// A run's rating for a table. One from another version of the scenario is greyed.
+const OLD_VERSION = "From before this scenario's settings changed, so it isn't compared with your current rating";
+const ratingCell = (r) => (r.rating === null ? "–"
+  : r.current ? esc(fmtKnob(r.knob, r.rating))
+  : `<span class="muted" title="${OLD_VERSION}">${esc(fmtKnob(r.knob, r.rating))}</span>`);
+
 // Up to eight key figures for a scenario, most important first. The rating tile
 // is left out when the page's header already shows the rating (withRating false).
 function insightKpis(d, withRating = true) {
-  const adaptive = d.runs.filter((r) => r.adaptive && r.rating !== null && r.knob === d.knob);
+  const adaptive = ratedRuns(d);
   const latest = adaptive.at(-1);
   const best = adaptive.reduce((m, r) => (m === null || betterThan(d.knob, r.rating, m) ? r.rating : m), null);
   const fastest = adaptive.reduce((m, r) => (r.fastest !== null && (m === null || betterThan(d.knob, r.fastest, m)) ? r.fastest : m), null);
@@ -65,10 +76,11 @@ function insightRunsTable(d) {
   return `<div class="card-head"><h2>Runs</h2><span class="small muted">${d.runs.length} in all · newest first</span></div>
     <div class="table-wrap"><table><thead><tr><th>When</th><th>Mode</th><th class="r">85% rating</th><th class="r">Hit</th><th class="r">Score</th><th class="r">Flick speed</th><th class="r">Reaction</th><th class="r">On target</th><th>Played in</th><th></th></tr></thead><tbody>
       ${shown.map((r) => `<tr><td style="white-space:nowrap">${esc(fmtShort(dt(r.finished_at)))}, ${esc(fmtTime(dt(r.finished_at)))}</td><td>${r.adaptive ? "Adaptive" : "Standard"}</td>
-        <td class="r num">${r.rating !== null ? esc(fmtKnob(r.knob, r.rating)) : "–"}</td><td class="r mono">${share(r.success_rate ?? r.accuracy)}</td><td class="r mono">${r.adaptive ? "–" : num(r.score)}</td>
+        <td class="r num">${ratingCell(r)}</td><td class="r mono">${share(r.success_rate ?? r.accuracy)}</td><td class="r mono">${r.adaptive ? "–" : num(r.score)}</td>
         <td class="r mono">${r.throughput ? `${r.throughput.toFixed(1)}` : "–"}</td><td class="r mono">${ms(r.reaction_ms)}</td><td class="r mono">${share(r.on_target)}</td><td class="muted">${esc(r.workout ?? "")}</td>
         <td>${r.replay ? `<a href="#replay/${r.run_id}" title="Watch this run again">Replay</a>` : ""}</td></tr>`).join("")}
     </tbody></table></div>
+    ${shown.some((r) => r.rating !== null && !r.current) ? `<div class="small muted" style="margin-top:8px">Greyed ratings are from before this scenario's settings changed. They're on another scale, so your best, the rating chart and the notes leave them out.</div>` : ""}
     ${rows.length > RUNS_SHOWN ? `<button type="button" class="link-btn" data-action="all-runs">${ui.allRuns ? `Show the latest ${RUNS_SHOWN}` : `Show all ${rows.length} runs`}</button>` : ""}`;
 }
 
@@ -101,7 +113,7 @@ function latestRunsCard(d, runsHref) {
   return `<section class="card"><div class="card-head"><h2>Latest runs</h2><a class="small" href="${runsHref}">All ${d.runs.length} runs</a></div>
     <div class="table-wrap"><table><thead><tr><th>When</th><th>Mode</th><th class="r">85% rating</th><th class="r">Hit</th><th></th></tr></thead><tbody>
       ${rows.map((r) => `<tr><td>${esc(fmtShort(dt(r.finished_at)))}, ${esc(fmtTime(dt(r.finished_at)))}</td><td>${r.adaptive ? "Adaptive" : "Standard"}</td>
-        <td class="r num">${r.rating !== null ? esc(fmtKnob(r.knob, r.rating)) : "–"}</td><td class="r mono">${share(r.success_rate ?? r.accuracy)}</td>
+        <td class="r num">${ratingCell(r)}</td><td class="r mono">${share(r.success_rate ?? r.accuracy)}</td>
         <td>${r.replay ? `<a href="#replay/${r.run_id}" title="Watch this run again">Replay</a>` : ""}</td></tr>`).join("")}
     </tbody></table></div></section>`;
 }

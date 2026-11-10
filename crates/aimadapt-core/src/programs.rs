@@ -94,6 +94,9 @@ struct Row {
     scenario: String,
     knob: Option<String>,
     rating: Option<f64>,
+    /// The scenario's settings fingerprint: its version. Ratings of different
+    /// versions aren't comparable.
+    hash: Option<String>,
     adaptive: bool,
     skill: Option<String>,
     program: Option<String>,
@@ -105,7 +108,7 @@ struct Row {
 fn load(db: &Db, time: &TimeSettings) -> Result<Vec<Row>, DbError> {
     let mut stmt = db.conn().prepare(
         "SELECT r.id, r.finished_at, COALESCE(r.duration_s, 60), e.base_scenario, e.knob, e.rating, e.adaptive,
-                e.skill, e.program, e.program_day, e.rep, e.block
+                e.skill, e.program, e.program_day, e.rep, e.block, r.scenario_hash
          FROM engine_runs e JOIN runs r ON r.id = e.run_id ORDER BY r.finished_at, r.id",
     )?;
     let rows = stmt.query_map([], |r| {
@@ -126,6 +129,7 @@ fn load(db: &Db, time: &TimeSettings) -> Result<Vec<Row>, DbError> {
                 day: r.get(9)?,
                 rep: r.get(10)?,
                 block: r.get(11)?,
+                hash: r.get(12)?,
             },
         ))
     })?;
@@ -163,9 +167,12 @@ fn profile_from(rows: &[Row], as_of: Option<NaiveDateTime>) -> SkillProfile {
     let mut runs: HashMap<&str, usize> = HashMap::new();
     let mut last: HashMap<&str, NaiveDateTime> = HashMap::new();
     for rs in by_scenario.values() {
-        // Only runs with the scenario's current knob count.
+        // Only runs with the scenario's current knob count,
         let knob = rs.last().and_then(|r| r.knob.as_deref()).unwrap_or_default();
-        let kept: Vec<&&Row> = rs.iter().filter(|r| r.knob.as_deref() == Some(knob)).collect();
+        // and of its current version (the latest run's settings fingerprint).
+        let hash = rs.last().and_then(|r| r.hash.as_deref());
+        let kept: Vec<&&Row> =
+            rs.iter().filter(|r| r.knob.as_deref() == Some(knob) && r.hash.as_deref() == hash).collect();
         if kept.is_empty() {
             continue;
         }
@@ -250,6 +257,9 @@ pub struct DrillSession {
     /// First rep vs. the last rep of the previous session of this drill: how much
     /// stuck since then (0 = all of it; negative = some was lost).
     pub carryover: Option<f64>,
+    /// The scenario's settings fingerprint for this session's runs (not shown).
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub version: Option<String>,
 }
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
@@ -383,7 +393,7 @@ pub fn progress(
 
 fn drill_sessions(by_date: &BTreeMap<NaiveDate, Vec<&Row>>) -> Vec<DrillSession> {
     let mut out: Vec<DrillSession> = Vec::new();
-    let mut last_seen: HashMap<String, f64> = HashMap::new();
+    let mut last_seen: HashMap<String, (f64, Option<String>)> = HashMap::new();
     for (date, rows) in by_date {
         let mut per: BTreeMap<(&str, &str), Vec<&Row>> = BTreeMap::new();
         for r in rows.iter().filter(|r| r.adaptive && r.rating.is_some() && r.knob.is_some()) {
@@ -392,12 +402,16 @@ fn drill_sessions(by_date: &BTreeMap<NaiveDate, Vec<&Row>>) -> Vec<DrillSession>
         let mut sessions: Vec<(i64, DrillSession)> = Vec::new();
         for ((scenario, day), mut rs) in per {
             rs.sort_by_key(|r| (r.rep.unwrap_or(0), r.run_id));
+            // A session that spans an edit counts only the runs of its latest version.
+            let version = rs[rs.len() - 1].hash.clone();
+            rs.retain(|r| r.hash == version);
             let knob = rs[0].knob.clone().unwrap_or_default();
             let first = rs[0].rating.unwrap_or(0.0);
             let last = rs[rs.len() - 1].rating.unwrap_or(0.0);
             let carryover = last_seen
                 .get(scenario)
-                .map(|prev| (Knob::from_id(&knob).h(first) - Knob::from_id(&knob).h(*prev)).exp() - 1.0);
+                .filter(|(_, v)| *v == version)
+                .map(|(prev, _)| (Knob::from_id(&knob).h(first) - Knob::from_id(&knob).h(*prev)).exp() - 1.0);
             sessions.push((
                 rs[0].run_id,
                 DrillSession {
@@ -411,9 +425,10 @@ fn drill_sessions(by_date: &BTreeMap<NaiveDate, Vec<&Row>>) -> Vec<DrillSession>
                     last,
                     within: (Knob::from_id(&knob).h(last) - Knob::from_id(&knob).h(first)).exp() - 1.0,
                     carryover,
+                    version: version.clone(),
                 },
             ));
-            last_seen.insert(scenario.to_string(), last);
+            last_seen.insert(scenario.to_string(), (last, version));
         }
         sessions.sort_by_key(|(id, _)| *id);
         out.extend(sessions.into_iter().map(|(_, s)| s));
@@ -433,7 +448,8 @@ fn focus_change(sessions: &[DrillSession], date: &str, day: &str) -> Option<f64>
     let diffs: Vec<f64> = this
         .iter()
         .filter_map(|s| {
-            let p = sessions.iter().find(|p| p.date == prev_date && p.scenario == s.scenario)?;
+            let p =
+                sessions.iter().find(|p| p.date == prev_date && p.scenario == s.scenario && p.version == s.version)?;
             Some(Knob::from_id(&s.knob).h(s.last) - Knob::from_id(&s.knob).h(p.last))
         })
         .collect();
@@ -498,12 +514,17 @@ mod tests {
         day: &'a str,
         rep: i64,
         block: &'a str,
+        /// The scenario's settings fingerprint (its version).
+        hash: Option<&'a str>,
     }
 
     fn save(db: &mut Db, r: &Run) {
         let file = format!("rustyaim/{}/{}/{}", r.scenario, r.at, r.rep);
         let mut fields = std::collections::BTreeMap::new();
         fields.insert("Source".into(), "rustyaim".into());
+        if let Some(h) = r.hash {
+            fields.insert("Hash".into(), h.into());
+        }
         fields.insert("Challenge Start".into(), (r.at - Duration::seconds(60)).format("%H:%M:%S%.3f").to_string());
         let run = RunFile {
             file_name: file.clone(),
@@ -552,6 +573,7 @@ mod tests {
                     day: "mon",
                     rep,
                     block: "main",
+                    hash: None,
                 };
                 save(&mut db, &r);
             }
@@ -566,6 +588,7 @@ mod tests {
                 day: "tue",
                 rep,
                 block: "main",
+                hash: None,
             };
             save(&mut db, &r);
         }
@@ -640,6 +663,7 @@ mod tests {
                 day: "tue",
                 rep,
                 block: "main",
+                hash: None,
             };
             save(&mut db, &r);
         }
@@ -658,6 +682,53 @@ mod tests {
         assert_eq!(time.training_day(at(2026, 11, 10, 4, 0)).to_string(), "2026-11-10");
     }
 
+    fn flicks(db: &mut Db, date: (u32, u32), base: f64, day: &str, hash: Option<&str>) {
+        for rep in 1..=5 {
+            let r = Run {
+                at: at(2026, date.0, date.1, 18, rep as u32 * 2),
+                scenario: "Timed Flicks",
+                skill: "static_clicking",
+                knob: "lifetime",
+                rating: base - 0.02 * f64::from(rep as u32),
+                day,
+                rep,
+                block: "main",
+                hash,
+            };
+            save(db, &r);
+        }
+    }
+
+    /// Bug: the skill profile compared a scenario's first day with its latest day even
+    /// when its settings changed in between, so an old 0.40 s and a new 0.70 s read as
+    /// a 43% loss.
+    #[test]
+    fn skill_change_ignores_runs_of_other_versions() {
+        let mut db = Db::open_in_memory().unwrap();
+        flicks(&mut db, (11, 2), 0.40, "mon", Some("old"));
+        flicks(&mut db, (11, 9), 0.70, "mon", Some("new"));
+        flicks(&mut db, (11, 10), 0.60, "tue", Some("new"));
+        let p = skill_profile(&db, None, &TimeSettings::default()).unwrap();
+        let s = p.skills.iter().find(|s| s.skill == "static_clicking").unwrap();
+        // Last three reps: 0.64, 0.62, 0.60 on the 9th and 0.54, 0.52, 0.50 on the 10th.
+        let gm = |v: [f64; 3]| (v.iter().map(|x| x.ln()).sum::<f64>() / 3.0).exp();
+        let want = gm([0.64, 0.62, 0.60]) / gm([0.54, 0.52, 0.50]) - 1.0;
+        assert!((s.change.unwrap() - want).abs() < 1e-6, "{:?} vs {want}", s.change);
+    }
+
+    /// Bug: carryover and the focus change compared a drill with its session before the
+    /// scenario's settings changed.
+    #[test]
+    fn carryover_and_focus_change_skip_other_versions() {
+        let mut db = Db::open_in_memory().unwrap();
+        flicks(&mut db, (11, 2), 0.40, "mon", Some("old"));
+        flicks(&mut db, (11, 9), 0.70, "mon", Some("new"));
+        let p = progress(&db, "Core Week", at(2026, 11, 10, 12, 0), &plan(), &TimeSettings::default()).unwrap();
+        let s = p.sessions.iter().find(|s| s.date == "2026-11-09").unwrap();
+        assert_eq!(s.carryover, None, "the earlier session is another version");
+        assert_eq!(p.week[0].focus_change, None, "last Monday is another version");
+    }
+
     /// Programs kept their own 4 AM day start while Time used the setting, so the
     /// two could disagree on which day a run belongs to. (The app has no control
     /// for the day start yet, so players couldn't hit this.)
@@ -673,6 +744,7 @@ mod tests {
             day: "tue",
             rep: 1,
             block: "main",
+            hash: None,
         };
         save(&mut db, &r);
         let six = TimeSettings { day_start_hour: 6, ..TimeSettings::default() };

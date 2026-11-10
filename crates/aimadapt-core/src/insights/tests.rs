@@ -15,10 +15,18 @@ use chrono::NaiveDate;
 use std::collections::BTreeMap;
 
 fn save(db: &mut Db, n: u32, e: &EngineRun) {
+    save_versioned(db, n, e, None);
+}
+
+/// Like [`save`], with the scenario's settings fingerprint (its version).
+fn save_versioned(db: &mut Db, n: u32, e: &EngineRun, hash: Option<&str>) {
     let at = NaiveDate::from_ymd_opt(2026, 11, 4).unwrap().and_hms_opt(8, n, 0).unwrap();
     let mut fields = BTreeMap::new();
     fields.insert("Score".to_string(), "50".to_string());
     fields.insert("Source".to_string(), "rustyaim".to_string());
+    if let Some(h) = hash {
+        fields.insert("Hash".to_string(), h.to_string());
+    }
     // A 60 s run, with its kills.
     let start = at - chrono::Duration::seconds(60);
     fields.insert("Challenge Start".to_string(), start.format("%H:%M:%S%.3f").to_string());
@@ -122,6 +130,53 @@ fn notes_compare_ratings_of_the_same_knob() {
     let i = scenario(&db, "Timed Flicks").unwrap().unwrap();
     let note = i.notes.iter().find(|n| n.title.starts_with("85% kill pace")).expect("the rating note");
     assert!(note.body.contains("Your first rating was 0.80 s 1 run ago"), "{}", note.body);
+}
+
+/// Two versions of one scenario: the old one rated 0.40 s and 0.42 s (runs 1 and 2), the
+/// current one 0.70 s and 0.66 s (runs 3 and 4).
+fn two_versions() -> Db {
+    let mut db = Db::open_in_memory().unwrap();
+    for (n, rating, hash) in [(1, 0.40, "old"), (2, 0.42, "old"), (3, 0.70, "new"), (4, 0.66, "new")] {
+        save_versioned(&mut db, n, &clicking_run(rating), Some(hash));
+    }
+    db
+}
+
+/// Bug: a scenario's best and best held mixed runs from before its settings changed,
+/// so after an edit the list showed the old version's 0.40 s as the best.
+#[test]
+fn overview_best_comes_from_the_current_version() {
+    let s = overview(&two_versions()).unwrap().remove(0);
+    assert_eq!(s.latest_rating, Some(0.66));
+    assert_eq!(s.best_rating, Some(0.66), "best rating of the current version only");
+    let fastest = s.fastest.unwrap();
+    assert!((fastest - 0.66 * 0.8).abs() < 1e-9, "best held of the current version only: {fastest}");
+}
+
+/// Bug: the run list and the notes mixed versions of a scenario. Runs from other
+/// versions stay in the list but are marked, and the notes use only the current one.
+#[test]
+fn insights_mark_and_note_only_the_current_version() {
+    let i = scenario(&two_versions(), "Timed Flicks").unwrap().unwrap();
+    assert_eq!(i.runs.len(), 4, "every run stays in the list");
+    let current: Vec<bool> = i.runs.iter().map(|r| r.current).collect();
+    assert_eq!(current, [false, false, true, true]);
+    let note = i.notes.iter().find(|n| n.title.starts_with("85% speed")).expect("the rating note");
+    assert!(note.body.contains("Your first rating was 0.70 s 1 run ago"), "{}", note.body);
+    let best = i.notes.iter().find(|n| n.title.starts_with("Best held")).expect("the best held note");
+    assert_eq!(best.title, "Best held: 0.53 s", "not the old version's 0.32 s");
+}
+
+/// Two runs without a hash are one version, and a run with a hash is another.
+#[test]
+fn runs_without_a_hash_are_one_version() {
+    let mut db = Db::open_in_memory().unwrap();
+    save_versioned(&mut db, 1, &clicking_run(0.40), Some("old"));
+    save_versioned(&mut db, 2, &clicking_run(0.70), None);
+    save_versioned(&mut db, 3, &clicking_run(0.66), None);
+    let i = scenario(&db, "Timed Flicks").unwrap().unwrap();
+    let current: Vec<bool> = i.runs.iter().map(|r| r.current).collect();
+    assert_eq!(current, [false, true, true]);
 }
 
 /// Bug: the chart was meant to keep the most recent 400 flicks but kept the

@@ -19,6 +19,7 @@
 //! number of runs before those, for comparison.
 
 use crate::knob::Knob;
+use rusqlite::OptionalExtension;
 use std::collections::HashMap;
 
 use crate::db::{Db, DbError};
@@ -63,6 +64,10 @@ pub struct RunPoint {
     pub workout: Option<String>,
     /// The run recorded replay frames (runs from before replays didn't).
     pub replay: bool,
+    /// The run is of the scenario's current version (same settings fingerprint as its
+    /// latest rated run). Ratings from other versions are on another scale, so
+    /// charts and bests should use only runs where this is true.
+    pub current: bool,
 }
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
@@ -348,13 +353,21 @@ pub fn overview(db: &Db) -> Result<Vec<ScenarioSummary>, DbError> {
     let mut out: Vec<ScenarioSummary> = rows.collect::<Result<_, _>>()?;
     for s in &mut out {
         if let Some(last) = db.last_rating(&s.scenario)? {
+            // Only the current version's runs: other versions are on another scale.
+            let hash = current_hash(db, &s.scenario)?.flatten();
             let agg = if Knob::from_id(&last.knob).higher_is_harder() { "MAX" } else { "MIN" };
-            s.best_rating = db.conn().query_row(
-                &format!("SELECT {agg}(rating) FROM engine_runs WHERE base_scenario = ?1 AND knob = ?2"),
-                [&s.scenario, &last.knob],
-                |r| r.get(0),
-            )?;
-            s.fastest = db.fastest_hit(&s.scenario, &last.knob, None)?;
+            let version = |col: &str, extra: &str| -> Result<Option<f64>, DbError> {
+                Ok(db.conn().query_row(
+                    &format!(
+                        "SELECT {agg}(e.{col}) FROM engine_runs e JOIN runs r ON r.id = e.run_id
+                         WHERE e.base_scenario = ?1 AND e.knob = ?2 AND r.scenario_hash IS ?3 {extra}"
+                    ),
+                    rusqlite::params![s.scenario, last.knob, hash],
+                    |r| r.get(0),
+                )?)
+            };
+            s.best_rating = version("rating", "")?;
+            s.fastest = version("fastest", "AND e.run_value IS NOT NULL")?;
             s.latest_rating = Some(last.rating);
             s.knob = Some(last.knob);
         }
@@ -362,17 +375,33 @@ pub fn overview(db: &Db) -> Result<Vec<ScenarioSummary>, DbError> {
     Ok(out)
 }
 
+/// The scenario's current version: the settings fingerprint (`runs.scenario_hash`)
+/// of its latest rated adaptive run. The outer `Option` is whether there is one; a
+/// run without a fingerprint is a version of its own (`Some(None)`).
+fn current_hash(db: &Db, base_scenario: &str) -> Result<Option<Option<String>>, DbError> {
+    Ok(db
+        .conn()
+        .query_row(
+            "SELECT r.scenario_hash FROM engine_runs e JOIN runs r ON r.id = e.run_id
+             WHERE e.base_scenario = ?1 AND e.adaptive = 1 AND e.rating IS NOT NULL
+             ORDER BY r.finished_at DESC, r.id DESC LIMIT 1",
+            [base_scenario],
+            |r| r.get::<_, Option<String>>(0),
+        )
+        .optional()?)
+}
+
 pub fn scenario(db: &Db, base_scenario: &str) -> Result<Option<Insights>, DbError> {
     let conn = db.conn();
     let mut stmt = conn.prepare(
         "SELECT r.id, r.finished_at, e.adaptive, e.rating, e.success_rate, r.score, r.accuracy, e.workout,
                 e.category, e.level_timeline, e.knob, e.rating_low, e.rating_high,
-                CASE WHEN e.run_value IS NOT NULL THEN e.fastest END, e.theta, e.slope, e.frames IS NOT NULL
+                CASE WHEN e.run_value IS NOT NULL THEN e.fastest END, e.theta, e.slope, e.frames IS NOT NULL, r.scenario_hash
          FROM engine_runs e JOIN runs r ON r.id = e.run_id
          WHERE e.base_scenario = ?1 ORDER BY r.finished_at, r.id",
     )?;
     #[allow(clippy::type_complexity)]
-    let rows: Vec<(RunPoint, String, Option<String>, Option<(f64, f64)>)> = stmt
+    let rows: Vec<(RunPoint, String, Option<String>, Option<(f64, f64)>, Option<String>)> = stmt
         .query_map([base_scenario], |r| {
             Ok((
                 RunPoint {
@@ -392,6 +421,7 @@ pub fn scenario(db: &Db, base_scenario: &str) -> Result<Option<Insights>, DbErro
                     on_target: None,
                     workout: r.get(7)?,
                     replay: r.get(16)?,
+                    current: false,
                 },
                 r.get(8)?,
                 r.get(9)?,
@@ -399,6 +429,7 @@ pub fn scenario(db: &Db, base_scenario: &str) -> Result<Option<Insights>, DbErro
                     (Some(t), Some(sl)) => Some((t, sl)),
                     _ => None,
                 },
+                r.get(17)?,
             ))
         })?
         .collect::<Result<_, _>>()?;
@@ -410,7 +441,10 @@ pub fn scenario(db: &Db, base_scenario: &str) -> Result<Option<Insights>, DbErro
     let latest_timeline = latest.and_then(|r| r.2.as_deref()).map(parse_timeline).unwrap_or_default();
     let knob = latest.and_then(|r| r.0.knob.clone());
     let model = latest.and_then(|r| r.3).zip(knob.clone());
-    let mut runs: Vec<RunPoint> = rows.into_iter().map(|r| r.0).collect();
+    // The current version is the latest rated run's; a run with no fingerprint is a version too.
+    let current = latest.map(|r| r.4.clone());
+    let mut runs: Vec<RunPoint> =
+        rows.into_iter().map(|r| RunPoint { current: current.as_ref().is_none_or(|c| *c == r.4), ..r.0 }).collect();
 
     // Targets for every run, grouped by run.
     let mut by_run: HashMap<i64, Vec<T>> = HashMap::new();
@@ -887,7 +921,7 @@ fn rating_notes(i: &Insights, out: &mut Vec<Note>) {
     let mut push = |title: String, body: String| out.push(Note { title, body });
     // Ratings in other knobs (a scenario can change what it rates) aren't comparable.
     let rated: Vec<&RunPoint> =
-        i.runs.iter().filter(|r| r.adaptive && r.rating.is_some() && r.knob == i.knob).collect();
+        i.runs.iter().filter(|r| r.current && r.adaptive && r.rating.is_some() && r.knob == i.knob).collect();
     if let (Some(knob), Some(last)) = (i.knob.as_deref().map(Knob::from_id), rated.last()) {
         let fmt = |v: f64| knob.format(v);
         let now = last.rating.unwrap_or(0.0);

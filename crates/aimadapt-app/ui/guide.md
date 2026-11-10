@@ -54,7 +54,7 @@ While the trainer is open, the page says so and the start buttons are disabled. 
   - **Reaction time:** how long before your crosshair starts moving toward a new target, as a histogram. It counts flicks of 3° or more, since on a tiny correction "started moving" hardly means anything. The Reaction column in the runs table counts the same flicks.
   - **Tracking:** time on target by target speed, how long you take to recover after the target changes direction, whether you trail or lead it, your unbroken stretches on target (half your time on target came in stretches at least this long), and centering (how far from the center you sit while on target).
   - **Within a run:** success in 10-second segments, which shows slow starts or fading late.
-- **Runs:** your latest 30 runs with their rating, hit rate, flick speed, reaction and time on target, the workout they were part of, and a **Replay** link to watch each one again (see [Replay](#help/replay)). **Show all** lists every run.
+- **Runs:** your latest 30 runs with their rating, hit rate, flick speed, reaction and time on target, the workout they were part of, and a **Replay** link to watch each one again (see [Replay](#help/replay)). **Show all** lists every run. A greyed rating is from before you changed the scenario's settings, so it isn't compared with the others (see [Adaptive mode](#help/adaptive)).
 
 **A KovaaK's scenario's page** has a header with its name, tags and the star and **Hide**, and, once you've played it in KovaaK's, two tabs. **Overview** has **Play in AimAdapt** when the file plays here, your score history with its chart, and **What the data says**. **Runs** has the table of your KovaaK's runs. It has no Insights tab, since KovaaK's files don't record shots or reaction.
 
@@ -120,7 +120,7 @@ The mix (Steady, Balanced or Push) is a setting in your profile. A stretch run n
 
 The estimate also covers how consistent you are, meaning how quickly your success falls off as a drill gets harder. One run can't settle that, so the rating carries what it has learned about it from run to run. That keeps a steady player's rating from wobbling. The cost is a slower answer to a real change: in tests with a simulated player who improves by 10%, a little under half of the gain shows after one run and about nine tenths after five.
 
-**Ratings belong to one version of a scenario.** Changing anything that affects play (speed, size, timers, movement) starts the rating over with a calibration run, because the old rating isn't on the same scale. Changing only the name or description keeps it.
+**Ratings belong to one version of a scenario.** Changing anything that affects play (speed, size, timers, movement) starts the rating over with a calibration run, because the old rating isn't on the same scale. Changing only the name or description keeps it. Insights and program progress follow the same rule: your best, your best held, the rating chart, the notes and every gain use only runs of the version you last played. The Runs table still lists every run, with ratings from older versions greyed.
 
 ## Built-in scenarios {#builtins}
 
@@ -325,6 +325,7 @@ Nothing is sent anywhere. Deleting one of your scenarios or workouts removes the
 - A scenario's page now has tabs under its header: Overview, Insights and Runs (KovaaK's scenarios have Overview and Runs). The header shows your latest rating, its likely range and your best held, and Back returns to the tab you were on.
 - Steadier ratings: when your skill hasn't changed, your rating moves about half as much from run to run. It now remembers between runs how well it knows your consistency. A real improvement takes a few runs to show in full. Your ratings are kept. On each scenario the full effect starts with your second run after updating.
 - One meaning for Play: **Play** always starts an adaptive run of one scenario, and a scenario's page has a small line under it saying what it will do. Workouts and program days say **Start session**, **Continue session** and **Repeat session**. **Standard run** is the secondary button, and a KovaaK's scenario that plays here says **Play in AimAdapt**.
+- Fixed: after you edit a scenario's settings, its best, best held, rating chart, notes and program gains no longer mix in runs from the old version. The Runs table greys those runs' ratings.
 - Fixed: a scenario's insights compared your rating with your first rating even when it was in another measure (after a scenario changed what it rates, say from target lifetime to kill pace).
 - Fixed: the trainer's results screen compared your rating with your best on any version of the scenario. Like the rating itself, the best now starts over when a scenario's settings change.
 - Fixed: when two runs tie for your best score, Progress now names the first one to reach it, as the history's PB marker does.
