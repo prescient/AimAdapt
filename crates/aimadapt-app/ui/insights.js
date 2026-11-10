@@ -33,8 +33,9 @@ const delta = (now, before, unit = "", better = 1) => {
   return `<span class="${good ? "pos" : "neg"}">${d > 0 ? "+" : ""}${unit === "%" ? Math.round(d * 100) : d.toFixed(unit === "bits/s" ? 1 : 0)}${unit === "%" ? " pts" : unit ? ` ${unit}` : ""}</span> vs. runs before`;
 };
 
-// Up to eight key figures for a scenario, most important first.
-function insightKpis(d) {
+// Up to eight key figures for a scenario, most important first. The rating tile
+// is left out when the page's header already shows the rating (withRating false).
+function insightKpis(d, withRating = true) {
   const adaptive = d.runs.filter((r) => r.adaptive && r.rating !== null && r.knob === d.knob);
   const latest = adaptive.at(-1);
   const best = adaptive.reduce((m, r) => (m === null || betterThan(d.knob, r.rating, m) ? r.rating : m), null);
@@ -42,7 +43,7 @@ function insightKpis(d) {
   const t = d.tracking;
   const sw = d.switching;
   return [
-    latest ? kpi(`85% ${knobWord(d.knob)}`, esc(fmtKnob(d.knob, latest.rating)), `best ${esc(fmtKnob(d.knob, best))}${fastest !== null ? ` · held ${esc(fmtKnob(d.knob, fastest))}` : ""}`) : "",
+    latest && withRating ? kpi(`85% ${knobWord(d.knob)}`, esc(fmtKnob(d.knob, latest.rating)), `best ${esc(fmtKnob(d.knob, best))}${fastest !== null ? ` · held ${esc(fmtKnob(d.knob, fastest))}` : ""}`) : "",
     d.success !== null ? kpi("Targets hit", share(d.success), `destroyed before timing out · last ${d.recent_runs} runs`) : "",
     t && !sw ? kpi("On target", share(t.on_target), delta(t.on_target, t.on_target_before, "%") || `median miss ${t.median_error_deg.toFixed(2)}°`) : "",
     d.reaction ? kpi("Reaction", `${Math.round(d.reaction.median_ms)}<small> ms</small>`, delta(d.reaction.median_ms, d.reaction.median_before_ms, "ms", -1) || "median, before moving") : "",
@@ -69,6 +70,40 @@ function insightRunsTable(d) {
         <td>${r.replay ? `<a href="#replay/${r.run_id}" title="Watch this run again">Replay</a>` : ""}</td></tr>`).join("")}
     </tbody></table></div>
     ${rows.length > RUNS_SHOWN ? `<button type="button" class="link-btn" data-action="all-runs">${ui.allRuns ? `Show the latest ${RUNS_SHOWN}` : `Show all ${rows.length} runs`}</button>` : ""}`;
+}
+
+// The scenario header's one line of figures: the latest rating with its likely range,
+// and the best held. Empty with no adaptive runs.
+function ratingLine(d, adaptive) {
+  const latest = adaptive.at(-1);
+  if (!latest) return "";
+  const fastest = adaptive.reduce((m, r) => (r.fastest !== null && (m === null || betterThan(d.knob, r.fastest, m)) ? r.fastest : m), null);
+  const low = latest.rating_low, high = latest.rating_high;
+  const range = low !== null && low !== undefined && high !== null && high !== undefined
+    ? ` (likely ${fmtKnob(d.knob, low).split(" ")[0]}–${fmtKnob(d.knob, high)})` : "";
+  const held = fastest !== null ? ` · best held ${fmtKnob(d.knob, fastest)}` : "";
+  return `85% ${knobWord(d.knob)} ${fmtKnob(d.knob, latest.rating)}${range}${held}`;
+}
+
+// "What to work on": the first `limit` notes, or all of them. `moreHref` links to the
+// rest when some are left out.
+function workOnCard(d, limit = Infinity, moreHref = "") {
+  const shown = d.notes.slice(0, limit);
+  return `<section class="card"><h2>What to work on</h2>
+    ${shown.length ? `<div class="grid">${shown.map((n) => `<div class="note"><div class="note-title">${esc(n.title)}</div><div class="note-body">${esc(n.body)}</div></div>`).join("")}</div>` : `<div class="note-body">Play a few more runs for notes on what to work on.</div>`}
+    ${shown.length < d.notes.length && moreHref ? `<a class="small" href="${moreHref}">All ${d.notes.length} notes on the Insights tab</a>` : ""}
+  </section>`;
+}
+
+// The latest five runs with their Replay links, and a link to the whole table.
+function latestRunsCard(d, runsHref) {
+  const rows = [...d.runs].reverse().slice(0, 5);
+  return `<section class="card"><div class="card-head"><h2>Latest runs</h2><a class="small" href="${runsHref}">All ${d.runs.length} runs</a></div>
+    <div class="table-wrap"><table><thead><tr><th>When</th><th>Mode</th><th class="r">85% rating</th><th class="r">Hit</th><th></th></tr></thead><tbody>
+      ${rows.map((r) => `<tr><td>${esc(fmtShort(dt(r.finished_at)))}, ${esc(fmtTime(dt(r.finished_at)))}</td><td>${r.adaptive ? "Adaptive" : "Standard"}</td>
+        <td class="r num">${r.rating !== null ? esc(fmtKnob(r.knob, r.rating)) : "–"}</td><td class="r mono">${share(r.success_rate ?? r.accuracy)}</td>
+        <td>${r.replay ? `<a href="#replay/${r.run_id}" title="Watch this run again">Replay</a>` : ""}</td></tr>`).join("")}
+    </tbody></table></div></section>`;
 }
 
 // ---------- charts ----------

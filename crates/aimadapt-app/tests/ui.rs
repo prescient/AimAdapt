@@ -510,3 +510,71 @@ fn longer_button_labels_fit_where_they_are_shown() {
         "the scenario header's buttons keep their own height"
     );
 }
+
+/// Rule (plan L2): a scenario's page has Overview, Insights and Runs tabs, each with
+/// its own address (`#scenarios/<key>`, `/insights`, `/runs`), instead of one long
+/// scroll with jump buttons. Only `route()` for the scenarios view splits a tab off,
+/// and only when there are two segments after the view and the last is a tab id, so
+/// list tabs and every other view's addresses parse as before.
+#[test]
+fn a_scenario_pages_tab_comes_from_its_address() {
+    let app = ui("app.js");
+    let route = decl(&app, "route");
+    assert!(route.contains("view === \"scenarios\""), "only Scenarios has tabs in its address: {route}");
+    assert!(route.contains("rest.length >= 2"), "a bare key or list tab has no tab: {route}");
+    assert!(route.contains("ITEM_TABS.some(") && route.contains("rest.at(-1)"), "the last segment is the tab: {route}");
+    assert!(route.contains("decodeURIComponent(rest.join(\"/\"))"), "the old parse stays for everything else: {route}");
+    let tabs = app.split("const ITEM_TABS = [").nth(1).and_then(|s| s.split("];").next()).expect("ITEM_TABS");
+    for id in ["overview", "insights", "runs"] {
+        assert!(tabs.contains(&format!("[\"{id}\", ")), "{id} is a tab: {tabs}");
+    }
+    // The tab reaches the page, and the Overview tab is the bare address.
+    assert!(decl(&app, "render").contains("(arg, tab)"));
+    assert!(decl(&app, "tabs").contains("bare"), "tabs() can leave one tab's address bare");
+    let scenarios = ui("scenarios.js");
+    assert!(decl(&scenarios, "itemTabs").contains("\"overview\")"), "Overview is the bare tab");
+    let href = decl(&scenarios, "scenarioHref");
+    assert!(href.contains("tab !== \"overview\""), "Overview adds no suffix: {href}");
+    // A name: address swaps to the item's address and takes its tab along.
+    assert!(decl(&scenarios, "scenariosPage").contains("scenarioHref(item.key, tab)"));
+}
+
+/// Rule (plan L2): both detail pages draw tabs under one header and have no jump
+/// buttons or section ids left over from them. An AimAdapt page tabs only when it
+/// has detailed records, and a KovaaK's page has no Insights tab.
+#[test]
+fn scenario_pages_draw_tabs_and_no_jump_buttons() {
+    let scenarios = ui("scenarios.js");
+    for (file, src) in scripts() {
+        assert!(!src.contains("data-action=\"jump\"") && !src.contains("jumpLinks"), "{file} still has jump buttons");
+    }
+    assert!(!ui("styles.css").contains(".jump"), "the jump styles are gone");
+    let trainer = decl(&scenarios, "trainerDetail");
+    assert!(trainer.contains("itemTabs(e.id, [\"overview\", \"insights\", \"runs\"]"), "{trainer}");
+    // The tabs come after the early returns for no records, so those pages have none.
+    let tabs_at = trainer.find("itemTabs(").unwrap();
+    for early in ["Not played yet", "Loading…", "No detailed records"] {
+        assert!(trainer.find(early).unwrap() < tabs_at, "{early} shows without tabs");
+    }
+    assert!(trainer.contains("insightKpis(d, false)"), "the header has the rating now");
+    assert!(trainer.contains("ratingLine("), "the header's figures line");
+    let kovaaks = decl(&scenarios, "kovaaksDetail");
+    assert!(kovaaks.contains("itemTabs(key, [\"overview\", \"runs\"]"), "{kovaaks}");
+    assert!(!kovaaks.contains("insights\""), "a KovaaK's page has no Insights tab");
+    assert!(kovaaks.contains("if (!cached) return"), "no history, no tabs");
+    // The Overview tab is the bare address; the others add their id.
+    assert!(trainer.contains("scenarioHref(e.id, \"runs\")") && trainer.contains("scenarioHref(e.id, \"insights\")"));
+    // The header's figures line says what the latest rating and best held are.
+    let line = decl(&ui("insights.js"), "ratingLine").to_string();
+    assert!(line.contains("best held") && line.contains("likely"), "{line}");
+}
+
+/// Bug (found checking plan L2 in the browser): a tab too short to scroll had no
+/// scrollbar, so the page was 15 px wider there and the header jumped sideways when
+/// you switched tabs. The scrollbar's space is now always kept.
+#[test]
+fn switching_tabs_does_not_shift_the_page_sideways() {
+    let css = ui("styles.css");
+    let html = css.lines().find(|l| l.starts_with("html {")).expect("a rule for html alone");
+    assert!(html.contains("scrollbar-gutter: stable"), "{html}");
+}

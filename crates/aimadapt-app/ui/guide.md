@@ -44,10 +44,9 @@ Each row has the scenario's skill and tags, your 85% rating, your best standard 
 
 While the trainer is open, the page says so and the start buttons are disabled. Each run is saved when its timer ends, so quitting partway through a workout keeps the runs you finished.
 
-**A scenario's page** is one scrolling page. The links under its name (**Overview**, **What to work on**, **Insights**, **Runs**) jump down it.
-- **Overview:** up to four key figures (your 85% rating with your best and best held, targets hit, time on target, reaction, flick speed, or for switching kills a minute and acquire time), the rating by run with its likely range, and **Last run**: how the rating moved during your latest run.
-- **What to work on:** plain-language notes from the figures below.
-- **Insights:** what your runs in the trainer recorded. Every run stores each target, each shot, tracking samples 30 times a second and the aim trace, so these come from what you actually did:
+**A scenario's page** has one header and, once you've played it, three tabs under it: **Overview**, **Insights** and **Runs**. Each tab has its own address, so Back returns to the tab you were on. The header holds the scenario's name, description and facts, the star and **Hide**, **Copy & edit**, **Standard run** and **Play**. A scenario with adaptive runs also has a line of figures there: your latest 85% rating with its likely range, and the best you've held (for example *85% speed 0.62 s (likely 0.58–0.66 s) · best held 0.55 s*). Before the first run the page has no tabs.
+- **Overview:** up to four key figures (targets hit, time on target, reaction, flick speed, or for switching kills a minute and acquire time), the rating by run with its likely range, and **Last run**: how the rating moved during your latest run. Under them are your latest five runs with their **Replay** links (**All N runs** opens the Runs tab) and the first three notes from **What to work on** (a link opens the rest on the Insights tab).
+- **Insights:** **What to work on**, plain-language notes from the figures below, then what your runs in the trainer recorded. Every run stores each target, each shot, tracking samples 30 times a second and the aim trace, so these come from what you actually did:
   - **Speed vs. hit rate:** your chance of success at each difficulty. You're reliable (95%) at one end and it's a coin flip (50%) at the other. A steep drop means you're consistent up to your limit; a gentle one means misses creep in early.
   - **Speed vs. difficulty:** time to kill against how hard each flick was (distance and size), as a Fitts' law fit. Throughput, in bits per second, is your flick speed corrected for difficulty.
   - **By flick direction** and **By flick distance:** hit rate and median time in eight directions and five distance bands, to find a weak side.
@@ -56,6 +55,8 @@ While the trainer is open, the page says so and the start buttons are disabled. 
   - **Tracking:** time on target by target speed, how long you take to recover after the target changes direction, whether you trail or lead it, your unbroken stretches on target (half your time on target came in stretches at least this long), and centering (how far from the center you sit while on target).
   - **Within a run:** success in 10-second segments, which shows slow starts or fading late.
 - **Runs:** your latest 30 runs with their rating, hit rate, flick speed, reaction and time on target, the workout they were part of, and a **Replay** link to watch each one again (see [Replay](#help/replay)). **Show all** lists every run.
+
+**A KovaaK's scenario's page** has a header with its name, tags and the star and **Hide**, and, once you've played it in KovaaK's, two tabs. **Overview** has **Play in AimAdapt** when the file plays here, your score history with its chart, and **What the data says**. **Runs** has the table of your KovaaK's runs. It has no Insights tab, since KovaaK's files don't record shots or reaction.
 
 **Reaction time and lifetime ratings.** A lifetime rating includes your reaction time, which practice barely changes. A note splits the rating into your reaction and the part you control. That part improves by more than the rating shows: going from 0.80 s to 0.62 s is 23% on the rating, but with a 0.22 s reaction the part you control fell 31%.
 
@@ -321,6 +322,7 @@ Nothing is sent anywhere. Deleting one of your scenarios or workouts removes the
 ## What's new {#whats-new}
 
 **November 2026**
+- A scenario's page now has tabs under its header: Overview, Insights and Runs (KovaaK's scenarios have Overview and Runs). The header shows your latest rating, its likely range and your best held, and Back returns to the tab you were on.
 - Steadier ratings: when your skill hasn't changed, your rating moves about half as much from run to run. It now remembers between runs how well it knows your consistency. A real improvement takes a few runs to show in full. Your ratings are kept. On each scenario the full effect starts with your second run after updating.
 - One meaning for Play: **Play** always starts an adaptive run of one scenario, and a scenario's page has a small line under it saying what it will do. Workouts and program days say **Start session**, **Continue session** and **Repeat session**. **Standard run** is the secondary button, and a KovaaK's scenario that plays here says **Play in AimAdapt**.
 - Fixed: a scenario's insights compared your rating with your first rating even when it was in another measure (after a scenario changed what it rates, say from target lifetime to kill pace).

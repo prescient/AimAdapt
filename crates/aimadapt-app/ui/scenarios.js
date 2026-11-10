@@ -267,7 +267,8 @@ function sortRows(rows, tab) {
   return [...rows].sort((a, b) => cmp(a, b, dir) || byName(a, b));
 }
 
-const scenarioHref = (key) => `#scenarios/${encodeURIComponent(key)}`;
+// An item's page. A tab other than Overview adds its id; Overview is the bare address.
+const scenarioHref = (key, tab = "overview") => `#scenarios/${encodeURIComponent(key)}${tab && tab !== "overview" ? `/${tab}` : ""}`;
 const scenarioHrefByName = (name) => scenarioHref(`name:${name}`);
 
 // Opens a Scenarios tab with its filters cleared, optionally to one skill (Today's
@@ -296,7 +297,7 @@ function trainerBanners() {
     ${tr.message ? `<section class="banner"><div class="banner-body">${esc(tr.message)}</div></section>` : ""}`;
 }
 
-function scenariosPage(arg) {
+function scenariosPage(arg, tab) {
   const tr = ui.trainer;
   if (tr.error) return `<div class="page">${head("Play, and see how you're doing", "Scenarios")}<div class="card error">${esc(tr.error)}</div></div>`;
   const wait = waitFor([trainerNeed(), overviewNeed()], "Loading scenarios…");
@@ -304,10 +305,10 @@ function scenariosPage(arg) {
   const all = scenarioItems();
   if (arg?.startsWith("name:")) {
     // Links from Today and older pages name a scenario. Swap to its own address,
-    // so Back skips this hop.
+    // so Back skips this hop. A tab in the address goes with it.
     const n = arg.slice(5);
     const item = all.find((x) => x.name === n && x.kind !== "workout");
-    location.replace(item ? scenarioHref(item.key) : "#scenarios");
+    location.replace(item ? scenarioHref(item.key, tab) : "#scenarios");
     return "";
   }
   if (!arg) {
@@ -318,7 +319,7 @@ function scenariosPage(arg) {
     ui.list.tab = arg;
     return listPage(all, arg);
   }
-  return itemPage(all.find((x) => x.key === arg) ?? null, all);
+  return itemPage(all.find((x) => x.key === arg) ?? null, all, tab);
 }
 
 function emptyTab(tab) {
@@ -433,15 +434,15 @@ function listPage(all, tab) {
 }
 
 // One scenario's or workout's own page, with a link back to the list you came from.
-function itemPage(item, all) {
-  const tab = defaultTab(all);
+function itemPage(item, all, tab) {
+  const listTab = defaultTab(all);
   const link = typeof helpLink === "function" ? helpLink() : "";
   return `<div class="page">
-    <div class="back-row"><a class="back-link" href="#scenarios/${tab}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg>Scenarios · ${esc(TAB_LABELS[tab])}</a>
+    <div class="back-row"><a class="back-link" href="#scenarios/${listTab}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg>Scenarios · ${esc(TAB_LABELS[listTab])}</a>
       <div class="head-actions">${playingWith()}${link}</div></div>
     ${trainerBanners()}
-    ${item ? `<div class="detail" id="scenario-detail">${itemDetail(item)}</div>`
-      : `<div class="card note-body">This scenario or workout isn't here any more. <a href="#scenarios/${tab}">Back to ${esc(TAB_LABELS[tab])}</a></div>`}
+    ${item ? `<div class="detail" id="scenario-detail">${itemDetail(item, tab)}</div>`
+      : `<div class="card note-body">This scenario or workout isn't here any more. <a href="#scenarios/${listTab}">Back to ${esc(TAB_LABELS[listTab])}</a></div>`}
   </div>`;
 }
 
@@ -470,13 +471,19 @@ async function toggleMark(list, key) {
   render();
 }
 
-function itemDetail(x) {
+function itemDetail(x, tab) {
   if (x.kind === "workout") return workoutDetail(x.entry);
-  if (x.kind === "kovaaks") return kovaaksDetail(x);
-  return trainerDetail(x.entry);
+  if (x.kind === "kovaaks") return kovaaksDetail(x, tab);
+  return trainerDetail(x.entry, tab);
 }
 
-const jumpLinks = (ids) => `<nav class="jumps" aria-label="On this page">${ids.map(([id, label]) => `<button type="button" class="jump" data-action="jump" data-target="${id}">${label}</button>`).join("")}</nav>`;
+// The tabs under an item's header. The tab asked for shows if the page has it, and
+// Overview shows otherwise. Returns the tab's id with the row to draw.
+function itemTabs(key, have, asked) {
+  const list = ITEM_TABS.filter(([id]) => have.includes(id));
+  const current = have.includes(asked) ? asked : "overview";
+  return { current, row: tabs(`scenarios/${encodeURIComponent(key)}`, list, current, "overview") };
+}
 
 function workoutDetail(e) {
   const w = e.workout;
@@ -500,52 +507,57 @@ function workoutDetail(e) {
     </section>`;
 }
 
-function trainerDetail(e) {
+function trainerDetail(e, askedTab) {
   const s = e.scenario;
   const playing = ui.trainer.data.playing ? "disabled" : "";
   const played = (e.runs || 0) + (e.adaptive_runs || 0) > 0 || ui.insights.overview.some((o) => o.scenario === s.name);
   const data = played ? insightsFor(s.name) : undefined;
   const d = data && !data.error ? data : null;
   const adaptive = d ? d.runs.filter((r) => r.adaptive && r.rating !== null && r.knob === d.knob) : [];
-  const sections = d ? [
-    d.curve ? curveCard(d.curve) : "",
-    d.fitts ? fittsCard(d.fitts) : "",
-    d.directions.length >= 3 ? directionCard(d.directions) : "",
-    d.shots ? shotCard(d.shots) : "",
-    d.reaction ? reactionCard(d.reaction) : "",
-    d.distances.length ? distanceCard(d.distances) : "",
-    d.tracking ? trackingCard(d.tracking) : "",
-    d.segments.some((x) => x.success !== null) ? segmentCard(d.segments) : "",
-  ].filter(Boolean) : [];
-  const jumps = [["overview", "Overview"]];
-  if (d) jumps.push(["work-on", "What to work on"]);
-  if (sections.length) jumps.push(["insights", "Insights"]);
-  if (d) jumps.push(["runs", "Runs"]);
-  return `<section class="card detail-head" id="overview">
+  const figures = d ? ratingLine(d, adaptive) : "";
+  const header = `<section class="card detail-head">
       <div class="card-head" style="align-items:flex-start">
         <div><div class="chips"><span class="tag">AimAdapt</span>${e.builtin ? "" : '<span class="tag gold">Yours</span>'}${isHidden(e.id) ? '<span class="tag grey">Hidden</span>' : ""}<span class="small muted">${esc(SKILL_LABELS[s.skill] ?? s.category)}</span></div>
           <h2 class="detail-title">${esc(s.name)}</h2>
           <div class="note-body">${esc(s.description || "")}</div>
-          <div class="small muted" style="margin-top:4px">${esc(scenarioFacts(s))}</div></div>
+          <div class="small muted" style="margin-top:4px">${esc(scenarioFacts(s))}</div>
+          ${figures ? `<div class="small" style="margin-top:4px">${esc(figures)}</div>` : ""}</div>
         <span class="chips">${markButtons(e.id)}
           <a class="btn" href="#edit/${encodeURIComponent(e.id)}">${e.builtin ? "Copy &amp; edit" : "Edit"}</a>
           <button class="btn" type="button" data-action="play" data-id="${esc(e.id)}" data-adaptive="0" ${playing}>Standard run</button>
           <span class="play-group"><button class="btn primary" type="button" data-action="play" data-id="${esc(e.id)}" data-adaptive="1" ${playing}>${playIcon}Play</button>
             <span class="small muted">adaptive · ${num(s.timing.duration_s)} s</span></span></span>
       </div>
-      ${jumpLinks(jumps)}
-    </section>
-    ${!played ? `<section class="card"><div class="note-body">Not played yet. Your first adaptive run is a calibration run that finds your level as you play; after that every run plays at one difficulty. See <a href="#help/adaptive">Adaptive mode</a>.</div></section>`
-      : data === undefined ? `<div class="empty-state">Loading…</div>`
-      : data?.error ? `<div class="card error">${esc(data.error)}</div>`
-      : !d ? `<section class="card"><div class="note-body">No detailed records for this scenario yet.</div></section>`
-      : `<section class="kpis" aria-label="Key figures">${insightKpis(d).slice(0, 4).join("")}</section>
-        ${adaptive.length ? ratingCard(d, adaptive) : ""}
-        <section class="card" id="work-on"><h2>What to work on</h2>
-          ${d.notes.length ? `<div class="grid">${d.notes.map((n) => `<div class="note"><div class="note-title">${esc(n.title)}</div><div class="note-body">${esc(n.body)}</div></div>`).join("")}</div>` : `<div class="note-body">Play a few more runs for notes on what to work on.</div>`}
-        </section>
-        ${sections.length ? `<div id="insights" class="insights-head"><h2>Insights</h2><span class="small muted">From your last ${d.recent_runs} runs</span></div><div class="insight-cols">${sections.join("")}</div>` : ""}
-        <section class="card" id="runs">${insightRunsTable(d)}</section>`}`;
+    </section>`;
+  if (!played) return `${header}<section class="card"><div class="note-body">Not played yet. Your first adaptive run is a calibration run that finds your level as you play; after that every run plays at one difficulty. See <a href="#help/adaptive">Adaptive mode</a>.</div></section>`;
+  if (data === undefined) return `${header}<div class="empty-state">Loading…</div>`;
+  if (data?.error) return `${header}<div class="card error">${esc(data.error)}</div>`;
+  if (!d) return `${header}<section class="card"><div class="note-body">No detailed records for this scenario yet.</div></section>`;
+
+  const { current, row } = itemTabs(e.id, ["overview", "insights", "runs"], askedTab);
+  let body;
+  if (current === "runs") {
+    body = `<section class="card">${insightRunsTable(d)}</section>`;
+  } else if (current === "insights") {
+    const sections = [
+      d.curve ? curveCard(d.curve) : "",
+      d.fitts ? fittsCard(d.fitts) : "",
+      d.directions.length >= 3 ? directionCard(d.directions) : "",
+      d.shots ? shotCard(d.shots) : "",
+      d.reaction ? reactionCard(d.reaction) : "",
+      d.distances.length ? distanceCard(d.distances) : "",
+      d.tracking ? trackingCard(d.tracking) : "",
+      d.segments.some((x) => x.success !== null) ? segmentCard(d.segments) : "",
+    ].filter(Boolean);
+    body = `${workOnCard(d)}
+      ${sections.length ? `<div class="insights-head"><h2>Insights</h2><span class="small muted">From your last ${d.recent_runs} runs</span></div><div class="insight-cols">${sections.join("")}</div>` : ""}`;
+  } else {
+    body = `<section class="kpis" aria-label="Key figures">${insightKpis(d, false).slice(0, 4).join("")}</section>
+      ${adaptive.length ? ratingCard(d, adaptive) : ""}
+      ${latestRunsCard(d, scenarioHref(e.id, "runs"))}
+      ${workOnCard(d, 3, scenarioHref(e.id, "insights"))}`;
+  }
+  return `${header}${row}${body}`;
 }
 
 // Each KovaaK's scenario's .sce file and whether the trainer can play it, by name.
@@ -573,7 +585,7 @@ function sceCard(name) {
 
 // A KovaaK's scenario: its score history from KovaaK's stats files, if you've
 // played it there, and Play in AimAdapt if the trainer can play its file.
-function kovaaksDetail(x) {
+function kovaaksDetail(x, askedTab) {
   const name = x.name;
   const played = Boolean(x.entry);
   const detail = played ? scenarioDetail(name) : null;
@@ -584,7 +596,7 @@ function kovaaksDetail(x) {
   const about = played
     ? "Played in KovaaK's. Its stats files record score, accuracy and kill times; shot placement, reaction, tracking and replays come from runs in AimAdapt's trainer."
     : "In your KovaaK's scenarios, not played there yet. Your scores show here once you play it in KovaaK's.";
-  return `<section class="card detail-head" id="overview">
+  const header = `<section class="card detail-head">
       <div class="card-head" style="align-items:flex-start">
         <div><div class="chips"><span class="tag blue">KovaaK's</span>${isHidden(key) ? '<span class="tag grey">Hidden</span>' : ""}${x.skill ? `<span class="small muted">${esc(x.skill)}</span>` : ""}</div>
           <h2 class="detail-title">${esc(name)}</h2>
@@ -593,11 +605,14 @@ function kovaaksDetail(x) {
         <span class="chips">${markButtons(key)}</span>
       </div>
       <div class="small muted">${about}</div>
-      ${cached ? jumpLinks([["overview", "Overview"], ["work-on", "What the data says"], ["runs", "Runs"]]) : ""}
-    </section>
-    ${sceCard(name)}
-    ${detail?.error ? `<div class="card error">Couldn't load its runs: ${esc(detail.error)}</div>` : ""}
-    ${cached ? scenarioView(cached) : ""}`;
+    </section>`;
+  const error = detail?.error ? `<div class="card error">Couldn't load its runs: ${esc(detail.error)}</div>` : "";
+  if (!cached) return `${header}${sceCard(name)}${error}`;
+  const { current, row } = itemTabs(key, ["overview", "runs"], askedTab);
+  const body = current === "runs"
+    ? scenarioRunsCard(cached)
+    : `${sceCard(name)}${scoreHistoryCard(cached)}${scenarioNotesCard(cached)}`;
+  return `${header}${row}${body}`;
 }
 
 async function startSce(path) {
@@ -635,8 +650,7 @@ document.addEventListener("click", (e) => {
   if (!btn) return;
   const a = btn.dataset.action;
   const tab = shownTab();
-  if (a === "jump") document.getElementById(btn.dataset.target)?.scrollIntoView({ behavior: "smooth", block: "start" });
-  else if (a === "favorite") toggleMark("favorites", btn.dataset.key);
+  if (a === "favorite") toggleMark("favorites", btn.dataset.key);
   else if (a === "hide") toggleMark("hidden", btn.dataset.key);
   else if (a === "browse-skill") openScenariosTab("browse", btn.dataset.skill ?? "");
   else if (a === "list-tab-open") openScenariosTab(btn.dataset.tab);

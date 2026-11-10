@@ -167,7 +167,7 @@ This also closes the backlog item on showing the split of run kinds and breakthr
 
 **Change.**
 - One header: name, rating with its range, best held, the play buttons.
-- Tabs under it, replacing the jump links: **Overview** (rating trend, the last five runs with Replay links, the top three notes), **Last run** (the per-run charts) and **Runs** (the full table).
+- Tabs under it, replacing the jump links: **Overview** (rating trend, the last five runs with Replay links, the top three notes), **Insights** (every note, then the charts from the last ten runs) and **Runs** (the full table). The middle tab was first planned as "Last run"; its charts cover the last ten runs, so it keeps the name Insights.
 - Addresses such as `#scenarios/<id>/runs`, so a tab can be linked and survives a reload. Old addresses still land somewhere sensible.
 - A KovaaK's scenario's page uses the same header and tabs and hides the tabs it has no data for.
 - The editor stays where it is.

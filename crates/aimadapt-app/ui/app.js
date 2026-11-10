@@ -197,8 +197,18 @@ const MOVED = {
 const PROGRESS_TABS = [["skills", "Skills"], ["benchmarks", "Benchmarks"], ["time", "Time"]];
 const SETTINGS_TABS = [["aim", "Aim and display"], ["goals", "Goals and time"], ["kovaaks", "KovaaK's"], ["data", "Your data"]];
 
+// The tabs of a scenario's own page. Overview is also the bare address.
+const ITEM_TABS = [["overview", "Overview"], ["insights", "Insights"], ["runs", "Runs"]];
+
+// A scenario's page can end in a tab: #scenarios/<key>/insights. The key is written
+// with encodeURIComponent, so a "/" inside it is %2F and the tab is the last segment.
+// Every other address is the view and an argument, as before.
 function route() {
   const [view, ...rest] = (location.hash.slice(1) || "today").split("/");
+  if (view === "scenarios" && rest.length >= 2 && ITEM_TABS.some(([id]) => id === rest.at(-1))) {
+    const tab = rest.pop();
+    return { view, arg: decodeURIComponent(rest.join("/")), tab };
+  }
   return { view, arg: rest.length ? decodeURIComponent(rest.join("/")) : null };
 }
 
@@ -221,7 +231,7 @@ function render() {
     location.replace(moved);
     return;
   }
-  const { view, arg } = r;
+  const { view, arg, tab } = r;
   const navView = NAV_OF[view] ?? view;
   document.querySelectorAll(".nav").forEach((a) => {
     const on = a.dataset.view === navView;
@@ -238,7 +248,7 @@ function render() {
   const views = { today, scenarios: scenariosPage, edit, workout, progress: progressPage, settings: settingsPage, help: helpPage, replay: replayPage };
   const focused = focusedControl(main);
   try {
-    main.innerHTML = (views[view] || today)(arg);
+    main.innerHTML = (views[view] || today)(arg, tab);
   } catch (e) {
     // Say what broke instead of leaving the last page up (or "Loading…") with no word.
     console.error(e);
@@ -318,9 +328,12 @@ const rescanButton = () =>
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"></path><path d="M20 4v7h-7"></path></svg>
     ${ui.rescanning ? "Scanning…" : "Rescan folder"}</button></span>`;
 
-// Tabs that are links, so each tab has its own address and Back works.
-function tabs(base, list, current) {
-  return `<nav class="tabs" aria-label="Sections">${list.map(([id, label]) => `<a class="tab ${id === current ? "on" : ""}" href="#${base}/${id}" ${id === current ? 'aria-current="page"' : ""}>${label}</a>`).join("")}</nav>`;
+// Tabs that are links, so each tab has its own address and Back works. The tab named
+// `bare` has the base address with no suffix (an item's Overview is the address every
+// list links to).
+function tabs(base, list, current, bare = null) {
+  const href = (id) => `#${base}${id === bare ? "" : `/${id}`}`;
+  return `<nav class="tabs" aria-label="Sections">${list.map(([id, label]) => `<a class="tab ${id === current ? "on" : ""}" href="${href(id)}" ${id === current ? 'aria-current="page"' : ""}>${label}</a>`).join("")}</nav>`;
 }
 
 const noRunsYet = () =>
@@ -420,10 +433,27 @@ function coachNotes() {
   return notes.slice(0, 3);
 }
 
-function scenarioView({ stats: s, history, cold_starts }) {
+// A KovaaK's scenario's score history: the figures and the score chart.
+function scoreHistoryCard({ stats: s, history }) {
   const periods = ui.snap.sens_periods;
   const counted = history.filter((r) => !r.restarted && r.score !== null);
   const sessionsCount = new Set(counted.map((r) => r.day)).size;
+  return `<section class="card" aria-label="Score history" style="gap:18px">
+      <div>
+        <div class="small muted">${s.runs} runs${s.runs !== s.counted_runs ? ` (${s.runs - s.counted_runs} restarted)` : ""} · ${sessionsCount} ${sessionsCount === 1 ? "day" : "days"} · first played ${esc(fmtShort(dt(s.first_played)))}</div></div>
+      <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px">
+        <div class="tile"><div class="kpi-label">Personal best</div><div class="kpi-value" style="color:var(--gold)">${num(s.best_score)}</div><div class="small muted">${s.best_at ? esc(fmtShort(dt(s.best_at)) + ", " + fmtTime(dt(s.best_at))) : ""}</div></div>
+        <div class="tile"><div class="kpi-label">Average</div><div class="kpi-value">${num(s.average)}</div><div class="small muted">${s.counted_runs} counted runs</div></div>
+        <div class="tile"><div class="kpi-label">Accuracy</div><div class="kpi-value">${acc(s.recent_accuracy)}</div><div class="small muted">Last ${ui.snap.progress_settings.trend_window} runs</div></div>
+        <div class="tile"><div class="kpi-label">Improvement</div><div class="kpi-value pos">${pct(s.improvement_pct)}</div><div class="small muted">First run → best</div></div>
+      </div>
+      ${scoreChart(history, periods)}
+    </section>`;
+}
+
+// "What the data says" for a KovaaK's scenario.
+function scenarioNotesCard({ stats: s, history, cold_starts }) {
+  const periods = ui.snap.sens_periods;
   const notes = [];
   for (const c of cold_starts.slice(-3)) {
     const rest = c.vs_rest_of_day_pct !== null ? `, ${pct(c.vs_rest_of_day_pct)} vs. the rest of that day` : "";
@@ -435,32 +465,22 @@ function scenarioView({ stats: s, history, cold_starts }) {
   if (s.variation_pct !== null) notes.push(["Consistency", `Scores vary by about ${s.variation_pct.toFixed(0)}% run to run (lower is steadier).`]);
   if (s.trend_pct !== null) notes.push(["Trend", `Last ${ui.snap.progress_settings.trend_window} runs vs. the ones before: ${pct(s.trend_pct)}.`]);
   const lastPeriod = periods[history.at(-1).sens_period];
+  return `<section class="card" aria-label="What the data says"><h2>What the data says</h2>
+      ${notes.map(([t, b]) => `<div class="note"><div class="note-title">${esc(t)}</div><div class="note-body">${esc(b)}</div></div>`).join("")}
+      <div class="small muted">Latest run played at ${esc(sensLabel(lastPeriod.settings))}${lastPeriod.cm_per_360 ? ` · ${lastPeriod.cm_per_360.toFixed(1)} cm/360` : ""}</div>
+    </section>`;
+}
 
-  return `<section class="card" aria-label="Score history" style="gap:18px">
-      <div>
-        <div class="small muted">${s.runs} runs${s.runs !== s.counted_runs ? ` (${s.runs - s.counted_runs} restarted)` : ""} · ${sessionsCount} ${sessionsCount === 1 ? "day" : "days"} · first played ${esc(fmtShort(dt(s.first_played)))}</div></div>
-      <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px">
-        <div class="tile"><div class="kpi-label">Personal best</div><div class="kpi-value" style="color:var(--gold)">${num(s.best_score)}</div><div class="small muted">${s.best_at ? esc(fmtShort(dt(s.best_at)) + ", " + fmtTime(dt(s.best_at))) : ""}</div></div>
-        <div class="tile"><div class="kpi-label">Average</div><div class="kpi-value">${num(s.average)}</div><div class="small muted">${s.counted_runs} counted runs</div></div>
-        <div class="tile"><div class="kpi-label">Accuracy</div><div class="kpi-value">${acc(s.recent_accuracy)}</div><div class="small muted">Last ${ui.snap.progress_settings.trend_window} runs</div></div>
-        <div class="tile"><div class="kpi-label">Improvement</div><div class="kpi-value pos">${pct(s.improvement_pct)}</div><div class="small muted">First run → best</div></div>
-      </div>
-      ${scoreChart(history, periods)}
-    </section>
-    <div class="row" style="align-items:flex-start">
-      <section class="card grow-3" aria-label="Runs" id="runs" style="flex:3 1 360px"><h2>Runs</h2><div class="table-wrap"><table>
-        <thead><tr><th>#</th><th>When</th><th class="r">Score</th><th class="r">Accuracy</th><th class="r">Avg TTK</th><th></th></tr></thead>
-        <tbody>${history.map((r, i) => ({ r, i })).reverse().slice(0, 60).map(({ r, i }) => `<tr>
-          <td class="mono muted">${i + 1}</td><td style="white-space:nowrap">${esc(fmtShort(dt(r.finished_at)))}, ${esc(fmtTime(dt(r.finished_at)))}</td>
-          <td class="r num">${num(r.score)}</td><td class="r mono">${acc(r.accuracy)}</td>
-          <td class="r mono">${r.avg_ttk_s ? r.avg_ttk_s.toFixed(2) + "s" : "–"}</td>
-          <td>${r.restarted ? '<span class="tag grey">restarted</span>' : r.is_pb ? '<span class="tag gold">PB</span>' : ""}</td></tr>`).join("")}</tbody>
-      </table></div>${history.length > 60 ? `<div class="small muted">Showing the latest 60 of ${history.length}.</div>` : ""}</section>
-      <section class="card grow-2" aria-label="What the data says" id="work-on" style="flex:2 1 280px"><h2>What the data says</h2>
-        ${notes.map(([t, b]) => `<div class="note"><div class="note-title">${esc(t)}</div><div class="note-body">${esc(b)}</div></div>`).join("")}
-        <div class="small muted">Latest run played at ${esc(sensLabel(lastPeriod.settings))}${lastPeriod.cm_per_360 ? ` · ${lastPeriod.cm_per_360.toFixed(1)} cm/360` : ""}</div>
-      </section>
-    </div>`;
+// A KovaaK's scenario's run table, newest first.
+function scenarioRunsCard({ history }) {
+  return `<section class="card" aria-label="Runs"><h2>Runs</h2><div class="table-wrap"><table>
+      <thead><tr><th>#</th><th>When</th><th class="r">Score</th><th class="r">Accuracy</th><th class="r">Avg TTK</th><th></th></tr></thead>
+      <tbody>${history.map((r, i) => ({ r, i })).reverse().slice(0, 60).map(({ r, i }) => `<tr>
+        <td class="mono muted">${i + 1}</td><td style="white-space:nowrap">${esc(fmtShort(dt(r.finished_at)))}, ${esc(fmtTime(dt(r.finished_at)))}</td>
+        <td class="r num">${num(r.score)}</td><td class="r mono">${acc(r.accuracy)}</td>
+        <td class="r mono">${r.avg_ttk_s ? r.avg_ttk_s.toFixed(2) + "s" : "–"}</td>
+        <td>${r.restarted ? '<span class="tag grey">restarted</span>' : r.is_pb ? '<span class="tag gold">PB</span>' : ""}</td></tr>`).join("")}</tbody>
+    </table></div>${history.length > 60 ? `<div class="small muted">Showing the latest 60 of ${history.length}.</div>` : ""}</section>`;
 }
 
 // A score axis from min to max rounded out to a "nice" step (1, 2, 2.5 or 5 × 10^n),

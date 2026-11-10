@@ -90,7 +90,7 @@ Saturday's drills are chosen from your weakest sub-skills.
 Four pages, in the sidebar:
 
 - **Today:** today's program workout with each drill's runs and 85% rating, and Start session, Continue session or Repeat session. Also the week at a glance, your favorites and what you played last (each with Play, or Start session for a workout), and a couple of things worth knowing.
-- **Scenarios:** everything you can play or have played (the trainer's scenarios, your workouts and your KovaaK's scenarios) in four tabs across the page: Recent (newest first, by day), Browse (every scenario, the trainer's and your KovaaK's files, by skill, with tag chips), Workouts and Yours. Each is a table you can sort by any column, with a search over names, skills, tags and descriptions and filters for skill, type, played or not, and favorites. Star favorites and hide what you don't want listed. Each scenario and workout has its own page: Play (adaptive) and Standard run at the top, then its key figures, rating chart, what to work on, Insights and runs with replays.
+- **Scenarios:** everything you can play or have played (the trainer's scenarios, your workouts and your KovaaK's scenarios) in four tabs across the page: Recent (newest first, by day), Browse (every scenario, the trainer's and your KovaaK's files, by skill, with tag chips), Workouts and Yours. Each is a table you can sort by any column, with a search over names, skills, tags and descriptions and filters for skill, type, played or not, and favorites. Star favorites and hide what you don't want listed. Each scenario and workout has its own page: Play (adaptive) and Standard run at the top with your latest rating, then three tabs: Overview (key figures, rating chart, latest runs and a few notes), Insights (what to work on and the charts below) and Runs (every run, with replays). A KovaaK's scenario's page has Overview (score history) and Runs.
 - **Progress:** three tabs.
   - **Skills:** the skill profile (the change in each of the nine sub-skills, each group and overall, measured from the end of your first day on each drill), the week (each day done, partial or missed, its minutes and its main drills against the same day last week, with Start session to make up a missed day), and reps and carry-over (rep 1 against the last rep of each drill, and how much of the previous session's rating carried over).
   - **Benchmarks:** your Voltaic Season 5 bests.
@@ -111,7 +111,7 @@ Help is at the bottom of the sidebar, and every page links to its section of the
 
 ## Insights
 
-Every run stores each target, each shot, tracking samples 30 times a second, a 240 Hz aim trace, and where the targets were 60 times a second. Each scenario's page shows:
+Every run stores each target, each shot, tracking samples 30 times a second, a 240 Hz aim trace, and where the targets were 60 times a second. Each scenario's page shows the rating by run on its Overview tab and the rest on its Insights tab:
 
 - **Rating by run** with its likely range, and how it moved during the last run.
 - **Speed vs. hit rate curve:** where you're reliable (95%), your 85% rating, and the coin-flip point (50%), with observed hit rates.
