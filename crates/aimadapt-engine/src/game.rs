@@ -1115,6 +1115,21 @@ fn update_hud(
     texts.p5().0 = line;
 }
 
+/// The verdict line after a fixed run. `goal` and `rate` are fractions (0.85). A run
+/// can be at the goal rate and still not hold it, when it was too short to count.
+fn run_verdict(goal: f32, rate: Option<f32>, held: bool, breakthrough: bool) -> String {
+    let pct = goal * 100.0;
+    if breakthrough {
+        format!("Breakthrough: you held {pct:.0}% faster than ever before")
+    } else if held {
+        format!("You held the {pct:.0}% goal")
+    } else if rate.is_some_and(|r| r >= goal) {
+        format!("At the {pct:.0}% goal, but too few targets to count as held")
+    } else {
+        format!("Below the {pct:.0}% goal this time")
+    }
+}
+
 fn update_overlay(
     game: Res<Game>,
     mut overlay: Single<&mut Visibility, With<Overlay>>,
@@ -1149,13 +1164,7 @@ fn update_overlay(
                     rate_word(k, game.sim.rated_per_target()),
                 ),
                 Some(v) => {
-                    let verdict = if a.breakthrough {
-                        format!("Breakthrough: you held {goal:.0}% faster than ever before")
-                    } else if a.fastest.is_some() {
-                        format!("You held the {goal:.0}% goal")
-                    } else {
-                        format!("Below the {goal:.0}% goal this time")
-                    };
+                    let verdict = run_verdict(a.goal, a.success_rate, a.fastest.is_some(), a.breakthrough);
                     format!(
                         "{}: {}   {} {hit:.0}%\n{verdict}\nRating {} (was {}) | {best}",
                         a.pick.run_label(),
@@ -1267,6 +1276,16 @@ fn rate_word(knob: Knob, per_target: bool) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Bug: a run at 90% but too short to hold the goal said "Below the 85% goal".
+    #[test]
+    fn the_run_verdict_names_all_four_outcomes() {
+        assert_eq!(run_verdict(0.85, Some(0.95), true, true), "Breakthrough: you held 85% faster than ever before");
+        assert_eq!(run_verdict(0.85, Some(0.95), true, false), "You held the 85% goal");
+        assert_eq!(run_verdict(0.85, Some(0.9), false, false), "At the 85% goal, but too few targets to count as held");
+        assert_eq!(run_verdict(0.85, Some(0.7), false, false), "Below the 85% goal this time");
+        assert_eq!(run_verdict(0.85, None, false, false), "Below the 85% goal this time");
+    }
 
     fn builtin(id: &str) -> Scenario {
         let e = aimadapt_sim::library::builtins().into_iter().find(|e| e.id == id).unwrap();

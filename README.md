@@ -49,7 +49,7 @@ Each scenario has one difficulty setting, chosen for what it trains: target life
   | Easy | 93–97% | 15% |
 
   The Steady and Push mixes change these shares. A stretch run never follows another stretch run, or a run well below 85%.
-- **Breakthroughs:** holding 85% for a whole run at a value harder than your best.
+- **Breakthroughs:** holding 85% for a whole run at a value harder than your best. A run of 30 targets or more holds it at 85%. A shorter run has to beat 85% by a margin (10 of 10, or 19 of 20), so a short lucky run doesn't count. A tracking segment counts as three targets.
 - **What counts:**
   - **Clicking:** a target is a success if it's destroyed before it times out, with at most one miss on it.
   - **Tracking:** each 2-second segment is scored by the share of time spent on target. Stability Switch and Switch Track only count time while a target is damaged and not yet healed, so moving between targets isn't counted against you. Their targets show health bars and heal when you leave them.

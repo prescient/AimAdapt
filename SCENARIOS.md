@@ -154,7 +154,7 @@ Every scenario can be played in **Standard** mode, at the difficulty written in 
 | Stretch | 55–72% | 20% | 5% | 35% |
 | Easy | 93–97% | 15% | 10% | 15% |
 
-A stretch run never comes straight after another stretch run, or after a run more than 10 points below the goal. Holding the goal rate (at least 10 targets or segments) for a whole run at a value harder than your best counts as a breakthrough. The game announces it at the end of the run, and the value is saved as your best held. The mix is a setting in your profile.
+A stretch run never comes straight after another stretch run, or after a run more than 10 points below the goal. Holding the goal rate for a whole run at a value harder than your best counts as a breakthrough. A run of 30 or more targets holds the goal at the goal rate itself. A shorter run (10 to 29 targets) has to beat it by one binomial standard deviation for its length, so at 85% that is 10 of 10 or 19 of 20. A tracking segment counts as three targets, so a tracking run of 20 seconds or more needs only the goal rate. A run under 10 targets or segments never counts. The game announces it at the end of the run, and the value is saved as your best held. The mix is a setting in your profile.
 
 | Field | Default | Meaning |
 |---|---|---|

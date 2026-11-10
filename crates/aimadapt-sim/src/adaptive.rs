@@ -41,8 +41,13 @@ pub const LAPSE: f32 = 0.04;
 /// within a segment are strongly correlated, so a segment counts as a few targets.
 const SEGMENT_WEIGHT: f32 = 3.0;
 const SLOPES: [f32; 6] = [0.04, 0.07, 0.11, 0.17, 0.26, 0.4];
-/// A fixed-difficulty run needs this many outcomes to count as holding the goal.
+/// A fixed-difficulty run needs at least this many outcomes to count as holding the
+/// goal, and a short one also needs a margin over the goal rate (see [`EVIDENCE_FULL`]).
 pub const MIN_RUN_OUTCOMES: usize = 10;
+/// A run with this much evidence, in target-equivalents (a clicking target counts 1,
+/// a tracking segment [`SEGMENT_WEIGHT`]), holds the goal at the goal rate itself.
+/// A shorter run needs a margin of one binomial standard deviation on top.
+const EVIDENCE_FULL: f32 = 30.0;
 /// A run this far below the goal rate rules out a stretch run next.
 const WELL_BELOW: f32 = 0.10;
 const GRID: usize = 161;
@@ -301,6 +306,8 @@ pub struct Rating {
     /// Log posterior, `thetas.len() × SLOPES.len()`.
     logp: Vec<f64>,
     outcomes: Vec<f32>,
+    /// The outcomes so far in target-equivalents: 1 per target, [`SEGMENT_WEIGHT`] per segment.
+    evidence: f32,
     /// (seconds, goal-rate value)
     pub timeline: Vec<(f32, f32)>,
     pub start_value: f32,
@@ -365,6 +372,7 @@ impl Rating {
             thetas,
             logp,
             outcomes: Vec::new(),
+            evidence: 0.0,
             timeline: Vec::new(),
             start_value: 0.0,
             best_before: prior.and_then(|p| p.fastest),
@@ -462,12 +470,23 @@ impl Rating {
         self.cfg.knob.value(h)
     }
 
-    /// Ends a fixed-difficulty run at `value`. If the run held the goal rate, that
-    /// value becomes this run's best, and the result is true for a breakthrough:
-    /// held at a value harder than the best before.
+    /// Whether the run so far holds the goal. It needs at least `MIN_RUN_OUTCOMES`
+    /// outcomes and a success rate of the goal plus a margin, capped at 100%. The
+    /// margin is one binomial standard deviation, sqrt(goal * (1 - goal) / evidence),
+    /// and is zero once there are `EVIDENCE_FULL` target-equivalents. So a short run
+    /// can't hold the goal by luck: with an 85% goal, 9 of 10 doesn't, 10 of 10 does.
+    fn holds_goal(&self) -> bool {
+        let goal = self.cfg.goal;
+        let margin = if self.evidence >= EVIDENCE_FULL { 0.0 } else { (goal * (1.0 - goal) / self.evidence).sqrt() };
+        self.outcomes.len() >= MIN_RUN_OUTCOMES
+            && self.success_rate().is_some_and(|r| r >= (goal + margin).min(1.0) - 1e-6)
+    }
+
+    /// Ends a fixed-difficulty run at `value`. If the run held the goal (see
+    /// `holds_goal`), that value becomes this run's best, and the result is true for a
+    /// breakthrough: held at a value harder than the best before.
     pub fn finish_run(&mut self, value: f32) -> bool {
-        let held = self.outcomes.len() >= MIN_RUN_OUTCOMES && self.success_rate().is_some_and(|r| r >= self.cfg.goal);
-        if !held {
+        if !self.holds_goal() {
             return false;
         }
         self.fastest = Some(value);
@@ -511,6 +530,7 @@ impl Rating {
             }
         }
         self.outcomes.push(outcome);
+        self.evidence += w;
         let success = outcome >= if tracking { self.cfg.goal } else { 0.5 };
         self.last_failed = !success;
         self.timeline.push((t, self.value()));
@@ -661,6 +681,74 @@ mod tests {
         // Too short a run to count.
         let mut r = run_at(prior, 0.45, 5, 5);
         assert!(!r.finish_run(0.45));
+    }
+
+    /// Bug: 9 hits of 10 (90%) counted as holding the goal and announced a breakthrough,
+    /// though a run that short clears 85% by luck. Short runs now need a margin.
+    #[test]
+    fn short_runs_need_a_margin_over_the_goal_to_hold_it() {
+        let prior = rated(0.6, 0.1, Some(0.5), None);
+        // (hits, n, holds) at the 85% goal.
+        let cases = [
+            (9, 10, false),
+            (10, 10, true),
+            (18, 20, false),
+            (19, 20, true),
+            (26, 29, false),
+            (27, 29, true),
+            (25, 30, false),
+            (26, 30, true),
+        ];
+        for (hits, n, holds) in cases {
+            let mut r = run_at(prior, 0.45, hits, n);
+            assert_eq!(r.finish_run(0.45), holds, "{hits} of {n}: breakthrough");
+            assert_eq!(r.fastest.is_some(), holds, "{hits} of {n}: best held");
+        }
+    }
+
+    /// Bug: a short lucky run set `fastest`, which then hid a real breakthrough at the
+    /// same value later.
+    #[test]
+    fn a_short_lucky_run_does_not_hide_a_later_breakthrough() {
+        let prior = rated(0.6, 0.1, Some(0.5), None);
+        let mut lucky = run_at(prior, 0.45, 9, 10);
+        assert!(!lucky.finish_run(0.45));
+        assert_eq!(lucky.fastest, None);
+        // The next run starts from the best held so far, as the trainer reads it back from
+        // its saved runs: the lucky run's value if it had set one, else the old 0.5 s.
+        let next = rated(0.6, 0.1, lucky.fastest.or(prior.fastest), None);
+        let mut full = run_at(next, 0.45, 45, 50);
+        assert!(full.finish_run(0.45), "a full run at the same value is still a breakthrough");
+    }
+
+    /// Tracking segments count as three targets each, so 10 of them need no margin.
+    #[test]
+    fn tracking_runs_hold_the_goal_by_segments() {
+        let prior = rated(0.6, 0.1, Some(0.5), None);
+        let track = |n: usize| {
+            let mut r = Rating::new(cfg(), Some(prior));
+            for i in 0..n {
+                r.update(i as f32, 0.45, 0.86, true);
+            }
+            r
+        };
+        let mut r = track(10);
+        assert!(r.finish_run(0.45));
+        assert_eq!(r.fastest, Some(0.45));
+        let mut r = track(9);
+        assert!(!r.finish_run(0.45));
+        assert_eq!(r.fastest, None);
+    }
+
+    /// The required rate is capped at 100%, so a high goal stays reachable.
+    #[test]
+    fn a_goal_near_one_stays_reachable() {
+        let prior = rated(0.6, 0.1, Some(0.5), None);
+        let mut r = Rating::new(Resolved { goal: 0.95, ..cfg() }, Some(prior));
+        for i in 0..10 {
+            r.update(i as f32, 0.45, 1.0, false);
+        }
+        assert!(r.finish_run(0.45));
     }
 
     #[test]

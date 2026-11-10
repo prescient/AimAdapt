@@ -75,7 +75,7 @@ Last reviewed: Nov 10, 2026 (after the layout review and the adaptive review; th
   - Every later run plays at one value, shown up front ("This run: 0.62 s"), picked from the mix: at your level (80–90% chance), stretch (55–72%) and easy (93–97%).
   - Steady, Balanced and Push mixes are set per profile.
   - Guard rails: no stretch run after a stretch run, or after a run more than 10 points below the goal.
-  - A breakthrough is holding the goal for a whole run at a value past your best, announced at the end of the run.
+  - A breakthrough is holding the goal for a whole run at a value past your best, announced at the end of the run. A run under 30 targets (a tracking segment counts as three) has to beat the goal by one binomial standard deviation to hold it, and the results screen says when a run was at the goal but too short to count (plan A8).
 - [x] Clicking success needs a kill before the timeout with at most one miss on it. Tracking is scored per 2-second segment by the share of time on target.
 - [x] Switching is rated on what it trains (from [playtesting](PLAYTEST.md): both ratings were mostly target acquisition time).
   - Speed Switch: kill pace. A kill within the pace of the one before is a success; each empty window is a failure. No per-target timers.
@@ -92,7 +92,6 @@ Last reviewed: Nov 10, 2026 (after the layout review and the adaptive review; th
 ### To do
 - [ ] `spike` P1 Tune against real play. The default easy/hard ranges, first guesses and the "consistent vs. fades gradually" cut-off are educated guesses that have only been checked with the bot.
 - [ ] `todo` P3 The Insights charts cover the last ten runs whatever their version, so for a few runs after an edit they mix old and new settings. Keep them to the current version, as the ratings are.
-- [ ] `todo` P1 Stricter breakthroughs: 30 targets at the goal rate, or a margin on a shorter run (plan A8).
 - [ ] `todo` P1 Name the kind of run before it starts and judge it against its plan afterwards (plan A2).
 - [ ] `todo` P2 Planned order inside a block: first run at your level, stretch runs in the middle, an easy run last (plan A5).
 - [ ] `todo` P2 Planned against actual success by kind of run, with each run's kind and breakthroughs in the Runs table (plan A6).

@@ -82,7 +82,7 @@ The trainer is a separate game window. It opens over the app window: centered ac
 - **Top right:** your success rate so far against the goal (named for what's counted: "Hit rate", "On target", "On pace" or "Finished in time"), kills and kills a minute. Kill-pace scenarios also show how long you have for the next kill.
 - **Targets:** timed targets show a bar that empties as their time runs out, and change color by wave so newer ones stand out (three red, then three blue, then red again on Timed Grid). Switching targets show a health bar.
 
-**After a run** the results show your rating and its likely range, your success rate, accuracy, kills, timeouts and average time to kill. A breakthrough gets a banner (see [Adaptive mode](#help/adaptive)).
+**After a run** the results show your rating and its likely range, your success rate, accuracy, kills, timeouts and average time to kill. Once a scenario has a rating, a line also says whether you held the goal, and a run that reached it but was too short to count says so. A breakthrough gets a banner (see [Adaptive mode](#help/adaptive)).
 
 ## Adaptive mode {#adaptive}
 
@@ -115,7 +115,7 @@ Target speed is in degrees per second because that's how fast your hand has to t
 
 The mix (Steady, Balanced or Push) is a setting in your profile. A stretch run never follows another stretch run, or a run more than 10 points below the goal.
 
-**Breakthroughs.** Holding 85% for a whole run (at least 10 targets or segments) at a value harder than your best is a breakthrough. The trainer announces it, and it becomes your new best held.
+**Breakthroughs.** Holding 85% for a whole run at a value harder than your best is a breakthrough. The trainer announces it, and it becomes your new best held. A run of 30 targets or more holds the goal at 85% itself. A shorter run needs more, because a few lucky hits can look like skill: all 10 of 10, or 19 of 20. A tracking segment counts as three targets, so a tracking run of 20 seconds or more needs just 85%. A run with fewer than 10 targets or segments never counts. This rule got stricter in November 2026. A best you held before then stays as it is.
 
 **How the rating moves.** The rating is an estimate with an uncertainty, much like a chess rating. A surprising result moves it more than an expected one: succeeding on a stretch run counts for a lot, failing on one costs little. The uncertainty grows with the days since you last played, so after a break your rating moves faster again.
 
@@ -323,6 +323,7 @@ Nothing is sent anywhere. Deleting one of your scenarios or workouts removes the
 ## What's new {#whats-new}
 
 **November 2026**
+- Breakthroughs are stricter. A run under 30 targets now has to beat 85% by a margin to count as held, so a lucky 9 of 10 no longer sets a best held. The results screen says when a run was at the goal but too short to count. Bests you already held are kept.
 - Scenarios has a **Program** tab with the week's plan: a card for each day with its drills, runs, your progress and a start button. Opening a drill from the tab and pressing back returns to it.
 - Start buttons for program days are only on Today and the Program tab. Progress › Skills shows results. **Week in detail** on Today is now **Whole week** and opens the Program tab.
 - Progress › Skills now shows the skill profile, then reps and carry-over, then the week.
