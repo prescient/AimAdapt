@@ -9,7 +9,7 @@ A scenario is refused when it uses something the trainer doesn't model, so every
 | Package | Commit | Files that play |
 |---|---|---|
 | K1 Every reason on a file | dc4732c | 98 of 225 |
-| K2 Dashes | 11 November 2026 | 103 of 225, 31 of the 34 Novice benchmarks |
+| K2 Dashes | fdf08f9 | 103 of 225, 31 of the 34 Novice benchmarks |
 | K3 Helper bots and knockback | | |
 | K4 Lives, time score and efficiency | | |
 | K5 Hitbox shapes | | |
@@ -109,6 +109,7 @@ Done. The timing was measured in KovaaK's first, on four `AimAdapt - Use Test` m
 - A dash with `MainVelocitySetToMovementKeys` goes along the bot's movement input and stays on the ground. It covers its speed times its duration, and the bot then carries on at about its usual speed.
 - A line of sight to the player counts as in combat. Nobody has to shoot.
 - A dash with `MainVelocityCanGoVertical` and a main velocity throws the bot high into the air.
+- Gravity is 800 units/s² per unit of `Gravity`. The importer had 980, so every imported bot fell a fifth too fast. Fixed in its own commit, with a regression test.
 
 Refused with a reason that names the setting: dashes that can go vertical, abilities used in reaction to damage (`AIDamageReaction`), a movement ability on a bot with `NoDodging`, health restore, hurtboxes and the health limits. Times over an hour and distances over 10 km are cut to those limits. After K2, 20 files in the listing still have a movement ability the trainer refuses.
 

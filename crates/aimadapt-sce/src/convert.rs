@@ -30,6 +30,9 @@ use crate::settings::Section;
 
 /// Unreal units in a meter.
 const UU_PER_M: f32 = 100.0;
+/// The fall of a character with `Gravity=1`, in m/s². Measured in KovaaK's from how
+/// high and how long bots hop: 800 units/s², where Earth's would be 980.
+const GRAVITY_M_S2: f32 = 8.0;
 /// A JSON `Cube` brush is this many units on a side at scale 1, placed from its
 /// lowest corner.
 const CUBE_UU: f32 = 100.0;
@@ -539,7 +542,7 @@ fn bot_motion(c: &BotChoice, ch: &Section) -> Motion {
         air_friction: ch.f32_or("AerialFriction", 0.0).max(0.0),
         braking: cm("BrakingDeceleration", 2048.0),
         braking_friction_factor: ch.f32_or("BrakingFrictionFactor", 2.0).max(0.0),
-        gravity: ch.f32_or("Gravity", 1.0).max(0.0) * 9.8,
+        gravity: ch.f32_or("Gravity", 1.0).max(0.0) * GRAVITY_M_S2,
         air_control: ch.f32_or("AirControl", 0.05).clamp(0.0, 1.0),
         jump_speed: jump.map(|v| v / UU_PER_M),
         air_jumps: ch.f32_or("AirJumpCount", 0.0).clamp(0.0, 100.0) as u32,

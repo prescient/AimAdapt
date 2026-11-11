@@ -211,13 +211,33 @@ fn a_dodge_profile_and_character_physics_come_through_in_meters() {
     let w = convert(&Sce::parse(&text), "box.sce", "0").unwrap().scenario.world.unwrap();
     let m = w.motion.unwrap();
     assert_eq!((m.max_speed, m.accel, m.friction), (6.0, 30.0, 4.0));
-    assert!((m.gravity - 19.6).abs() < 1e-4);
+    assert!((m.gravity - 16.0).abs() < 1e-4);
     assert!(!m.bump_bots && !m.faces_player);
     let d = &m.dodges[0];
     assert_eq!((d.strafe_s, d.min_distance, d.max_distance), ([0.4, 0.9], 5.0, 20.0));
     assert_eq!((d.start_side, d.advance), (aimadapt_sim::motion::Start::Minus, true));
     assert_eq!(d.hit_turn.as_ref().unwrap().chance, 0.75);
     assert_eq!(d.blocked.as_ref().unwrap().fraction, 0.5);
+}
+
+/// Bug: a bot's gravity was read as 9.8 m/s² per unit of `Gravity`. KovaaK's uses
+/// 800 units/s² (8 m/s²), measured there from how high and how long bots hop, so
+/// imported bots fell about a fifth too fast and jumped too low.
+#[test]
+fn a_bots_gravity_is_800_units_a_second_squared() {
+    let gravity = |setting: &str| {
+        let text = VOLUME_SCE
+            .replace("CharacterProfile=Dot Ball", "CharacterProfile=Dot Ball\nDodgeProfileNames=Hop")
+            .replace("MainBBType=Spheroid", &format!("MainBBType=Spheroid\n{setting}JumpVelocityMax=256.0"))
+            .replace("[Map Data]", "[Dodge Profile]\nName=Hop\nJumpFrequency=1.0\n[Map Data]");
+        let world = convert(&Sce::parse(&text), "box.sce", "0").unwrap().scenario.world.unwrap();
+        world.motion.expect("a jumper moves").gravity
+    };
+    assert!((gravity("Gravity=1.0\n") - 8.0).abs() < 1e-4);
+    assert!((gravity("Gravity=0.3\n") - 2.4).abs() < 1e-4);
+    // A character without the setting has a gravity of 1.
+    assert!((gravity("") - 8.0).abs() < 1e-4);
+    assert_eq!(gravity("Gravity=0.0\n"), 0.0);
 }
 
 /// Bots of several kinds: each keeps its own size, health, color and movement,
