@@ -267,11 +267,106 @@ fn inverted_bot_spawn_radius_makes_clusters() {
 }
 
 #[test]
-fn bots_with_dashes_or_knockbacks_cant_play_yet() {
+fn bots_with_knockbacks_cant_play_yet() {
     let text = VOLUME_SCE
         .replace("MainBBType=Spheroid", "MainBBType=Spheroid\nAbilityProfileNames=Shove.abilmelee;;")
         .replace("[Map Data]", "[Melee Ability Profile]\nName=Shove\nHurtboxRadius=80.0\n[Map Data]");
-    assert!(reasons(&text).iter().any(|r| r.starts_with("bots that use abilities")), "{:?}", reasons(&text));
+    assert_eq!(reasons(&text), vec!["bots that use abilities (knockbacks)".to_string()]);
+}
+
+/// Made up for these tests: the bots' character has one movement ability, and the
+/// bot profile and character say when it is used.
+fn dasher(ability: &str) -> String {
+    VOLUME_SCE
+        .replace(
+            "CharacterProfile=Dot Ball",
+            "CharacterProfile=Dot Ball\nUseAbilityFrequency=0.5\nUseAbilityFreqMinTime=0.4\nUseAbilityFreqMaxTime=1.2\n\
+             AbilityUseTimer=0.3\nSeeThroughWalls=true",
+        )
+        .replace(
+            "MainBBType=Spheroid",
+            "MainBBType=Spheroid\nAbilityProfileNames=Zip.abilmov;;\nBlockAbilityOnStartDuration=1.5\nAbilityGlobalCooldown=0.6",
+        )
+        .replace("[Map Data]", &format!("[Movement Ability Profile]\nName=Zip\n{ability}\n[Map Data]"))
+}
+
+const ZIP: &str = "MaxCharges=2.0\nChargeTimer=1.5\nDelayAfterUse=0.25\nFullyAuto=true\nAbilityDuration=0.3\n\
+    LockDirectionForDuration=true\nNegateGravityForDuration=true\nMainVelocity=1800.0\nMainVelocityCanGoVertical=false\n\
+    MainVelocitySetToMovementKeys=true\nUpVelocity=150.0\nEndVelocityFactor=0.5\nAbilityBlocksMovement=true\n\
+    AIUseInCombat=true\nAIUseOutOfCombat=false\nAIUseOnGround=true\nAIUseInAir=false\nAIReuseTimer=0.4\n\
+    AIMinTargDist=500.0\nAIMaxTargDist=3000.0\nAIMaxTargFOV=90.0\nChargesOnSpawn=1.0";
+
+#[test]
+fn a_movement_ability_comes_through_in_meters_and_seconds() {
+    let i = convert(&Sce::parse(&dasher(ZIP)), "box.sce", "0").unwrap();
+    let m = i.scenario.world.unwrap().motion.expect("a bot with an ability moves, though its MaxSpeed is 0");
+    assert_eq!(m.max_speed, 0.0);
+    let ab = m.abilities.expect("and has abilities");
+    assert_eq!((ab.press_every_s, ab.chance, ab.window_s), (0.3, 0.5, [0.4, 1.2]));
+    assert_eq!((ab.start_block_s, ab.global_cooldown_s, ab.sees_through_walls), (1.5, 0.6, true));
+    assert_eq!(ab.list.len(), 1);
+    let a = &ab.list[0];
+    assert_eq!((a.max_charges, a.spawn_charges, a.charge_s), (2, 1, 1.5));
+    assert_eq!((a.delay_s, a.reuse_s, a.duration_s), (0.25, 0.4, 0.3));
+    assert_eq!((a.speed, a.up_speed, a.end_factor), (18.0, 1.5, 0.5));
+    assert!(a.along_input && !a.vertical && a.lock_direction && a.no_gravity && a.blocks_movement);
+    assert_eq!((a.in_combat, a.out_of_combat, a.on_ground, a.in_air), (true, false, true, false));
+    assert_eq!((a.min_distance, a.max_distance, a.max_angle_deg), (5.0, 30.0, 90.0));
+    let note = "bots use their movement abilities (dashes and jumps), timed as measured in KovaaK's; there a dash now \
+                and then comes later than its settings say";
+    assert!(i.notes.iter().any(|n| n == note), "{:?}", i.notes);
+}
+
+#[test]
+fn a_movement_ability_with_only_a_launch_takes_the_defaults() {
+    let m = convert(&Sce::parse(&dasher("UpVelocity=400.0")), "box.sce", "0").unwrap().scenario.world.unwrap().motion;
+    let a = m.unwrap().abilities.unwrap().list.remove(0);
+    assert_eq!((a.max_charges, a.spawn_charges, a.end_factor, a.max_angle_deg), (1, 1, 1.0, 360.0));
+    assert_eq!((a.min_distance, a.max_distance, a.up_speed), (0.0, 0.0, 4.0));
+    assert!(a.in_combat && a.out_of_combat && a.on_ground && a.in_air);
+    assert!(!a.lock_direction && !a.no_gravity);
+    // An ability that moves nothing leaves a still bot still.
+    let still = convert(&Sce::parse(&dasher("AbilityDuration=0.2")), "box.sce", "0").unwrap().scenario.world.unwrap();
+    assert_eq!(still.motion, None);
+    // Never usable (neither on the ground nor in the air) still imports.
+    let never = dasher("UpVelocity=400.0\nAIUseOnGround=false\nAIUseInAir=false");
+    assert!(convert(&Sce::parse(&never), "box.sce", "0").is_ok());
+}
+
+#[test]
+fn movement_abilities_with_settings_the_trainer_doesnt_play_say_which() {
+    for (setting, value) in [
+        ("HealthRestore", "20.0"),
+        ("Hurtbox", "true"),
+        ("AIMinSelfHealth", "10.0"),
+        ("AIMaxSelfHealth", "90.0"),
+        ("AIMinTargHealth", "5.0"),
+        ("AIMaxTargHealth", "50.0"),
+        ("CancelDashOnGreaterThan45Collisions", "true"),
+    ] {
+        let text = dasher(&format!("MainVelocity=1800.0\n{setting}={value}"));
+        assert_eq!(
+            reasons(&text),
+            vec![format!("a movement ability the trainer can't play yet (Zip: {setting}={value})")],
+            "{setting}"
+        );
+    }
+    // Their harmless values play.
+    let fine =
+        dasher("MainVelocity=1800.0\nHealthRestore=0.0\nHurtbox=false\nAIMinSelfHealth=0.0\nAIMaxSelfHealth=100.0");
+    assert_eq!(reasons(&fine), Vec::<String>::new());
+}
+
+#[test]
+fn weapon_abilities_are_refused_once_and_a_melee_one_beside_a_dash_still_is() {
+    let weapon = VOLUME_SCE
+        .replace("MainBBType=Spheroid", "MainBBType=Spheroid\nAbilityProfileNames=Zap.abilwep;;")
+        .replace("[Map Data]", "[Weapon Ability Profile]\nName=Zap\n[Map Data]");
+    assert_eq!(reasons(&weapon), vec!["weapon abilities (Zap)".to_string()]);
+    let both = dasher("MainVelocity=1800.0")
+        .replace("AbilityProfileNames=Zip.abilmov;;", "AbilityProfileNames=Zip.abilmov;Shove.abilmelee;")
+        .replace("[Map Data]", "[Melee Ability Profile]\nName=Shove\n[Map Data]");
+    assert_eq!(reasons(&both), vec!["bots that use abilities (knockbacks)".to_string()]);
 }
 
 /// Bug: Pasu's player is on team 2, so the player and the bots swapped spawn
@@ -613,4 +708,73 @@ fn a_bad_radius_and_a_map_reason_do_not_panic() {
     let err = convert(&Sce::parse(&text), "x.sce", "0").unwrap_err();
     assert!(err.iter().any(|r| r.feature == "bot size"), "{err:?}");
     assert!(err.iter().any(|r| r.feature == "the map has no spawn point for the player"), "{err:?}");
+}
+
+/// `FullyAuto` makes no difference for a bot in KovaaK's, so it doesn't change what
+/// comes through.
+#[test]
+fn full_auto_makes_no_difference_to_a_bots_ability() {
+    let get = |auto: &str| {
+        let text = dasher(&format!("UpVelocity=400.0\nFullyAuto={auto}"));
+        convert(&Sce::parse(&text), "box.sce", "0").unwrap().scenario.world.unwrap().motion
+    };
+    assert_eq!(get("true"), get("false"));
+}
+
+/// A dash that can go up or down with a main velocity does something else in KovaaK's
+/// (it launches the bot high into the air), which the trainer can't play yet.
+#[test]
+fn a_vertical_dash_is_refused_but_a_vertical_jump_imports() {
+    let refused = |ability: &str| convert(&Sce::parse(&dasher(ability)), "box.sce", "0").map(|_| ()).unwrap_err();
+    let gaps = refused("MainVelocity=2000.0\nMainVelocityCanGoVertical=true");
+    assert_eq!(gaps.len(), 1, "{gaps:?}");
+    assert_eq!(
+        gaps[0].to_string(),
+        "a movement ability the trainer can't play yet (Zip: MainVelocityCanGoVertical=true)"
+    );
+    // A horizontal dash, and a jump that is vertical with no main velocity, play.
+    assert!(
+        convert(&Sce::parse(&dasher("MainVelocity=2000.0\nMainVelocityCanGoVertical=false")), "box.sce", "0").is_ok()
+    );
+    let jump = dasher("MainVelocity=0.0\nMainVelocityCanGoVertical=true\nUpVelocity=600.0");
+    let m = convert(&Sce::parse(&jump), "box.sce", "0").unwrap().scenario.world.unwrap().motion.unwrap();
+    let a = &m.abilities.unwrap().list[0];
+    assert_eq!((a.speed, a.up_speed, a.vertical), (0.0, 6.0, true));
+}
+
+/// Helper files set "anywhere" and "never" as huge numbers (an `AIMaxTargDist` of a
+/// million). Those are cut to what the trainer allows; the file isn't refused for them.
+#[test]
+fn huge_ability_distances_and_times_are_cut_down_not_refused() {
+    let text = dasher("UpVelocity=400.0\nAIMaxTargDist=100000000.0\nChargeTimer=99999.0\nAIReuseTimer=1e9");
+    let m = convert(&Sce::parse(&text), "box.sce", "0").unwrap().scenario.world.unwrap().motion.unwrap();
+    let a = &m.abilities.unwrap().list[0];
+    assert_eq!((a.max_distance, a.charge_s, a.reuse_s), (10_000.0, 3600.0, 3600.0));
+    // A dash faster than the trainer allows is refused, with the reason.
+    let fast = dasher("MainVelocity=90000.0");
+    assert_eq!(reasons(&fast), vec!["a value the trainer doesn't allow (a bot's ability has a speed out of range)"]);
+}
+
+/// Whether a bot with `NoDodging` still uses its movement abilities wasn't measured in
+/// KovaaK's. Before this was refused, such a bot was imported standing still and its
+/// ability was dropped without a word.
+#[test]
+fn a_dash_on_a_bot_that_doesnt_dodge_is_refused() {
+    let text = dasher("MainVelocity=1800.0").replace("AbilityUseTimer=0.3", "AbilityUseTimer=0.3\nNoDodging=true");
+    assert_eq!(
+        reasons(&text),
+        vec!["a movement ability the trainer can't play yet (Zip: on a bot with NoDodging)".to_string()]
+    );
+    // An ability that moves nothing changes nothing, so the bot stays as it was.
+    let idle = dasher("AbilityDuration=0.2").replace("AbilityUseTimer=0.3", "AbilityUseTimer=0.3\nNoDodging=true");
+    assert_eq!(reasons(&idle), Vec::<String>::new());
+}
+
+/// Damage reactions weren't measured in KovaaK's, so the trainer doesn't play them.
+#[test]
+fn an_ability_that_reacts_to_damage_is_refused() {
+    let text = dasher("UpVelocity=400.0\nAIDamageReaction=true");
+    let gaps = convert(&Sce::parse(&text), "box.sce", "0").map(|_| ()).unwrap_err();
+    assert_eq!(gaps.len(), 1, "{gaps:?}");
+    assert_eq!(gaps[0].to_string(), "a movement ability the trainer can't play yet (Zip: AIDamageReaction=true)");
 }

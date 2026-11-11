@@ -6,22 +6,22 @@ A scenario is refused when it uses something the trainer doesn't model, so every
 
 ## Status
 
-| Package | Commit |
-|---|---|
-| K1 Every reason on a file | done 11 November 2026 |
-| K2 Dashes | |
-| K3 Helper bots and knockback | |
-| K4 Lives, time score and efficiency | |
-| K5 Hitbox shapes | |
-| K6 Standing and spawning details | |
-| K7 Armed bots that never fire, invincible characters | |
-| K8 Bots that destroy themselves | |
-| K9 Heads | |
-| K10 Waypoint paths | |
-| K11 Several pellets per shot | |
-| K12 Teleporters, hurt volumes and jump pads | |
-| K13 Solid props | |
-| K14 Player movement | |
+| Package | Commit | Files that play |
+|---|---|---|
+| K1 Every reason on a file | dc4732c | 98 of 225 |
+| K2 Dashes | 11 November 2026 | 103 of 225, 31 of the 34 Novice benchmarks |
+| K3 Helper bots and knockback | | |
+| K4 Lives, time score and efficiency | | |
+| K5 Hitbox shapes | | |
+| K6 Standing and spawning details | | |
+| K7 Armed bots that never fire, invincible characters | | |
+| K8 Bots that destroy themselves | | |
+| K9 Heads | | |
+| K10 Waypoint paths | | |
+| K11 Several pellets per shot | | |
+| K12 Teleporters, hurt volumes and jump pads | | |
+| K13 Solid props | | |
+| K14 Player movement | | |
 
 ## Where the files stand
 
@@ -74,7 +74,7 @@ Expected count of playable files after each step, if the packages land in order:
 
 `aimadapt-cli sce --summary` counts the files that play. Since K1 it also counts files per reason and how many files each reason blocks alone. Each package's commit message gives the count before and after.
 
-The listing includes the scenario files AimAdapt wrote itself (the `AimAdapt -` prefix, 32 on the development machine, all playable). The counts in this plan leave them out: 130 of 257 in the listing is 98 of 225 here.
+The listing includes the test maps written for measuring in KovaaK's (the `AimAdapt -` prefix: 32 on the development machine at the start, all playable, and 36 after K2, 34 of them playable). The counts in this plan leave them out: 130 of 257 in the listing was 98 of 225 here, and 137 of 261 after K2 is 103 of 225.
 
 After K1, 50 of the 127 refused files had a single reason: armed bots 11, abilities 9, the player moving 5, heads 5, invincibility set on a character 5, solid props 5, waypoint paths 3, several pellets 3, and one each for map objects, aim assist, aim down sights and the damage efficiency score. The other 77 need two or more packages.
 
@@ -99,6 +99,18 @@ Bots with a movement ability dash: a burst of speed along the way they are movin
 - When a bot uses one: how often it considers it, the chance each time, a block after spawning, a cooldown shared by all its abilities, and the ability's own rules (distance to the player, the player within a view angle, on the ground or in the air, own health).
 - `aimadapt-sce::convert`: `[Movement Ability Profile]` sections on a bot's character become dashes. A movement ability with a setting outside this list is still refused, and names the setting.
 - Tests: charge and reuse timing, the speed during and after a dash, the rules that stop a use, a fixed-seed run that stays the same, and a fixture file.
+
+Done. The timing was measured in KovaaK's first, on four `AimAdapt - Use Test` maps with hopping and dashing bots filmed off the screen:
+
+- `AbilityUseTimer` is the time between presses of the ability key.
+- `UseAbilityFrequency` is a chance rolled once per window of `UseAbilityFreqMinTime` to `UseAbilityFreqMaxTime` seconds. For that whole window the bot presses every time or not at all. With a frequency of 1 the window times change nothing.
+- `FullyAuto` changes nothing for a bot.
+- `AIReuseTimer` and `ChargeTimer` hold a use back until the first press after them. A charge starts to refill when the ability ends, and a charge that comes back at the moment of a press isn't used for that press: a 4 s charge after a 0.1 s dash, pressed every 0.1 s, went every 4.2 s.
+- A dash with `MainVelocitySetToMovementKeys` goes along the bot's movement input and stays on the ground. It covers its speed times its duration, and the bot then carries on at about its usual speed.
+- A line of sight to the player counts as in combat. Nobody has to shoot.
+- A dash with `MainVelocityCanGoVertical` and a main velocity throws the bot high into the air.
+
+Refused with a reason that names the setting: dashes that can go vertical, abilities used in reaction to damage (`AIDamageReaction`), a movement ability on a bot with `NoDodging`, health restore, hurtboxes and the health limits. Times over an hour and distances over 10 km are cut to those limits. After K2, 20 files in the listing still have a movement ability the trainer refuses.
 
 ### K3. Helper bots and knockback
 
@@ -198,4 +210,12 @@ These rows are filled in as packages land. A row leaves the table when a test ma
 
 | Setting | Read as | Checked |
 |---|---|---|
-| | | |
+| The first press of the ability key after a bot appears | One press interval after it appears | No |
+| `BlockAbilityOnStartDuration` (character) | No ability for that long after the bot appears | No |
+| `AbilityGlobalCooldown` (character) | After any ability, none of the bot's abilities for that long | No |
+| `DelayAfterUse` (ability) | That ability can't be used again for that long after a use | No |
+| `EndVelocityFactor` | The share of the dash speed the bot keeps when the dash ends | No |
+| `LockDirectionForDuration`, `NegateGravityForDuration`, `AbilityBlocksMovement` | As named, for the ability's duration | No |
+| `AIMinTargDist`, `AIMaxTargDist`, `AIMaxTargFOV`, `AIUseOnGround`, `AIUseInAir` | Rules that stop a use: distance to the player, the player within the view angle, on the ground or in the air | No |
+| A new ability window | Starts when the last one ends, on its own timer | Partly: the windows and the presses ran on separate timers |
+| A dash that comes later than its settings say | Not copied | Open: seen twice in KovaaK's on a 4.2 s dash (once 5.67 s), cause unknown |

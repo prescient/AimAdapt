@@ -43,7 +43,13 @@ impl Sim {
                 // An imported scenario's bot: dodge profile and character movement.
                 let half = half_segment(t.shape, t.radius, t.height * t.radius / t.base_radius.max(1e-6));
                 let (yaw, pitch) = (t.yaw, t.pitch);
-                b.step(m, &mut self.rng, &self.bot_walls, &mut t.pos, t.radius, half, now, dt);
+                // Only abilities use sight: a ray from the bot to the eye against the walls
+                // that stop shots (not the invisible clip walls).
+                let seen = m.abilities.is_none() || t.pos.length() < 1e-3 || {
+                    let to_bot = t.pos.normalize();
+                    !blocked(&self.walls, to_bot, t.pos.length())
+                };
+                b.step_seen(m, &mut self.rng, &self.bot_walls, &mut t.pos, t.radius, half, now, dt, seen);
                 (t.yaw, t.pitch) = angles(t.pos);
                 t.distance = t.pos.length();
                 // Angular speed, for tracking telemetry.

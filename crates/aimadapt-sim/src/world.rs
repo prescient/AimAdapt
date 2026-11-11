@@ -281,6 +281,12 @@ impl World {
         if self.rotations.iter().flatten().any(|r| *r as usize >= self.slots.len()) {
             p.push("a bot slot names a rotation the world doesn't have".into());
         }
+        let motions = self.motion.iter().chain(self.kinds.iter().filter_map(|k| k.motion.as_ref()));
+        for problem in motions.filter_map(|m| m.abilities.as_ref()).flat_map(|a| a.problems()) {
+            if !p.contains(&problem) {
+                p.push(problem);
+            }
+        }
         let spawns = self.spawns.len() as u32;
         for k in &self.kinds {
             if k.radius.is_nan() || k.radius <= 0.0 || k.health.is_nan() || k.health <= 0.0 {
@@ -597,5 +603,23 @@ mod tests {
         let w = World { spawns: vec![], ..world() };
         assert!(!w.problems().is_empty());
         assert!(world().problems().is_empty());
+    }
+
+    /// A bot's ability numbers are checked, whether the bots share one motion or each
+    /// kind has its own.
+    #[test]
+    fn ability_values_out_of_range_are_problems() {
+        use crate::motion::{Abilities, Ability, Motion};
+        let motion = |speed: f32| Motion {
+            abilities: Some(Abilities { list: vec![Ability { speed, ..Default::default() }], ..Default::default() }),
+            ..Default::default()
+        };
+        let w = World { motion: Some(motion(10.0)), ..world() };
+        assert!(w.problems().is_empty(), "{:?}", w.problems());
+        let w = World { motion: Some(motion(9000.0)), ..world() };
+        assert!(w.problems().iter().any(|p| p.contains("speed")), "{:?}", w.problems());
+        let kind = WorldKind { motion: Some(motion(f32::NAN)), ..Default::default() };
+        let w = World { kinds: vec![kind], slots: vec![vec![(0, 1.0)]], ..world() };
+        assert!(w.problems().iter().any(|p| p.contains("speed")), "{:?}", w.problems());
     }
 }

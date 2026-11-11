@@ -21,6 +21,8 @@ use aimadapt_sim::scenario::{Category, Scoring, Shape, Skill, Timing, Trigger, W
 use aimadapt_sim::world::{AccuracyMult, PlayerBlock, World, WorldBox, WorldKind, WorldMesh, WorldSpawn};
 use aimadapt_sim::{Scenario, Vec3};
 
+mod abilities;
+
 use crate::inventory::Gap;
 use crate::map::{Map, MapFormat, Placement, Solid, Teams};
 use crate::scenario::{BotChoice, Sce};
@@ -156,6 +158,13 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
     if moving {
         notes
             .push("bots move by their dodge profiles; how closely that matches KovaaK's is still to be checked".into());
+        if kinds.iter().any(|(_, m)| m.as_ref().is_some_and(|m| m.abilities.is_some())) {
+            notes.push(
+                "bots use their movement abilities (dashes and jumps), timed as measured in KovaaK's; there a \
+                 dash now and then comes later than its settings say"
+                    .into(),
+            );
+        }
         if characters.iter().any(|ch| ch.is("HasJetpack")) {
             notes.push("bots' jetpacks thrust whenever they'd jump; how long they hold it is a guess".into());
         }
@@ -251,11 +260,9 @@ fn bots<'a>(r: &crate::scenario::Resolved<'a>, other_team: u32, reasons: &mut Ve
         let mut choices = Vec::new();
         for c in &slot.choices {
             let Some(ch) = c.character else { continue };
-            if !c.abilities.is_empty() {
-                // Dashes, and the knockbacks helper bots use to push targets around
-                // (Raw Control, Controlsphere): without them these play too easy.
-                push_once(reasons, Gap::planned("bots that use abilities", "dashes and knockbacks"));
-            }
+            // Movement abilities play; the knockbacks helper bots use to push targets
+            // around (Raw Control, Controlsphere) don't yet.
+            abilities::reasons(c, reasons);
             let m = moves(c, ch).then(|| bot_motion(c, ch));
             let k = match kinds.iter().position(|(k, km)| same_kind(k, ch) && *km == m) {
                 Some(k) => k,
@@ -493,7 +500,8 @@ fn player_eye(player: Option<&Section>, start: Vec3, meshes: &[WorldMesh]) -> Ve
 
 /// Whether a bot moves, unless `NoDodging` keeps it still: it runs (`MaxSpeed`),
 /// flies up and down (`IsFlyer` with a flight speed: its dodge profile's jumps and
-/// crouches move it), or jumps (a jump speed and a dodge profile that jumps).
+/// crouches move it), jumps (a jump speed and a dodge profile that jumps), or has a
+/// movement ability that dashes or launches it.
 fn moves(c: &BotChoice, ch: &Section) -> bool {
     if c.bot.is("NoDodging") {
         return false;
@@ -502,7 +510,7 @@ fn moves(c: &BotChoice, ch: &Section) -> bool {
         ch.is("IsFlyer") && (ch.f32_or("FlightVelocityUp", 0.0) > 0.0 || ch.f32_or("FlightVelocityDown", 0.0) > 0.0);
     let jumps =
         ch.f32_or("JumpVelocityMax", 0.0) > 0.0 && c.dodges.iter().any(|(d, _)| d.f32_or("JumpFrequency", 0.0) > 0.0);
-    ch.f32_or("MaxSpeed", 0.0) > 0.0 || flies || jumps
+    ch.f32_or("MaxSpeed", 0.0) > 0.0 || flies || jumps || abilities::moves(c)
 }
 
 /// Whether any bot's dodge profile crouches.
@@ -560,6 +568,7 @@ fn bot_motion(c: &BotChoice, ch: &Section) -> Motion {
             c.bot.f32_or("DodgeProfileMaxChangeTime", 0.0).max(0.0),
         ],
         random_dodges: c.bot.bool("RandomizeDodgeProfiles").unwrap_or(true),
+        abilities: abilities::abilities(c, ch),
     }
 }
 

@@ -23,7 +23,7 @@ fn read(name: &str) -> Sce {
 #[test]
 fn finds_every_fixture() {
     let files = find_files(&[fixtures()]);
-    assert_eq!(files.len(), 3);
+    assert_eq!(files.len(), 4);
     assert!(files.iter().all(|f| f.extension().unwrap() == "sce"));
 }
 
@@ -156,12 +156,42 @@ fn an_imported_scenario_plays_in_the_sim() {
     assert!((sim.score() - 10.0 * 0.5f32.sqrt()).abs() < 1e-4, "{}", sim.score());
 }
 
+/// A strafing bot with a movement ability: it imports, says so in a note, and in play
+/// it moves faster than its top speed at some point (it dashed), and stays in its lane.
+#[test]
+fn a_bot_with_a_dash_imports_and_dashes_in_play() {
+    let i = import(&path("Dash Lane")).unwrap();
+    assert!(i.notes.iter().any(|n| n.contains("movement abilities")), "{:?}", i.notes);
+    let w = i.scenario.world.as_ref().unwrap();
+    let motion = w.motion.as_ref().unwrap();
+    assert_eq!(motion.max_speed, 6.0);
+    let ab = motion.abilities.as_ref().unwrap();
+    assert_eq!((ab.list.len(), ab.list[0].speed, ab.list[0].along_input), (1, 24.0, true));
+    assert_eq!((ab.press_every_s, ab.chance, ab.window_s), (0.2, 0.8, [1.0, 2.0]));
+    let mut sim = Sim::new(i.scenario, 11);
+    let idle = Input { aim: Vec3::Y, fire_pressed: false, fire_held: false };
+    while sim.phase() == Phase::Countdown {
+        sim.step(0.05, idle);
+    }
+    let dt = 1.0 / 120.0;
+    let (mut last, mut fastest) = (sim.targets()[0].pos, 0.0f32);
+    for _ in 0..(8.0 / dt) as usize {
+        sim.step(dt, idle);
+        let p = sim.targets()[0].pos;
+        fastest = fastest.max(Vec3::new(p.x - last.x, 0.0, p.z - last.z).length() / dt);
+        assert!(p.x.abs() < 8.0 && p.y > -2.5, "stays in its lane: {p}");
+        last = p;
+    }
+    assert!(fastest > 6.5, "it dashed past its top speed of 6 m/s: {fastest}");
+}
+
 #[test]
 fn scenarios_the_trainer_cant_play_yet_say_why() {
-    // The drifting pair move, which plays, but they nudge and dash, which doesn't yet.
+    // The drifting pair move and dash, which plays, but one of them also pushes with
+    // a melee ability (a knockback), which doesn't yet.
     let moving = import(&path("Drifting Pair")).unwrap_err();
     let text: Vec<String> = moving.iter().map(ToString::to_string).collect();
-    assert_eq!(text, vec!["bots that use abilities (dashes and knockbacks)".to_string()]);
+    assert_eq!(text, vec!["bots that use abilities (knockbacks)".to_string()]);
     assert!(!moving[0].beyond_plan, "abilities are in the plan");
     // Reflex maps play; this one's projectile weapon doesn't, and isn't planned.
     let old = import(&path("Old Room")).unwrap_err();

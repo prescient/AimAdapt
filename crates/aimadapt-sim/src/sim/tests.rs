@@ -566,6 +566,32 @@ fn walls_stop_shots_but_clip_walls_dont() {
     }
 }
 
+/// A bot with a movement ability for "in combat" only sees the player past a clip
+/// wall (shots go through it) but not past a solid one.
+#[test]
+fn a_solid_wall_blocks_a_bots_sight_but_a_clip_wall_doesnt() {
+    use crate::motion::{Abilities, Ability, Motion};
+    let wall = |clip: bool| crate::world::WorldMesh {
+        positions: vec![[-5.0, -2.0, -5.0], [5.0, -2.0, -5.0], [5.0, 5.0, -5.0], [-5.0, 5.0, -5.0]],
+        triangles: vec![[0, 1, 2], [0, 2, 3]],
+        clip,
+        ..Default::default()
+    };
+    let dash = Ability { charge_s: 0.2, speed: 3.0, out_of_combat: false, ..Ability::default() };
+    let m = Motion {
+        abilities: Some(Abilities { press_every_s: 0.05, chance: 1.0, list: vec![dash], ..Default::default() }),
+        ..Default::default()
+    };
+    for (clip, uses) in [(false, false), (true, true)] {
+        let mut sim = Sim::new(on_a_floor(vec![wall(clip)], Some(m.clone())), 1);
+        for _ in 0..480 {
+            sim.step(FRAME, idle());
+        }
+        let used = sim.targets[0].bot.as_ref().unwrap().ability_uses() > 0;
+        assert_eq!(used, uses, "clip wall {clip}");
+    }
+}
+
 #[test]
 fn imported_bots_move_on_the_map() {
     let strafe = crate::motion::Dodge { strafe_s: [0.5, 0.5], ..Default::default() };

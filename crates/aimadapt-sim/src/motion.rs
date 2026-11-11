@@ -15,6 +15,12 @@ use serde::{Deserialize, Serialize};
 use crate::collide::Collider;
 use crate::rng::Rng;
 
+mod ability;
+#[cfg(test)]
+mod ability_tests;
+use ability::AbilityState;
+pub use ability::{Abilities, Ability};
+
 /// Unreal's default terminal velocity, m/s.
 const TERMINAL: f32 = 40.0;
 /// Unreal's default walkable floor: up to about 45 degrees.
@@ -79,6 +85,9 @@ pub struct Motion {
     pub change_dodge_s: [f32; 2],
     /// Pick the next dodge profile at random by weight, or else take them in order.
     pub random_dodges: bool,
+    /// Movement abilities (dashes, blinks, ability jumps) and when it uses them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub abilities: Option<Abilities>,
 }
 
 impl Default for Motion {
@@ -107,6 +116,7 @@ impl Default for Motion {
             dodges: Vec::new(),
             change_dodge_s: [0.0, 0.0],
             random_dodges: true,
+            abilities: None,
         }
     }
 }
@@ -260,6 +270,8 @@ pub struct BotState {
     spawn_right: Vec3,
     /// Where it appeared, to go back to if it falls out of the map.
     home: Vec3,
+    /// Its movement abilities' charges, timers and the one in use.
+    ab: AbilityState,
 }
 
 fn between(rng: &mut Rng, r: [f32; 2]) -> f32 {
@@ -309,10 +321,15 @@ impl BotState {
             thrust_left: 0.0,
             spawn_right: spawn_right.normalize_or(Vec3::X),
             home,
+            ab: AbilityState::default(),
         };
         s.dodge = if m.random_dodges { pick(rng, &m.dodges) } else { 0 };
         s.next_dodge = between(rng, m.change_dodge_s);
         s.begin_dodge(m, rng);
+        // Last, so a bot without abilities draws the same numbers as before.
+        if let Some(ab) = &m.abilities {
+            s.ab = AbilityState::new(ab, rng);
+        }
         s
     }
 
@@ -466,7 +483,8 @@ impl BotState {
     }
 
     /// Moves the bot for `dt` seconds: a capsule of `radius` with a middle segment of
-    /// half-length `half` (0 for a ball) at `pos`, among `walls`.
+    /// half-length `half` (0 for a ball) at `pos`, among `walls`. For a bot with
+    /// abilities, see [`BotState::step_seen`] (this one counts it as in sight).
     #[allow(clippy::too_many_arguments)]
     pub fn step(
         &mut self,
@@ -479,7 +497,26 @@ impl BotState {
         now: f32,
         dt: f32,
     ) {
+        self.step_seen(m, rng, walls, pos, radius, half, now, dt, true);
+    }
+
+    /// [`BotState::step`], told whether the bot has a line of sight to the player
+    /// (only its abilities' rules use it).
+    #[allow(clippy::too_many_arguments)]
+    pub fn step_seen(
+        &mut self,
+        m: &Motion,
+        rng: &mut Rng,
+        walls: &Collider,
+        pos: &mut Vec3,
+        radius: f32,
+        half: f32,
+        now: f32,
+        dt: f32,
+        seen: bool,
+    ) {
         if m.still_until_hurt && !self.hurt {
+            self.ability_tick(m, dt);
             return;
         }
         self.think(m, rng, *pos, now, dt);
@@ -494,12 +531,17 @@ impl BotState {
         let wish = right * self.side * m.strafe_mult + toward * self.fore * back;
         let cap = m.max_speed * wish.length();
         let dir = wish.normalize_or_zero();
+        let view = self.ability_view(m, dir, spawn_forward);
+        self.use_abilities(m, rng, &view, *pos, seen);
+        let (dir, cap) = if self.ability_blocks_input(m) { (Vec3::ZERO, 0.0) } else { (dir, cap) };
+        let clock = self.ability_clock();
 
         let steps = (dt / SUBSTEP).ceil().clamp(1.0, 64.0) as usize;
         let h = dt / steps as f32;
         let mut touched_wall = false;
-        for _ in 0..steps {
+        for i in 0..steps {
             self.physics(m, dir, cap, h);
+            self.hold_ability(m, &view, *pos, h, clock + (i + 1) as f32 * h);
             let was = *pos;
             let on_floor = self.grounded;
             *pos += self.vel * h;
@@ -575,6 +617,7 @@ impl BotState {
             *pos = self.home;
             self.vel = Vec3::ZERO;
         }
+        self.ability_tick(m, dt);
     }
 
     /// One substep of Unreal's `CalcVelocity`: friction and braking, then input
@@ -703,10 +746,10 @@ mod tests {
     }
     use crate::world::WorldMesh;
 
-    const DT: f32 = 1.0 / 120.0;
+    pub(super) const DT: f32 = 1.0 / 120.0;
 
     /// A floor at y = -2 and walls at x = ±6, with the bot 10 m in front.
-    fn arena() -> Collider {
+    pub(super) fn arena() -> Collider {
         let quad = |p: [[f32; 3]; 4]| WorldMesh {
             positions: p.to_vec(),
             triangles: vec![[0, 1, 2], [0, 2, 3]],
@@ -719,7 +762,7 @@ mod tests {
         ])
     }
 
-    fn strafer() -> Motion {
+    pub(super) fn strafer() -> Motion {
         Motion {
             max_speed: 4.0,
             accel: 40.0,
