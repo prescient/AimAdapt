@@ -1785,3 +1785,171 @@ fn a_kind_can_be_invincible_on_its_own() {
     assert_eq!(sim.stats().kills, 1, "only the kind that isn't invincible dies");
     assert!(sim.targets().iter().any(|t| t.kind() == Some(0) && t.health == 1.0));
 }
+
+/// A world scenario (an empty floor, one target) whose clock runs at `time_scale`.
+fn timed(time_scale: f32) -> Scenario {
+    let mut s = on_a_floor(Vec::new(), None);
+    s.world.as_mut().unwrap().time_scale = time_scale;
+    s
+}
+
+/// Steps `secs` real seconds at 240 Hz, looking away from everything.
+fn real_seconds(sim: &mut Sim, secs: f32) {
+    for _ in 0..(secs * 240.0).round() as usize {
+        sim.step(FRAME, idle());
+    }
+}
+
+/// Bug: the importer ignored `Timescale`, so a scenario at 0.5 played at normal
+/// speed. The run's clock counts game seconds: 10 real seconds at 0.5 are 5.
+#[test]
+fn a_time_scale_makes_the_run_clock_run_at_that_rate() {
+    for (scale, want) in [(0.5, 5.0), (2.0, 20.0), (1.0, 10.0)] {
+        let mut s = timed(scale);
+        s.timing.duration_s = 100.0;
+        let mut sim = Sim::new(s, 1);
+        assert_eq!(sim.time_scale(), scale);
+        real_seconds(&mut sim, 10.0);
+        assert!((sim.elapsed() - want).abs() < 0.01, "at {scale}: {} game seconds", sim.elapsed());
+    }
+}
+
+/// Bug: the importer ignored `Timescale`, so a 20 s scenario at 0.5 ended after 20
+/// real seconds instead of 40 (and at 2.0 after 20 instead of 10).
+#[test]
+fn a_time_scaled_run_lasts_its_length_divided_by_the_scale() {
+    for (scale, real) in [(0.5, 40.0), (2.0, 10.0)] {
+        let mut s = timed(scale);
+        s.timing.duration_s = 20.0;
+        let mut sim = Sim::new(s, 1);
+        real_seconds(&mut sim, real - 0.5);
+        assert_eq!(sim.phase(), Phase::Running, "at {scale}, not over after {} s", real - 0.5);
+        real_seconds(&mut sim, 1.0);
+        assert_eq!(sim.phase(), Phase::Finished, "at {scale}, over after {} s", real + 0.5);
+        assert!((sim.elapsed() - 20.0).abs() < 1e-3, "the timer counts game seconds");
+        assert!((sim.real_elapsed() - real).abs() < 0.01);
+        assert!((sim.result().duration_s - real).abs() < 0.01, "the saved run counts real seconds");
+    }
+}
+
+/// The countdown is real time at any time scale, and only the part of a step past it
+/// is scaled.
+#[test]
+fn the_countdown_takes_the_same_real_time_at_any_time_scale() {
+    for scale in [0.5, 1.0, 2.0] {
+        let mut s = timed(scale);
+        s.timing.countdown_s = 3.0;
+        s.timing.duration_s = 100.0;
+        let mut sim = Sim::new(s, 1);
+        real_seconds(&mut sim, 2.9);
+        assert_eq!(sim.phase(), Phase::Countdown, "at {scale}");
+        assert!((sim.countdown_left() - 0.1).abs() < 0.01, "at {scale}: {}", sim.countdown_left());
+        // One step of 1 s crosses the end: 0.1 s of it is countdown, 0.9 s is play.
+        sim.step(1.0, idle());
+        assert_eq!(sim.phase(), Phase::Running, "at {scale}");
+        assert!((sim.elapsed() - 0.9 * scale).abs() < 0.02, "at {scale}: {}", sim.elapsed());
+    }
+}
+
+/// Bug: the importer ignored `Timescale`, so bots moved at normal speed in slow
+/// motion. A falling bot covers the same distance in 2 real seconds at 0.5 as in 1 at 1.0.
+#[test]
+fn bots_move_on_the_game_clock() {
+    let fall = |scale: f32, secs: f32| {
+        let mut s = timed(scale);
+        s.timing.duration_s = 100.0;
+        s.world.as_mut().unwrap().spawns[0].pos = [0.0, 20.0, -10.0];
+        s.world.as_mut().unwrap().motion = Some(crate::motion::Motion { gravity: 9.8, ..Default::default() });
+        let mut sim = Sim::new(s, 1);
+        let start = sim.targets()[0].pos.y;
+        real_seconds(&mut sim, secs);
+        start - sim.targets()[0].pos.y
+    };
+    let normal = fall(1.0, 1.0);
+    assert!(normal > 2.0, "it falls: {normal} m");
+    let slow = fall(0.5, 2.0);
+    assert!((slow - normal).abs() < 0.1, "{slow} m in 2 s at 0.5, {normal} m in 1 s at 1.0");
+    let slower = fall(0.5, 1.0);
+    assert!(slower < normal * 0.5, "{slower} m in 1 s at 0.5");
+}
+
+/// Bug: the importer ignored `Timescale`, so a held automatic weapon fired at its
+/// full rate in slow motion. Shots per real second are the rate times the time scale.
+#[test]
+fn a_held_weapon_fires_at_the_rate_times_the_time_scale() {
+    let shots = |scale: f32| {
+        let mut s = timed(scale);
+        s.timing.duration_s = 100.0;
+        s.weapon.trigger = Trigger::Hold;
+        s.weapon.fire_rate = 10.0;
+        let mut sim = Sim::new(s, 1);
+        let held = Input { aim: Vec3::Y, fire_pressed: false, fire_held: true };
+        for _ in 0..(10 * 240) {
+            sim.step(FRAME, held);
+        }
+        sim.stats().shots as f32
+    };
+    let (normal, slow, fast) = (shots(1.0), shots(0.5), shots(2.0));
+    assert!((normal - 100.0).abs() <= 2.0, "{normal} shots in 10 s at 10/s");
+    assert!((slow - 50.0).abs() <= 2.0, "{slow} shots in 10 s at 0.5");
+    assert!((fast - 200.0).abs() <= 3.0, "{fast} shots in 10 s at 2.0");
+}
+
+/// The time scale is part of a scenario's identity only when it isn't 1.0, so the
+/// fingerprint (and the bests tied to it) of every earlier scenario stays the same.
+#[test]
+fn a_time_scale_of_one_leaves_the_fingerprint_alone() {
+    let plain = timed(1.0);
+    assert!(!plain.to_toml().contains("time_scale"));
+    let slow = timed(0.5);
+    assert!(slow.to_toml().contains("time_scale"));
+    assert_ne!(plain.fingerprint(), slow.fingerprint());
+    assert!(plain.problems().is_empty(), "{:?}", plain.problems());
+    assert!(slow.problems().is_empty());
+    for bad in [0.0, 0.05, 10.5, f32::NAN] {
+        assert!(!timed(bad).problems().is_empty(), "{bad} is refused");
+    }
+}
+
+/// Bug: the importer ignored `Timescale`, so a run's saved length, its kill times and
+/// its replay timeline were in game seconds, and a replay of a slow-motion run played
+/// back twice too fast. The result reports real seconds, with replay frames and the
+/// aim trace still at 60 and 240 per real second.
+#[test]
+fn a_time_scaled_result_is_in_real_seconds() {
+    let mut s = timed(0.5);
+    s.timing.duration_s = 10.0;
+    let mut sim = Sim::new(s, 1);
+    // Click the target 4 real seconds in (2 game seconds), then wait out the run.
+    real_seconds(&mut sim, 4.0);
+    let at = sim.targets()[0].pos;
+    sim.step(FRAME, shoot(at));
+    real_seconds(&mut sim, 17.0);
+    assert_eq!(sim.phase(), Phase::Finished);
+    let r = sim.result();
+    assert_eq!(r.kills.len(), 1);
+    assert!((r.kills[0].at_s - 4.0).abs() < 0.05, "kill at {} real s", r.kills[0].at_s);
+    assert!((r.kills[0].ttk_s - 4.0).abs() < 0.05, "time to kill {} real s", r.kills[0].ttk_s);
+    assert!((r.duration_s - 20.0).abs() < 0.01);
+    let last = r.telemetry.trace.last().unwrap()[0];
+    assert!(last > 19.9 && last <= 20.01, "trace ends at {last}");
+    assert!(r.telemetry.shots.iter().all(|s| (s.t - 4.0).abs() < 0.05));
+    let frames = &r.telemetry.frames;
+    assert!(frames.last().unwrap().t > 19.9);
+    let per_s = frames.len() as f32 / 20.0;
+    assert!((per_s - FRAME_HZ).abs() < 2.0, "{per_s} frames per real second");
+}
+
+/// Bug: the importer ignored `Timescale`, so the time estimates for workouts and the
+/// program counted a scenario's duration as real seconds. Slow motion takes longer.
+#[test]
+fn a_scenarios_real_length_follows_its_time_scale() {
+    let mut s = timed(0.5);
+    s.timing.duration_s = 30.0;
+    s.timing.countdown_s = 3.0;
+    assert_eq!(s.real_seconds(), 63.0);
+    s.world.as_mut().unwrap().time_scale = 2.0;
+    assert_eq!(s.real_seconds(), 18.0);
+    s.world = None;
+    assert_eq!(s.real_seconds(), 33.0);
+}

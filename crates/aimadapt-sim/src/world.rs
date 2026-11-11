@@ -14,7 +14,7 @@ use crate::motion::Motion;
 use crate::rng::Rng;
 use crate::scenario::Shape;
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct World {
     /// Where the scenario came from, e.g. "VT 1w4ts Novice S5.sce", and a hash of
@@ -70,6 +70,46 @@ pub struct World {
     /// damage). They aren't drawn, shot or scored.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pushers: Vec<Pusher>,
+    /// The rate of the scenario's whole clock (KovaaK's `Timescale`): bots, the weapon,
+    /// delays and the run timer all run at this many game seconds per real second, so
+    /// 0.5 is slow motion and the run lasts twice as long. The countdown stays in real
+    /// time.
+    #[serde(skip_serializing_if = "is_one")]
+    pub time_scale: f32,
+}
+
+/// Whether a time scale is the default, so it stays out of the file (and the fingerprint).
+fn is_one(v: &f32) -> bool {
+    *v == 1.0
+}
+
+/// The slowest and fastest time scale a world can have.
+pub const TIME_SCALE_RANGE: (f32, f32) = (0.1, 10.0);
+
+impl Default for World {
+    fn default() -> Self {
+        World {
+            source: String::new(),
+            source_hash: String::new(),
+            spawns: Vec::new(),
+            offset_min: [0.0; 3],
+            offset_max: [0.0; 3],
+            blocked_radius: 0.0,
+            cluster: false,
+            accuracy_mult: AccuracyMult::default(),
+            invincible: false,
+            fov_range: None,
+            meshes: Vec::new(),
+            walls: Vec::new(),
+            player_block: None,
+            motion: None,
+            kinds: Vec::new(),
+            slots: Vec::new(),
+            rotations: Vec::new(),
+            pushers: Vec::new(),
+            time_scale: 1.0,
+        }
+    }
 }
 
 /// A helper bot: it kicks every target in reach on a fixed schedule from the start
@@ -391,6 +431,10 @@ impl World {
             if !p.contains(&problem) {
                 p.push(problem);
             }
+        }
+        let (lo, hi) = TIME_SCALE_RANGE;
+        if !(lo..=hi).contains(&self.time_scale) {
+            p.push(format!("time scale must be {lo}–{hi}"));
         }
         if !self.pushers.is_empty() && !self.bots_move() {
             p.push("helper bots push nothing unless the bots can move".into());

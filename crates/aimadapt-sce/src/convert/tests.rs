@@ -799,3 +799,32 @@ fn an_ability_that_reacts_to_damage_is_refused() {
     assert_eq!(gaps.len(), 1, "{gaps:?}");
     assert_eq!(gaps[0].to_string(), "a movement ability the trainer can't play yet (Zip: AIDamageReaction=true)");
 }
+
+/// Bug: the importer ignored `Timescale`, so a scenario saved at 0.8 played at normal
+/// speed and for the wrong length. It goes into the world; without it the clock is 1.0.
+#[test]
+fn the_time_scale_is_read_into_the_world() {
+    let scale = |text: &str| convert(&Sce::parse(text), "box.sce", "0").unwrap().scenario.world.unwrap().time_scale;
+    assert_eq!(scale(&VOLUME_SCE.replace("MapScale=1.0", "MapScale=1.0\nTimescale=0.8")), 0.8);
+    assert_eq!(scale(&VOLUME_SCE.replace("MapScale=1.0", "MapScale=1.0\nTimescale=2.0")), 2.0);
+    assert_eq!(scale(&VOLUME_SCE.replace("MapScale=1.0", "MapScale=1.0\nTimescale=1.0")), 1.0);
+    assert_eq!(scale(VOLUME_SCE), 1.0);
+}
+
+/// Bug: the importer ignored `Timescale`, so `Timescale=0` (which freezes the game) and
+/// absurd values imported as normal scenarios. Values outside 0.1 to 10 are refused.
+#[test]
+fn a_time_scale_outside_the_range_is_refused() {
+    for bad in ["0.0", "0.05", "50", "-1.0"] {
+        let text = VOLUME_SCE.replace("MapScale=1.0", &format!("MapScale=1.0\nTimescale={bad}"));
+        let err = convert(&Sce::parse(&text), "x.sce", "0").unwrap_err();
+        let gap = err.iter().find(|r| r.feature == "time scale").unwrap_or_else(|| panic!("{bad}: {err:?}"));
+        assert!(gap.beyond_plan);
+        let value = bad.parse::<f32>().unwrap().to_string();
+        assert!(gap.detail.contains(&value) && gap.detail.contains("0.1") && gap.detail.contains("10"), "{gap}");
+    }
+    for ok in ["0.1", "10.0"] {
+        let text = VOLUME_SCE.replace("MapScale=1.0", &format!("MapScale=1.0\nTimescale={ok}"));
+        assert!(convert(&Sce::parse(&text), "x.sce", "0").is_ok(), "{ok}");
+    }
+}

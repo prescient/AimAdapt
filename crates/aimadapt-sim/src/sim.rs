@@ -642,6 +642,17 @@ impl Sim {
         self.scenario.timing.duration_s - self.elapsed()
     }
 
+    /// The rate of the game clock against real time (1.0 unless the scenario is a
+    /// time-scaled import).
+    pub fn time_scale(&self) -> f32 {
+        self.scenario.world.as_ref().map_or(1.0, |w| w.time_scale)
+    }
+
+    /// Real seconds of play so far: `elapsed()` is game seconds.
+    pub fn real_elapsed(&self) -> f32 {
+        self.elapsed() / self.time_scale()
+    }
+
     pub fn countdown_left(&self) -> f32 {
         (self.scenario.timing.countdown_s - self.clock).max(0.0)
     }
@@ -662,11 +673,19 @@ impl Sim {
         }
     }
 
-    /// Advances the simulation by `dt` seconds with this frame's input.
+    /// Advances the simulation by `dt` real seconds with this frame's input. Once the
+    /// run is going the game clock moves `dt * time_scale` seconds, and `clock` counts
+    /// the countdown in real seconds and then game seconds.
     pub fn step(&mut self, dt: f32, input: Input) -> Vec<Event> {
         let events = Vec::new();
         if self.phase == Phase::Finished || dt <= 0.0 {
             return events;
+        }
+        let scale = self.time_scale();
+        if self.phase == Phase::Running {
+            let dt = dt * scale;
+            self.clock += dt;
+            return self.run_step(dt, input, events);
         }
         self.clock += dt;
         if self.phase == Phase::Countdown {
@@ -680,11 +699,15 @@ impl Sim {
             for t in &mut self.targets {
                 t.track.restart(0.0, aim, t.pos, t.radius);
             }
-            // Only the part of this step past the countdown counts as play.
-            let over = self.clock - self.scenario.timing.countdown_s;
+            // Only the part of this step past the countdown counts as play, and that
+            // part is on the game clock.
+            let over = (self.clock - self.scenario.timing.countdown_s) * scale;
+            if scale != 1.0 {
+                self.clock = self.scenario.timing.countdown_s + over;
+            }
             return self.run_step(over, input, events);
         }
-        self.run_step(dt, input, events)
+        events
     }
 
     fn run_step(&mut self, dt: f32, input: Input, mut events: Vec<Event>) -> Vec<Event> {

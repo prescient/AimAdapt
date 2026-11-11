@@ -483,6 +483,13 @@ impl Scenario {
         toml::to_string_pretty(self).expect("scenario always serializes")
     }
 
+    /// How long a run takes in real seconds, countdown included: the duration is in game
+    /// seconds, which a time-scaled import plays at `time_scale` per real second.
+    pub fn real_seconds(&self) -> f32 {
+        let scale = self.world.as_ref().map_or(1.0, |w| w.time_scale);
+        self.timing.duration_s / scale + self.timing.countdown_s
+    }
+
     /// A short fingerprint of everything that affects play, so harder or easier
     /// variants of a scenario with the same name are told apart in history.
     pub fn fingerprint(&self) -> String {

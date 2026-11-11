@@ -40,14 +40,21 @@ impl Sim {
                 break_days: a.break_days,
             }
         });
-        RunResult {
+        let mut result = RunResult {
             score: adaptive.as_ref().map_or(self.score(), |a| a.value),
             stats: self.stats.clone(),
             kills: self.kills.clone(),
             duration_s: self.elapsed(),
             adaptive,
             telemetry,
+        };
+        // The run is played on the game clock but reported in real seconds, as
+        // KovaaK's reports it: time played, time to kill, and the replay's timeline.
+        let scale = self.time_scale();
+        if scale != 1.0 {
+            result.convert_to_real_seconds(scale);
         }
+        result
     }
 
     /// Updates per-target flick telemetry, tracking samples and the aim trace.
@@ -78,21 +85,22 @@ impl Sim {
         }
 
         if now >= self.next_trace {
-            self.next_trace = now + 1.0 / TRACE_HZ;
+            self.next_trace = now + self.time_scale() / TRACE_HZ;
             let (yaw, pitch) = angles(aim);
             self.telemetry.trace.push([now, yaw, pitch]);
         }
 
         if now >= self.next_frame {
             // Step on from the last frame's slot, not from now, so frames keep to
-            // 60 Hz instead of slipping to every third game frame.
-            self.next_frame = (self.next_frame + 1.0 / FRAME_HZ).max(now);
+            // 60 Hz instead of slipping to every third game frame. On a time-scaled
+            // scenario the rates are per real second, so the slot is `time_scale` as long.
+            self.next_frame = (self.next_frame + self.time_scale() / FRAME_HZ).max(now);
             let targets = self.targets.iter().map(|t| t.pose()).collect();
             self.telemetry.frames.push(TargetFrame { t: now, targets });
         }
 
         if self.scenario.weapon.kind == WeaponKind::Beam && now >= self.next_sample {
-            self.next_sample = now + 1.0 / SAMPLE_HZ;
+            self.next_sample = now + self.time_scale() / SAMPLE_HZ;
             let nearest = self.targets.iter().min_by(|a, b| angle_deg(aim, a.pos).total_cmp(&angle_deg(aim, b.pos)));
             if let Some(t) = nearest {
                 let motion = (t.rate[0] * t.pitch.to_radians().cos(), t.rate[1]);
@@ -109,6 +117,41 @@ impl Sim {
                     engaged: self.targets.iter().any(Target::engaged),
                 });
             }
+        }
+    }
+}
+
+impl RunResult {
+    /// Turns every time in the result from game seconds into real seconds, given the
+    /// game clock's rate (`scale` game seconds per real second).
+    fn convert_to_real_seconds(&mut self, scale: f32) {
+        self.duration_s /= scale;
+        for k in &mut self.kills {
+            k.at_s /= scale;
+            k.ttk_s /= scale;
+        }
+        let t = &mut self.telemetry;
+        for r in &mut t.targets {
+            for v in [&mut r.spawned_at, &mut r.start_at, &mut r.ended_at, &mut r.lifetime_s] {
+                *v /= scale;
+            }
+            for v in [&mut r.reaction_s, &mut r.reach_s].into_iter().flatten() {
+                *v /= scale;
+            }
+        }
+        for s in &mut t.shots {
+            s.t /= scale;
+        }
+        for s in &mut t.samples {
+            s.t /= scale;
+            s.since_change_s /= scale;
+            s.target_speed_dps *= scale;
+        }
+        for p in &mut t.trace {
+            p[0] /= scale;
+        }
+        for f in &mut t.frames {
+            f.t /= scale;
         }
     }
 }

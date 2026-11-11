@@ -148,9 +148,7 @@ pub fn build_trainer(state: &AppData, t: &TrainerState) -> Result<Trainer, Strin
     // same estimate the Program page uses.
     let duration: HashMap<&str, f64> = scenarios
         .iter()
-        .filter_map(|e| {
-            e.scenario.as_ref().map(|s| (e.id.as_str(), f64::from(s.timing.duration_s + s.timing.countdown_s) + 12.0))
-        })
+        .filter_map(|e| e.scenario.as_ref().map(|s| (e.id.as_str(), f64::from(s.real_seconds()) + 12.0)))
         .collect();
     let workout_last = db.workouts_last_played().map_err(err)?;
     let workouts = workout::load_all(&t.workouts_dir())
@@ -634,7 +632,7 @@ pub fn build_program(state: &AppData, t: &TrainerState) -> Result<ProgramPage, S
     let db = state.db.lock().map_err(err)?;
     let durations: HashMap<String, f64> = library::load_all(&t.scenarios_dir())
         .into_iter()
-        .filter_map(|e| e.scenario.ok().map(|s| (e.id, f64::from(s.timing.duration_s + s.timing.countdown_s))))
+        .filter_map(|e| e.scenario.ok().map(|s| (e.id, f64::from(s.real_seconds()))))
         .collect();
     let week = aimadapt_engine::training_week();
     let days: Vec<ProgramDay> = Weekday::ALL

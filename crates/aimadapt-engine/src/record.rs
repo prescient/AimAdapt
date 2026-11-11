@@ -400,6 +400,22 @@ mod tests {
         assert_eq!(runs, 0, "half a run was saved");
     }
 
+    /// Bug: the importer ignored `Timescale`, and a saved run's Play Time was game
+    /// seconds. A 10 s scenario at 0.5 takes 20 real seconds, and the file says so. (The
+    /// run's length in the history, which time-trained totals add up, is the wall-clock
+    /// time between its start and finish, so it was already real.)
+    #[test]
+    fn a_time_scaled_run_is_saved_with_its_real_play_time() {
+        use aimadapt_sim::world::{World, WorldSpawn};
+        let spawn = WorldSpawn { pos: [0.0, 0.0, -10.0], ..Default::default() };
+        let world = World { spawns: vec![spawn], time_scale: 0.5, ..Default::default() };
+        let scenario = Scenario { name: "Test Slow".into(), world: Some(world), ..Default::default() };
+        let settings = PlayerSettings::default();
+        let result = play(&scenario, false, None);
+        let run = to_run_file(&info(&scenario, &result, &settings, 0));
+        assert_eq!(run.field("Play Time"), Some("20.000"));
+    }
+
     #[test]
     fn engine_runs_show_up_like_kovaaks_runs() {
         let scenario = Scenario { name: "Test Grid".into(), ..Default::default() };

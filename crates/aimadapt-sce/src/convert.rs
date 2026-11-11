@@ -244,6 +244,11 @@ fn rule_reasons(top: &Section, reasons: &mut Vec<Gap>) {
     if top.f32_or("ScorePerTime", 0.0) != 0.0 {
         push_once(reasons, Gap::planned("a score for time", ""));
     }
+    let (lo, hi) = aimadapt_sim::world::TIME_SCALE_RANGE;
+    if let Some(v) = top.f32("Timescale").filter(|v| !(lo..=hi).contains(v)) {
+        let detail = format!("Timescale is {v}; the trainer allows {lo} to {hi}");
+        push_once(reasons, Gap { feature: "time scale", detail, beyond_plan: true });
+    }
     for (key, feature) in [
         ("ScoreMultDamageEfficiency", "a score multiplied by damage efficiency"),
         ("ScoreMultKillEfficiency", "a score multiplied by kill efficiency"),
@@ -355,7 +360,7 @@ fn add_kinds(
 }
 
 /// The scenario-wide rules the world keeps: where it came from, accuracy scoring,
-/// invincible bots and a locked field of view.
+/// invincible bots, the time scale and a locked field of view.
 fn world_rules(world: &mut World, top: &Section, source: &str, source_hash: &str) {
     world.source = source.into();
     world.source_hash = source_hash.into();
@@ -365,6 +370,8 @@ fn world_rules(world: &mut World, top: &Section, source: &str, source_hash: &str
         _ => AccuracyMult::None,
     };
     world.invincible = top.is("InvincibleBots");
+    // Out-of-range values are refused in `rule_reasons`.
+    world.time_scale = top.f32("Timescale").unwrap_or(1.0);
     if top.is("LockFOVRange") {
         let lo = top.f32_or("LockedFOVMin", 0.0);
         let hi = top.f32_or("LockedFOVMax", 180.0);

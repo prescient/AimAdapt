@@ -10,7 +10,7 @@ A scenario is refused when it uses something the trainer doesn't model, so every
 |---|---|---|
 | K1 Every reason on a file | dc4732c | 98 of 225 |
 | K2 Dashes | fdf08f9 | 103 of 225, 31 of the 34 Novice benchmarks |
-| K3 Helper bots and knockback | | 107 of 225, all 34 Novice benchmarks |
+| K3 Helper bots and knockback | 32d5397 | 107 of 225, all 34 Novice benchmarks |
 | K4 Lives, time score and efficiency | | |
 | K5 Hitbox shapes | | |
 | K6 Standing and spawning details | | |
@@ -246,6 +246,8 @@ These rows are filled in as packages land. A row leaves the table when a test ma
 
 | Setting | Read as | Checked |
 |---|---|---|
+| The countdown before a run, on a scenario with a time scale | Not scaled: it takes the same real time at any time scale | No |
+| The timer on screen, on a scenario with a time scale | Shows game seconds left, so it counts down at the time scale per real second | No |
 | The first press of the ability key after a bot appears | One press interval after it appears | No |
 | `BlockAbilityOnStartDuration` (character) | No ability for that long after the bot appears | No |
 | `AbilityGlobalCooldown` (character) | After any ability, none of the bot's abilities for that long | No |
