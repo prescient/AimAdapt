@@ -106,12 +106,17 @@ function helpPage() {
   const all = guideSections(help.text);
   const q = help.query.trim().toLowerCase();
   const shown = q ? all.filter((s) => s.title && q.split(/\s+/).every((w) => s.text.includes(w))) : all;
-  const toc = all.filter((s) => s.title);
+  const here = route().arg;
+  // The rail lists what the filter leaves, so it always matches the sections on the right.
+  const toc = shown.filter((s) => s.title);
   return `<div class="page help">
-    ${head("User guide", "Help", `<div class="field help-search"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9aa1ac" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg>
-      <input id="help-q" type="search" placeholder="Search the guide" aria-label="Search the guide" value="${esc(help.query)}"></div>`)}
+    ${head("User guide", "Help")}
     <div class="help-layout">
-      <nav class="card help-toc" aria-label="Contents">${toc.map((s) => `<a href="#help/${s.id}">${esc(s.title)}</a>`).join("")}</nav>
+      <nav class="card help-toc" aria-label="Contents">
+        <div class="help-filter"><div class="field help-search"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9aa1ac" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg>
+          <input id="help-q" type="search" placeholder="Filter the guide" aria-label="Filter the guide" value="${esc(help.query)}"></div></div>
+        ${toc.length ? toc.map((s) => `<a href="#help/${s.id}"${s.id === here ? ' aria-current="true"' : ""}>${esc(s.title)}</a>`).join("") : `<div class="note-body">No sections match.</div>`}
+      </nav>
       <div class="help-body">
         ${shown.length ? shown.map((s) => `<section class="card guide" id="guide-${s.id}">${s.title ? `<h2>${esc(s.title)}</h2>` : ""}${s.html}</section>`).join("")
           : `<div class="card note-body">Nothing in the guide matches "${esc(help.query)}".</div>`}
@@ -123,15 +128,28 @@ function helpPage() {
 function scrollToHelp() {
   const { arg } = route();
   const el = arg && document.getElementById(`guide-${arg}`);
+  document.querySelector('.help-toc [aria-current="true"]')?.scrollIntoView({ block: "nearest" });
   if (el) el.scrollIntoView({ block: "start" });
 }
 
+// The guide section for the page at this address. Every id is a section of guide.md.
+const HELP_FOR = { today: "today", progress: "progress", settings: "settings", edit: "edit", workout: "workout", replay: "replay" };
+function helpSection({ view, arg }) {
+  if (view === "scenarios") {
+    if (arg === "program") return "program";
+    if (arg?.startsWith("workout:")) return "workout";
+    if (arg?.startsWith("kovaaks:")) return "kovaaks-play";
+    return "scenarios";
+  }
+  if (view === "settings" && arg === "data") return "data";
+  return HELP_FOR[view] ?? "start";
+}
+
 // The Help link in each page's header goes to that page's section.
-const HELP_FOR = { edit: "edit", workout: "workout", replay: "replay" };
 function helpLink() {
-  const { view } = route();
-  if (view === "help") return "";
-  const id = HELP_FOR[view] ?? (document.querySelector(`.nav[data-view="${view}"]`) ? view : "dashboard");
+  const r = route();
+  if (r.view === "help") return "";
+  const id = helpSection(r);
   return `<a class="help-link" href="#help/${id}" title="Help for this page">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17.5v.01"></path></svg>Help</a>`;
 }

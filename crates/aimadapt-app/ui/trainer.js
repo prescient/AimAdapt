@@ -97,14 +97,12 @@ function edit(id) {
     if (id === "new") Object.assign(scenario, { name: "My scenario", author: "", description: "", tags: [] });
     else if (entry.builtin) Object.assign(scenario, { name: `${scenario.name} (my copy)`, author: "" });
     tr.edit = { forId: id, replace: entry && !entry.builtin ? id : null, builtin: !!entry?.builtin, scenario, problems: [] };
+    // Decided once, here: a section that holds only defaults starts folded. After this only the
+    // player's clicks change it, so typing in a field never folds the section under the cursor.
+    editGroups().forEach((g, i) => (ui.folds[editFoldId(g)] = i === 0 || !holdsDefaults(g, scenario)));
   }
   const e = tr.edit;
-  const groups = [];
-  for (const f of tr.data.fields) {
-    let g = groups.find((x) => x.name === f.group);
-    if (!g) groups.push((g = { name: f.group, fields: [] }));
-    g.fields.push(f);
-  }
+  const groups = editGroups();
   return `<div class="page">
     ${head(e.replace ? "Edit scenario" : e.builtin ? "Copy of a built-in scenario" : "New scenario", esc(e.scenario.name || "Untitled"), `<span class="chips">
       <button class="btn" type="button" data-action="cancel-edit" data-href="${esc(e.replace || e.forId !== "new" ? scenarioHref(e.forId) : "#scenarios")}">Cancel</button>
@@ -114,8 +112,38 @@ function edit(id) {
     ${trainerErrorBanner()}
     ${e.builtin ? `<section class="banner info"><div class="banner-body">Built-in scenarios stay as they are. Saving makes your own copy.</div></section>` : ""}
     <div id="edit-status">${editStatus()}</div>
-    <div class="editor-groups">${groups.map((g) => `<section class="card"><h2>${esc(g.name)}</h2><div class="form-grid">${g.fields.map((f) => fieldInput(f, getPath(e.scenario, f.path))).join("")}</div></section>`).join("")}</div>
+    <div class="editor-groups">${groups.map((g, i) => editGroup(g, i === 0)).join("")}</div>
   </div>`;
+}
+
+// The editor's fields grouped as the file format does, in order.
+function editGroups() {
+  const groups = [];
+  for (const f of ui.trainer.data.fields) {
+    let g = groups.find((x) => x.name === f.group);
+    if (!g) groups.push((g = { name: f.group, fields: [] }));
+    g.fields.push(f);
+  }
+  return groups;
+}
+
+const editFoldId = (g) => `edit:${g.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+
+// Whether every field of the group holds its default. Without the defaults (older preview
+// data) nothing counts as default, so nothing folds.
+function holdsDefaults(g, scenario) {
+  const defaults = ui.trainer.data.defaults;
+  if (!defaults) return false;
+  return g.fields.every((f) => JSON.stringify(getPath(scenario, f.path)) === JSON.stringify(getPath(defaults, f.path)));
+}
+
+// The first group (the name) is always a plain card. The others are folds, open or not as decided when the
+// editor opened the scenario. A folded group's summary says when it holds only defaults.
+function editGroup(g, first) {
+  const e = ui.trainer.edit;
+  const form = `<div class="form-grid">${g.fields.map((f) => fieldInput(f, getPath(e.scenario, f.path))).join("")}</div>`;
+  if (first) return `<section class="card"><h2>${esc(g.name)}</h2>${form}</section>`;
+  return fold(editFoldId(g), g.name, `<section class="card">${form}</section>`, holdsDefaults(g, e.scenario) ? "defaults" : "");
 }
 
 function editStatus() {

@@ -2,7 +2,7 @@
 
 This guide is for AimAdapt 0.1.0. It covers every page of the app, the trainer window, how ratings work, and what each built-in scenario trains.
 
-The app has four pages, in the sidebar: **Today** (what to play now), **Scenarios** (everything you can play, and how you're doing on each), **Progress** (how you're doing overall) and **Settings**. Help is at the bottom of the sidebar, and every page has a Help link to its own section.
+The app has four pages, in the sidebar: **Today** (what to play now), **Scenarios** (everything you can play, and how you're doing on each), **Progress** (how you're doing overall) and **Settings**. Help is at the bottom of the sidebar, and every page has a Help link to its own section. When the window is 1180 pixels wide or less, the sidebar shows only icons: point at one to see its name. On the Help page, the box at the top of the contents list filters the guide. Only sections that match stay in the list and on the page. The list marks the section you're in, and scrolls on its own when the window is short.
 
 ## Getting started {#start}
 
@@ -203,7 +203,7 @@ Built-in workouts:
 - **Daily Fundamentals:** about eight minutes of clicking, tracking and switching, all adaptive.
 - **Clicking Focus:** timed flicks at every distance, plus reaction and moving targets.
 - **Tracking Focus:** reactive strafes, smooth tracking and switching.
-- **Core Week: Monday** to **Core Week: Friday:** the program's days. They're played from Today and Progress › Skills, so they aren't in the Scenarios list.
+- **Core Week: Monday** to **Core Week: Friday:** the program's days. They're played from Today and Scenarios › Program, so they aren't in the Workouts list.
 
 Workouts have their own tab on Scenarios.
 
@@ -211,7 +211,7 @@ Workouts have their own tab on Scenarios.
 
 ## Scenario editor {#edit}
 
-The editor is a form with every scenario setting, grouped as in the file format: about, timing, weapon, targets, spawn area, movement, scoring, adaptive and arena. Each field explains itself, and values are checked as you type. Anything that needs fixing is listed under **Fix before saving**.
+The editor is a form with every scenario setting, grouped as in the file format: about, timing, weapon, targets, spawn area, movement, scoring, adaptive and arena. Each field explains itself, and values are checked as you type. Anything that needs fixing is listed under **Fix before saving**. Sections that hold only default values start folded, with "defaults" beside the name. The first section, with the scenario's name, is always open. Click a section's name to open or fold it. It stays as you left it while you edit.
 
 - **Built-ins are copied before editing.** Your copy is saved in your own scenarios folder.
 - **Save & play adaptive** saves and starts an adaptive run. **Save** goes back to the scenario's page; **Cancel** does too and throws away your changes.
@@ -324,6 +324,7 @@ Nothing is sent anywhere. Deleting one of your scenarios or workouts removes the
 ## What's new {#whats-new}
 
 **November 2026**
+- The Help page has its filter at the top of the contents list, which now shows only the matching sections and marks the one you're in. The sidebar shows only icons when the window is 1180 pixels wide or less, so the lists on Scenarios keep all their columns down to a narrower window than before. In the scenario editor, sections that hold only default values start folded.
 - After a long break from a scenario (three days or more), its next run is a calibration run that starts from your old rating, and the trainer says how many days it has been. Your rating and best held carry over.
 - Scenarios has three tabs now: **Browse**, **Workouts** and **Program**. Recent and Yours became filters on Browse: **Played**, and a **Yours** button next to Favorites. Once you've played something, Browse opens with your latest plays first. One **Rating or score** column shows your rating, or your best score where there is no rating. **All recent** on Today opens Browse showing what you've played. On a narrow window the lists drop columns so Play stays in view, and the page no longer scrolls sideways.
 - Breakthroughs are stricter. A run under 30 targets now has to beat 85% by a margin to count as held, so a lucky 9 of 10 no longer sets a best held. The results screen says when a run was at the goal but too short to count. Bests you already held are kept.

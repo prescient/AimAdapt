@@ -307,12 +307,19 @@ function renderStatus() {
   if (!s) return;
   const watching = !!s.stats_dir;
   const last = s.training.runs.at(-1);
+  const linked = watching ? "KovaaK's linked" : "KovaaK's not found";
+  const lastRun = last ? `Last run ${fmtShort(dt(last.finished_at))}, ${fmtTime(dt(last.finished_at))}` : "No runs yet";
+  // On a narrow window the box shrinks to its dot (see styles.css), so the text is also its tooltip.
+  el.title = `${linked}. ${lastRun}`;
   el.innerHTML = `
-    <div class="status-title"><span class="dot ${watching ? "" : "off"}"></span>${watching ? "KovaaK's linked" : "KovaaK's not found"}</div>
-    <div class="small muted">${last ? `Last run ${esc(fmtShort(dt(last.finished_at)))}, ${esc(fmtTime(dt(last.finished_at)))}` : "No runs yet"}</div>`;
+    <div class="status-title"><span class="dot ${watching ? "" : "off"}"></span><span class="status-text">${linked}</span></div>
+    <div class="small muted status-text">${esc(lastRun)}</div>`;
 }
 
 // ---------- shared pieces ----------
+
+// "1 run", "2 runs".
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 const kpi = (label, value, note = "") =>
   `<div class="kpi"><div class="kpi-label">${label}</div><div class="kpi-value">${value}</div>${note ? `<div class="kpi-note">${note}</div>` : ""}</div>`;
@@ -340,9 +347,9 @@ function tabs(base, list, current, bare = null) {
 // A section the reader opens when they want it: a native <details>, so the keyboard
 // works. Whether it's open is kept in ui.folds, because every render redraws it. The
 // summary has an id, so the focus stays on it across a render (see refocus).
-function fold(id, title, body) {
+function fold(id, title, body, note = "") {
   return `<details class="fold" data-fold="${esc(id)}" ${ui.folds[id] ? "open" : ""}>
-    <summary id="fold-${esc(id)}">${esc(title)}</summary><div class="fold-body">${body}</div></details>`;
+    <summary id="fold-${esc(id)}">${esc(title)}${note ? ` <span class="fold-note">${esc(note)}</span>` : ""}</summary><div class="fold-body">${body}</div></details>`;
 }
 
 // toggle doesn't bubble, so listen on the way down.
@@ -411,10 +418,10 @@ function scoreHistoryCard({ stats: s, history }) {
   const sessionsCount = new Set(counted.map((r) => r.day)).size;
   return `<section class="card" aria-label="Score history" style="gap:18px">
       <div>
-        <div class="small muted">${s.runs} runs${s.runs !== s.counted_runs ? ` (${s.runs - s.counted_runs} restarted)` : ""} · ${sessionsCount} ${sessionsCount === 1 ? "day" : "days"} · first played ${esc(fmtShort(dt(s.first_played)))}</div></div>
+        <div class="small muted">${plural(s.runs, "run")}${s.runs !== s.counted_runs ? ` (${s.runs - s.counted_runs} restarted)` : ""} · ${sessionsCount} ${sessionsCount === 1 ? "day" : "days"} · first played ${esc(fmtShort(dt(s.first_played)))}</div></div>
       <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px">
         <div class="tile"><div class="kpi-label">Personal best</div><div class="kpi-value" style="color:var(--gold)">${num(s.best_score)}</div><div class="small muted">${s.best_at ? esc(fmtShort(dt(s.best_at)) + ", " + fmtTime(dt(s.best_at))) : ""}</div></div>
-        <div class="tile"><div class="kpi-label">Average</div><div class="kpi-value">${num(s.average)}</div><div class="small muted">${s.counted_runs} counted runs</div></div>
+        <div class="tile"><div class="kpi-label">Average</div><div class="kpi-value">${num(s.average)}</div><div class="small muted">${plural(s.counted_runs, "counted run")}</div></div>
         <div class="tile"><div class="kpi-label">Accuracy</div><div class="kpi-value">${acc(s.recent_accuracy)}</div><div class="small muted">Last ${ui.snap.progress_settings.trend_window} runs</div></div>
         <div class="tile"><div class="kpi-label">Improvement</div><div class="kpi-value pos">${pct(s.improvement_pct)}</div><div class="small muted">First run → best</div></div>
       </div>
@@ -430,9 +437,9 @@ function scenarioNotesCard({ stats: s, history, cold_starts }) {
     const rest = c.vs_rest_of_day_pct !== null ? `, ${pct(c.vs_rest_of_day_pct)} vs. the rest of that day` : "";
     notes.push(["First run on " + fmtShort(day(c.day)), `${num(c.first_score)} vs. previous best ${num(c.previous_best)} (${pct(c.vs_previous_best_pct)}${rest}).`]);
   }
-  if (s.plateau) notes.push(["Plateau", `${s.runs_since_pb} runs since your last best and a flat trend (${pct(s.trend_pct)}).`]);
+  if (s.plateau) notes.push(["Plateau", `${plural(s.runs_since_pb, "run")} since your last best and a flat trend (${pct(s.trend_pct)}).`]);
   else if (s.runs_since_pb === 0 && s.counted_runs > 1) notes.push(["New best on your latest run", "Still climbing."]);
-  else if (s.runs_since_pb > 0) notes.push(["Since your best", `${s.runs_since_pb} runs. Plateau warnings start after ${ui.snap.progress_settings.plateau_runs}.`]);
+  else if (s.runs_since_pb > 0) notes.push(["Since your best", `${plural(s.runs_since_pb, "run")}. Plateau warnings start after ${ui.snap.progress_settings.plateau_runs}.`]);
   if (s.variation_pct !== null) notes.push(["Consistency", `Scores vary by about ${s.variation_pct.toFixed(0)}% run to run (lower is steadier).`]);
   if (s.trend_pct !== null) notes.push(["Trend", `Last ${ui.snap.progress_settings.trend_window} runs vs. the ones before: ${pct(s.trend_pct)}.`]);
   const lastPeriod = periods[history.at(-1).sens_period];

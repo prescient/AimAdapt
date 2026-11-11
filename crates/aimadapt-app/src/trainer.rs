@@ -83,6 +83,8 @@ pub struct Trainer {
     /// A profile matched to the latest KovaaK's run, if known.
     kovaaks_profile: Option<Profile>,
     fields: &'static [spec::Field],
+    /// A scenario with every setting at its default, for the editor to tell which sections hold only defaults.
+    defaults: Scenario,
     scenarios_dir: String,
     workouts_dir: String,
     playing: bool,
@@ -166,6 +168,7 @@ pub fn build_trainer(state: &AppData, t: &TrainerState) -> Result<Trainer, Strin
         profiles_note: aimadapt_engine::profiles_note(&t.data_dir),
         kovaaks_profile: aimadapt_engine::kovaaks_profile(&db),
         fields: spec::FIELDS,
+        defaults: Scenario::default(),
         scenarios_dir: t.scenarios_dir().display().to_string(),
         workouts_dir: t.workouts_dir().display().to_string(),
         playing: t.playing.load(Ordering::SeqCst),
@@ -613,6 +616,19 @@ mod tests {
         assert!(r.error.unwrap().contains("boom"));
         let r = closed_report(false, Some(3), &[]);
         assert!(r.error.unwrap().contains("exit code 3"));
+    }
+
+    /// The editor folds a section when its fields equal the defaults, read from the payload's `defaults`
+    /// at each field's path. `build_trainer` needs a database, so this checks what it puts there: the
+    /// default scenario serializes with a value at every path the editor draws (a missing one would
+    /// read as "not default" and keep its section open).
+    #[test]
+    fn the_editors_defaults_have_a_value_for_every_field() {
+        let defaults = serde_json::to_value(Scenario::default()).unwrap();
+        for f in spec::FIELDS {
+            let found = f.path.split('.').try_fold(&defaults, |v, k| v.get(k));
+            assert!(found.is_some(), "no default at {}", f.path);
+        }
     }
 
     #[test]

@@ -167,8 +167,9 @@ Last reviewed: Nov 10, 2026 (after the layout review and the adaptive review; th
 ### To do (second step of the simpler layout)
 - [ ] `todo` P1 Today: "Since your last session" (rating changes and breakthroughs since the session before) and each drill's change against the same day last week, with a session summary when the trainer closes (plan L3b).
 - [x] Progress trimmed: Skills leads with the profile and carry-over and has no start buttons, Benchmarks says it comes from KovaaK's, Time folds its extra cards, and notes are ranked once, with Today showing the top one (plan L4).
-- [ ] `todo` P3 Help contents rail with a filter, icon-only sidebar on narrow windows, and editor sections that hold defaults start folded (plan L6b).
+- [x] Help has its filter at the top of the contents rail, which lists only the matching sections, marks the current one and scrolls on its own; the sidebar shows icons only at 1180 px and under; editor sections that hold only defaults start folded; every page's Help link lands on a guide section (plan L6b).
 - [ ] `todo` P2 One streak: the program streak and the all-runs streak still differ (Today shows the all-runs one).
+- [ ] `todo` P2 Keep the sidebar in view on a long page. It scrolls away with the page, so the page links leave the window and Help and the status box sit at the very bottom.
 - [ ] `todo` P2 Settings save as you change them, instead of Save and Undo.
 - [ ] `todo` P3 Folder picker for the KovaaK's stats folder.
 - [ ] `todo` P3 Skill and tags for KovaaK's scenarios (Voltaic packs map to sub-skills), so the Skill filter covers them.

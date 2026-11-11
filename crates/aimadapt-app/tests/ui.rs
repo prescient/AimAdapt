@@ -496,6 +496,8 @@ fn play_always_means_an_adaptive_run() {
 /// height. A week card's button wraps its label, the week drops to four columns
 /// before a word can't fit, and the scenario header keeps its buttons their own
 /// height. (Layout can't be measured here, so this checks the rules that fix it.)
+/// The week went to four columns at 1100 px until plan L6b made the sidebar icon-only
+/// at 1180 px and under. That gives the page 156 px more, so it now does at 960 px.
 #[test]
 fn longer_button_labels_fit_where_they_are_shown() {
     let css = ui("styles.css");
@@ -506,7 +508,7 @@ fn longer_button_labels_fit_where_they_are_shown() {
     };
     assert!(!rule(".small-btn").contains("nowrap"), "a week card's button wraps its label");
     assert!(
-        css.contains("@media (max-width: 1100px) { .week-grid { grid-template-columns: repeat(4,"),
+        css.contains("@media (max-width: 960px) { .week-grid { grid-template-columns: repeat(4,"),
         "the week has four columns on narrower windows"
     );
     assert!(
@@ -1080,15 +1082,18 @@ fn todays_all_recent_opens_browse_filtered_to_played() {
 /// scrollbar too. The table now drops Runs, then Type, then Skill as the window narrows,
 /// and its box is positioned, so text placed absolutely inside it scrolls with it.
 /// Widths can't be measured here (they were checked in a browser from 900 to 1440 px),
-/// so this pins the rules that make the columns fit.
+/// so this pins the rules that make the columns fit. The columns went at 1160, 1100 and
+/// 1020 px until plan L6b made the sidebar icon-only at 1180 px and under. The page
+/// is 156 px wider there, so hiding Runs at 1160 px threw away room it had. They now
+/// go at 1020, 960 and 880 px.
 #[test]
 fn a_narrow_window_drops_list_columns_and_keeps_play_in_view() {
     let css = ui("styles.css");
     let wrap = css_rule(&css, ".table-wrap");
     assert!(wrap.contains("overflow-x: auto") && wrap.contains("position: relative"), "{wrap}");
-    assert!(css.contains("@media (max-width: 1160px) { .lib-table .c-plays { display: none; } }"));
-    assert!(css.contains("@media (max-width: 1100px) { .lib-table .c-kind, .lib-table .c-length { display: none; } }"));
-    let narrow = css.split("@media (max-width: 1020px) {").nth(1).expect("the rules for 1020 px and under");
+    assert!(css.contains("@media (max-width: 1020px) { .lib-table .c-plays { display: none; } }"));
+    assert!(css.contains("@media (max-width: 960px) { .lib-table .c-kind, .lib-table .c-length { display: none; } }"));
+    let narrow = css.split("@media (max-width: 880px) {").nth(1).expect("the rules for 880 px and under");
     let narrow = narrow
         .split(
             "
@@ -1104,4 +1109,169 @@ fn a_narrow_window_drops_list_columns_and_keeps_play_in_view() {
             assert!(!line.contains(keep), "{keep} is hidden by: {line}");
         }
     }
+}
+
+/// Rule (plan L6b): the Help page's filter box is at the top of the contents rail, not in
+/// the page header, and the rail lists only the sections that match (the ones shown on the
+/// right), saying so when none do. The rail is sticky, has a maximum height tied to the
+/// window and scrolls on its own, so a 600 px tall window still reaches every entry, and
+/// it marks the section in the address as current.
+#[test]
+fn the_help_filter_is_in_the_rail_and_the_rail_lists_what_matches() {
+    let help = ui("help.js");
+    let page = decl(&help, "helpPage");
+    let rail = at(page, "<nav class=\"card help-toc\"");
+    let rail_end = rail + at(&page[rail..], "</nav>");
+    let input = at(page, "id=\"help-q\"");
+    assert!(rail < input && input < rail_end, "the filter box goes inside the rail");
+    assert!(page[input..].starts_with("id=\"help-q\" type=\"search\" placeholder=\"Filter the guide\""), "{page}");
+    assert!(page.contains("${head(\"User guide\", \"Help\")}"), "the header has no search box any more");
+    assert!(page.contains("const toc = shown.filter((s) => s.title)"), "the rail lists the sections that are shown");
+    assert!(page.contains("No sections match."), "{page}");
+    assert!(help.contains("help.query = e.target.value"), "the input listener stays");
+    assert!(page.contains("aria-current=\"true\""), "the current section is marked for screen readers");
+    assert!(page.contains("s.id === here"), "{page}");
+
+    let css = ui("styles.css");
+    let toc = css_rule(&css, ".help-toc");
+    assert!(toc.contains("position: sticky"), "{toc}");
+    assert!(toc.contains("max-height: calc(100vh"), "the rail is never taller than the window: {toc}");
+    assert!(toc.contains("overflow-y: auto"), "and scrolls on its own: {toc}");
+    // Bug: with `top: 0` the filter stuck 12px below the rail's top edge and covered the first link.
+    let filter = css_rule(&css, ".help-filter");
+    assert!(filter.contains("position: sticky; top: -12px;"), "{filter}");
+    assert!(css.contains(".help-toc a[aria-current=\"true\"] {"), "the current section has a visible style");
+}
+
+/// Rule (plan L6b): every page's Help link lands on a section of guide.md. Before this,
+/// an address with no entry in the table fell back to "dashboard", which isn't a section,
+/// and the Program tab, a scenario's page and a workout's page landed on the wrong one.
+/// Every name `helpSection` can return, and every view `render()` can draw, is checked.
+#[test]
+fn every_help_link_lands_on_a_guide_section() {
+    let guide = ui("guide.md");
+    let ids: BTreeSet<String> = guide
+        .lines()
+        .filter(|l| l.starts_with("## "))
+        .filter_map(|l| l.split("{#").nth(1).map(|s| s.trim().trim_end_matches('}').to_string()))
+        .collect();
+    let help = ui("help.js");
+    let table = help.split("const HELP_FOR = {").nth(1).and_then(|s| s.split('}').next()).expect("HELP_FOR");
+    let section = decl(&help, "helpSection");
+    let mut named = BTreeSet::new();
+    for text in [table, section] {
+        for (i, part) in text.split('"').enumerate() {
+            if i % 2 == 1 && !part.contains(':') {
+                named.insert(part.to_string());
+            }
+        }
+    }
+    assert!(!named.is_empty());
+    for id in &named {
+        assert!(ids.contains(id), "helpSection names {id:?}, which isn't a section of guide.md: {ids:?}");
+    }
+    assert!(section.contains("?? \"start\""), "an unknown page lands on Getting started, not a missing section");
+    // The Program tab, a workout's page and a KovaaK's scenario's page have their own sections.
+    for part in ["arg === \"program\"", "return \"program\"", "\"workout:\"", "\"kovaaks:\"", "\"kovaaks-play\""] {
+        assert!(section.contains(part), "{part} in helpSection");
+    }
+    // Every view the app draws has a link target.
+    let app = ui("app.js");
+    let views = app.split("const views = {").nth(1).and_then(|s| s.split('}').next()).expect("the views table");
+    for view in views.split(',').map(|v| v.split(':').next().unwrap().trim()).filter(|v| !v.is_empty() && *v != "help")
+    {
+        assert!(
+            table.contains(&format!("{view}: \"")) || section.contains(&format!("view === \"{view}\"")),
+            "no Help section for the {view} page"
+        );
+    }
+}
+
+/// Rule (plan L6b): up to 1180 px wide the sidebar shows icons only. Each nav label and the
+/// brand name are in a span that CSS hides (visually, so screen readers still read them),
+/// each link has a title, and the status box shrinks to its dot, with its words kept as a
+/// title on the box. The strip is a fixed 64 px beside `.content`'s 560 px basis, so it
+/// can't wrap above the content, and over 1180 px the sidebar is as it was. (1180 and not
+/// 1160, where the lists' columns only just fit beside the full sidebar.)
+#[test]
+fn the_sidebar_shows_icons_only_on_a_narrow_window() {
+    let index = ui("index.html");
+    let links: Vec<&str> = index.split("<a class=\"nav\"").skip(1).collect();
+    assert_eq!(links.len(), 5, "Today, Scenarios, Progress, Settings and Help");
+    for link in &links {
+        let tag = link.split('>').next().unwrap();
+        assert!(tag.contains(" title=\""), "a nav link has a title for its tooltip: {tag}");
+        assert!(link.contains("<span class=\"nav-label\">"), "the label is in a span: {link}");
+    }
+    assert!(index.contains("<span class=\"brand-name\">AimAdapt</span>"));
+    assert!(index.contains("<span class=\"status-text\">"), "the status text is in a span");
+
+    let css = ui("styles.css");
+    let lines: Vec<&str> = css.lines().map(str::trim).collect();
+    let open = lines.iter().position(|l| *l == "@media (max-width: 1180px) {").expect("a rule for 1180 px and under");
+    let narrow: Vec<&str> = lines[open + 1..].iter().take_while(|l| **l != "}").copied().collect();
+    let narrow = narrow.join("\n");
+    assert!(narrow.contains(".sidebar { flex: 0 0 64px;"), "a narrow strip: {narrow}");
+    assert!(narrow.contains(".nav { justify-content: center;"), "icons centred: {narrow}");
+    for hidden in [".brand-name", ".nav-label", ".status-text"] {
+        assert!(narrow.contains(hidden), "{hidden} is hidden in the narrow rule: {narrow}");
+    }
+    assert!(css.contains("\n.sidebar { flex: 1 1 220px;"), "over 1180 px the sidebar is unchanged");
+    assert!(css.contains("\n.content { flex: 999 1 560px;"), "the content keeps its basis");
+
+    let app = ui("app.js");
+    let status = decl(&app, "renderStatus");
+    assert!(status.contains("el.title ="), "the status words are the box's tooltip: {status}");
+    assert!(status.contains("class=\"status-text\""), "{status}");
+}
+
+/// Rule (plan L6b): in the scenario editor a section whose fields all hold the default
+/// value starts folded. The state is decided once, when the editor opens a scenario (in
+/// the block that sets `tr.edit`), from the `defaults` in the trainer payload, so typing
+/// never folds or unfolds a section and a redraw keeps it. The first section (the name) is
+/// always open, and without `defaults` (older preview data) nothing folds.
+#[test]
+fn editor_sections_that_hold_defaults_start_folded() {
+    let trainer = ui("trainer.js");
+    let edit = decl(&trainer, "edit");
+    let opens = at(edit, "tr.edit = { forId: id");
+    let decides = at(edit, "ui.folds[editFoldId(g)] = i === 0 || !holdsDefaults(g, scenario)");
+    assert!(
+        decides > opens && decides < at(edit, "const e = tr.edit;"),
+        "decided when the scenario opens, not per draw"
+    );
+    assert_eq!(trainer.matches("ui.folds").count(), 1, "nothing else in the editor changes a fold");
+    let holds = decl(&trainer, "holdsDefaults");
+    assert!(holds.contains("if (!defaults) return false"), "no defaults, nothing folds: {holds}");
+    assert!(holds.contains("JSON.stringify(getPath(scenario, f.path))"), "{holds}");
+    assert!(holds.contains("JSON.stringify(getPath(defaults, f.path))"), "{holds}");
+    assert!(holds.contains(".every("), "every field of the group: {holds}");
+    let group = decl(&trainer, "editGroup");
+    assert!(group.contains("first) return `<section class=\"card\"><h2>"), "the first group is a plain card: {group}");
+    assert!(group.contains("fold(editFoldId(g), g.name,"), "{group}");
+    assert!(group.contains("\"defaults\""), "a folded group says it holds defaults: {group}");
+    assert!(trainer.contains("`edit:${g.name"), "fold ids that can't clash with the Time tab's");
+    let app = ui("app.js");
+    assert!(decl(&app, "fold").contains("fold-note"), "fold() takes a note for the summary");
+    // The Rust side sends the defaults.
+    let rust = std::fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/trainer.rs")).unwrap();
+    assert!(rust.contains("defaults: Scenario::default(),"), "build_trainer sends the defaults");
+}
+
+/// Bug: the KovaaK's score history card said "1 runs" and "1 counted runs" for a scenario
+/// with one run, because it printed `${n} runs` with no singular. Counts there go through
+/// the `plural` helper now.
+#[test]
+fn the_score_history_card_says_1_run_not_1_runs() {
+    let app = ui("app.js");
+    let helper = decl(&app, "plural");
+    assert!(helper.contains("n === 1 ? \"\" : \"s\""), "{helper}");
+    let card = decl(&app, "scoreHistoryCard");
+    assert!(card.contains("plural(s.runs, \"run\")"), "{card}");
+    assert!(card.contains("plural(s.counted_runs, \"counted run\")"), "{card}");
+    for raw in ["${s.runs} runs", "${s.counted_runs} counted runs"] {
+        assert!(!card.contains(raw), "{raw} says \"1 runs\" for one run: {card}");
+    }
+    let notes = decl(&app, "scenarioNotesCard");
+    assert!(!notes.contains("${s.runs_since_pb} runs"), "the same count in the notes: {notes}");
 }
