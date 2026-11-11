@@ -156,6 +156,8 @@ Every scenario can be played in **Standard** mode, at the difficulty written in 
 
 A stretch run never comes straight after another stretch run, or after a run more than 10 points below the goal. Holding the goal rate for a whole run at a value harder than your best counts as a breakthrough. A run of 30 or more targets holds the goal at the goal rate itself. A shorter run (10 to 29 targets) has to beat it by one binomial standard deviation for its length, so at 85% that is 10 of 10 or 19 of 20. A tracking segment counts as three targets, so a tracking run of 20 seconds or more needs only the goal rate. A run under 10 targets or segments never counts. The game announces it at the end of the run, and the value is saved as your best held. The mix is a setting in your profile.
 
+**Planned order in a block.** When a workout or a program day plays a scenario two or more times in a row, the kind of each run is planned from the mix instead of drawn. The stretch and easy shares are rounded to the number of runs. The first run is at your level, stretch runs go in the middle with none side by side and none last, and easy runs close the block. Five Balanced runs go at your level, at your level, stretch, at your level, easy. A calibration run still comes first when one is due, and a planned stretch run becomes a run at your level after a run more than 10 points below the goal. A run on its own draws its kind as described above.
+
 | Field | Default | Meaning |
 |---|---|---|
 | `adaptive.goal` | `0.85` | Your rating is the value you succeed at this share of the time (0.6–0.95). |

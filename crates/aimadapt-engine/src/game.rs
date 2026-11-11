@@ -233,7 +233,7 @@ impl Game {
             let now = Local::now().naive_local();
             let prior = db.as_ref().and_then(|db| record::prior(db, &s, now));
             self.run.best = db.as_ref().and_then(|db| record::best_rating(db, &s));
-            Sim::adaptive(s, self.session.seed, prior, self.session.settings.challenge)
+            Sim::adaptive_in_block(s, self.session.seed, prior, self.session.settings.challenge, step.rep, step.reps)
         } else {
             self.run.best = db.as_ref().and_then(|db| record::best_score(db, &s));
             Sim::new(s, self.session.seed)

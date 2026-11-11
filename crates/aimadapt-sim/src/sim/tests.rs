@@ -824,6 +824,32 @@ fn prior_at(knob: Knob, value: f32, fastest: Option<f32>) -> Prior {
     }
 }
 
+/// Planned order: five runs of one drill on Balanced play at level, at level,
+/// stretch, at level, easy, not a random draw each. A block run with no prior is
+/// still a calibration run.
+#[test]
+fn block_runs_follow_the_planned_order() {
+    let s = no_countdown(Scenario::default());
+    let prior = Prior { last_run: None, ..prior_at(Knob::Lifetime, 0.8, None) };
+    let kinds: Vec<Pick> = (1..=5)
+        .map(|rep| {
+            Sim::adaptive_in_block(s.clone(), 4 + u64::from(rep), Some(prior), Mix::Balanced, rep, 5)
+                .run_pick()
+                .unwrap()
+                .1
+        })
+        .collect();
+    assert_eq!(kinds, [Pick::Near, Pick::Near, Pick::Stretch, Pick::Near, Pick::Easy]);
+    for rep in 1..=5 {
+        let sim = Sim::adaptive_in_block(s.clone(), 4, None, Mix::Balanced, rep, 5);
+        assert_eq!(sim.run_pick(), None, "rep {rep}: no prior means calibration");
+    }
+    // A prior that needs calibration (a long break) is calibration too.
+    let stale = Prior { days: 400.0, ..prior };
+    assert!(stale.needs_calibration());
+    assert_eq!(Sim::adaptive_in_block(s, 4, Some(stale), Mix::Balanced, 3, 5).run_pick(), None);
+}
+
 /// Playtest: adapting target by target inside a run felt chaotic. After the
 /// calibration run, every target in a run gets the same lifetime.
 #[test]

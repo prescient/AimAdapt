@@ -245,6 +245,40 @@ impl Mix {
     }
 }
 
+/// The kind of each run in a block of `reps` runs of one drill, built from the mix
+/// (`rep` counts from 1). `None` for a single run, which keeps the random draw, and
+/// for a `rep` outside the block. Counts are the mix's shares of the block, rounded.
+/// The first run is at level. Easy runs go at the end, never first. Stretch runs sit
+/// in the middle, spread evenly, never first, never last and never side by side; if
+/// the rounded count doesn't fit under those rules, as many as fit are used.
+pub fn planned_kind(rep: u32, reps: u32, mix: Mix) -> Option<Pick> {
+    if reps < 2 || rep == 0 || rep > reps {
+        return None;
+    }
+    let (_, stretch_share, easy_share) = mix.shares();
+    let n = reps as usize;
+    let easy = ((easy_share * reps as f32).round() as usize).min(n - 1);
+    // Positions 2 to n - max(easy, 1) can take a stretch run, no two side by side.
+    let room = n.saturating_sub(easy.max(1) + 1);
+    let stretch = ((stretch_share * reps as f32).round() as usize).min(room.div_ceil(2));
+    let at = rep as usize;
+    if at > n - easy {
+        return Some(Pick::Easy);
+    }
+    if stretch > 0 && at >= 2 {
+        let i = at - 2;
+        let is_stretch = if 2 * stretch > room {
+            i.is_multiple_of(2)
+        } else {
+            (0..stretch).any(|j| (2 * j + 1) * room / (2 * stretch) == i)
+        };
+        if is_stretch {
+            return Some(Pick::Stretch);
+        }
+    }
+    Some(Pick::Near)
+}
+
 /// What kind of difficulty was picked, for a target or a whole run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pick {
@@ -479,6 +513,19 @@ impl Rating {
             (Pick::Stretch, 0.55 + rng.next_f32() * 0.17)
         } else {
             (Pick::Easy, 0.93 + rng.next_f32() * 0.04)
+        };
+        (self.value_at(chance), chance, kind)
+    }
+
+    /// Like [`Rating::pick_run`] for a run whose kind the plan has already set (see
+    /// [`planned_kind`]): only the chance of success is drawn, inside that kind's band.
+    /// A planned stretch run still becomes an at-level run when a stretch isn't allowed.
+    pub fn pick_planned(&self, rng: &mut Rng, planned: Pick) -> (f32, f32, Pick) {
+        let stretch_ok = self.last_run.is_none_or(|(p, s)| p != Pick::Stretch && s >= self.cfg.goal - WELL_BELOW);
+        let (kind, chance) = match planned {
+            Pick::Stretch if stretch_ok => (Pick::Stretch, 0.55 + rng.next_f32() * 0.17),
+            Pick::Easy => (Pick::Easy, 0.93 + rng.next_f32() * 0.04),
+            _ => (Pick::Near, 0.80 + rng.next_f32() * 0.10),
         };
         (self.value_at(chance), chance, kind)
     }
@@ -816,6 +863,108 @@ mod tests {
                 _ => assert!((v / 0.6 - 1.0).abs() < 0.12, "near run at {v}"),
             }
         }
+    }
+
+    fn letters(reps: u32, mix: Mix) -> String {
+        (1..=reps)
+            .map(|rep| match planned_kind(rep, reps, mix).unwrap() {
+                Pick::Near => 'N',
+                Pick::Stretch => 'S',
+                _ => 'E',
+            })
+            .collect()
+    }
+
+    #[test]
+    fn planned_blocks_pin_the_examples() {
+        assert_eq!(letters(5, Mix::Balanced), "NNSNE");
+        assert_eq!(letters(5, Mix::Push), "NSNSE");
+        assert_eq!(letters(10, Mix::Balanced).chars().rev().take(2).collect::<String>(), "EE");
+        assert_eq!(letters(2, Mix::Steady), "NN");
+        // Shares that land on a half round up: Steady gets its easy run at five runs
+        // (0.10 x 5) and its first stretch run at ten (0.05 x 10).
+        assert_eq!(letters(4, Mix::Steady), "NNNN");
+        assert_eq!(letters(5, Mix::Steady), "NNNNE");
+        assert_eq!(letters(9, Mix::Steady), "NNNNNNNNE");
+        assert_eq!(letters(10, Mix::Steady), "NNNNNSNNNE");
+        // The short blocks the built-in workouts use.
+        assert_eq!(letters(3, Mix::Balanced), "NSN");
+        assert_eq!(letters(4, Mix::Balanced), "NNSE");
+        assert_eq!(letters(3, Mix::Push), "NSN");
+        assert_eq!(letters(4, Mix::Push), "NNSE");
+    }
+
+    /// Planned order: a block never opens on a stretch run or ends on one, stretch
+    /// runs are never side by side, and easy runs close the block.
+    #[test]
+    fn planned_blocks_follow_the_rules_for_every_mix_and_length() {
+        for mix in [Mix::Steady, Mix::Balanced, Mix::Push] {
+            let (_, ss, es) = mix.shares();
+            for reps in 2..=60u32 {
+                let kinds: Vec<Pick> = (1..=reps).map(|r| planned_kind(r, reps, mix).unwrap()).collect();
+                let n = reps as usize;
+                let count = |k| kinds.iter().filter(|&&p| p == k).count();
+                assert_eq!(kinds[0], Pick::Near, "{mix:?} {reps}");
+                assert_ne!(kinds[n - 1], Pick::Stretch, "{mix:?} {reps}");
+                assert!(kinds.windows(2).all(|w| w != [Pick::Stretch, Pick::Stretch]), "{mix:?} {reps}");
+                // Easy: the rounded share, never the first run, all at the end.
+                let easy = ((es * reps as f32).round() as usize).min(n - 1);
+                assert_eq!(count(Pick::Easy), easy, "{mix:?} {reps}");
+                assert!(kinds[n - easy..].iter().all(|&p| p == Pick::Easy), "{mix:?} {reps}");
+                // Stretch: the rounded share, capped at what fits between the first
+                // run and the closing run(s) with a gap between each.
+                let room = n.saturating_sub(easy.max(1) + 1);
+                let want = (ss * reps as f32).round() as usize;
+                assert_eq!(count(Pick::Stretch), want.min(room.div_ceil(2)), "{mix:?} {reps}");
+                assert_eq!(count(Pick::Near) + count(Pick::Stretch) + count(Pick::Easy), n);
+            }
+        }
+    }
+
+    #[test]
+    fn planned_kind_is_none_outside_a_block() {
+        for mix in [Mix::Steady, Mix::Balanced, Mix::Push] {
+            assert_eq!(planned_kind(1, 0, mix), None);
+            assert_eq!(planned_kind(1, 1, mix), None);
+            assert_eq!(planned_kind(0, 5, mix), None);
+            assert_eq!(planned_kind(6, 5, mix), None);
+            assert!(planned_kind(5, 5, mix).is_some());
+        }
+    }
+
+    #[test]
+    fn planned_runs_play_their_kind_inside_its_band() {
+        let r = Rating::new(cfg(), Some(rated(0.6, 0.05, None, Some((Pick::Near, 0.86)))));
+        let mut rng = Rng::new(5);
+        for (kind, lo, hi) in [(Pick::Near, 0.80, 0.90), (Pick::Stretch, 0.55, 0.72), (Pick::Easy, 0.93, 0.97)] {
+            for _ in 0..100 {
+                let (v, chance, got) = r.pick_planned(&mut rng, kind);
+                assert_eq!(got, kind);
+                assert!((lo..=hi).contains(&chance), "{kind:?}: {chance}");
+                assert!((r.chance_at(v) - chance).abs() < 0.03);
+            }
+        }
+        // Guard rail: no planned stretch after a stretch run or a run well below the goal.
+        for last in [(Pick::Stretch, 0.9), (Pick::Near, 0.70)] {
+            let r = Rating::new(cfg(), Some(rated(0.6, 0.05, None, Some(last))));
+            let (_, chance, got) = r.pick_planned(&mut rng, Pick::Stretch);
+            assert_eq!(got, Pick::Near, "{last:?}");
+            assert!((0.80..=0.90).contains(&chance));
+        }
+    }
+
+    /// The single-run draw is unchanged by the planned order (values recorded from
+    /// the code before the change).
+    #[test]
+    fn unplanned_pick_run_is_unchanged() {
+        let r = Rating::new(cfg(), Some(rated(0.6, 0.05, None, None)));
+        let mut rng = Rng::new(11);
+        let got: Vec<(f32, Pick)> = (0..6).map(|_| r.pick_run(&mut rng, Mix::Push)).map(|(v, _, k)| (v, k)).collect();
+        let want = [(0.5887758, Pick::Near), (0.5169579, Pick::Stretch), (0.60640925, Pick::Near)]
+            .into_iter()
+            .chain([(0.62342125, Pick::Near), (0.63956356, Pick::Near), (0.588328, Pick::Near)])
+            .collect::<Vec<_>>();
+        assert_eq!(got, want);
     }
 
     #[test]

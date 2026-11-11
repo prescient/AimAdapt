@@ -9,7 +9,7 @@
 pub use crate::rng::Rng;
 use glam::Vec3;
 
-use crate::adaptive::{Knob, Mix, Pick, Prior, Rating};
+use crate::adaptive::{Knob, Mix, Pick, Prior, Rating, planned_kind};
 use crate::collide::Collider;
 use crate::motion::{BotState, separate};
 use crate::scenario::{Movement, MovementKind, Range, Scenario, Shape, Trigger, WeaponKind};
@@ -468,11 +468,31 @@ impl Sim {
     /// run plays at one difficulty picked from the mix around the rating, and the
     /// rating takes in the run as it's played.
     pub fn adaptive(scenario: Scenario, seed: u64, prior: Option<Prior>, mix: Mix) -> Sim {
+        Sim::adaptive_in_block(scenario, seed, prior, mix, 1, 1)
+    }
+
+    /// An adaptive run that is run `rep` of `reps` in a block of the same drill. In a
+    /// block of two or more, the run's kind follows [`planned_kind`] instead of the
+    /// random draw. Calibration comes first: with no prior, or after a long break, it's
+    /// a calibration run whatever the plan says.
+    pub fn adaptive_in_block(
+        scenario: Scenario,
+        seed: u64,
+        prior: Option<Prior>,
+        mix: Mix,
+        rep: u32,
+        reps: u32,
+    ) -> Sim {
         let cfg = scenario.adaptive.resolve(&scenario);
         let rating = Rating::new(cfg, prior);
         let after_break = prior.filter(Prior::needs_calibration).map(|p| p.days);
-        let run =
-            (prior.is_some() && after_break.is_none()).then(|| rating.pick_run(&mut Rng::new(seed ^ 0x9e37_79b9), mix));
+        let run = (prior.is_some() && after_break.is_none()).then(|| {
+            let mut rng = Rng::new(seed ^ 0x9e37_79b9);
+            match planned_kind(rep, reps, mix) {
+                Some(kind) => rating.pick_planned(&mut rng, kind),
+                None => rating.pick_run(&mut rng, mix),
+            }
+        });
         let state = AdaptiveRun { rating, mix, segment: None, run, breakthrough: false, break_days: after_break };
         let mut sim = Sim::build(scenario, seed, Some(state));
         if let Some((value, _, _)) = run {

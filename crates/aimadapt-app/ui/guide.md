@@ -113,6 +113,8 @@ Target speed is in degrees per second because that's how fast your hand has to t
 
 The mix (Steady, Balanced or Push) is a setting in your profile. A stretch run never follows another stretch run, or a run more than 10 points below the goal.
 
+**Several runs in a row.** When a workout plays a scenario more than once in a row, the kind of each run follows a plan built from your mix instead of a random draw. The first run is at your level. Stretch runs sit in the middle, never last and never two in a row. Easy runs come at the end. Five runs on Balanced go: at your level, at your level, stretch, at your level, easy. The shares are rounded to the number of runs, so a short block has fewer kinds: on Balanced and Push a block needs three runs for a stretch run and four for an easy one, and on Steady it needs ten and five. A planned stretch run still becomes a run at your level if the run before it was more than 10 points below the goal. A run played on its own picks its kind at random from the mix.
+
 **After a break.** If you leave a scenario for a few days, your old rating is only a rough guide to where you are now, so the next run is a calibration run again. That happens after three days away if the rating was still settling, and after about five and a half if it was well settled. The run starts from your old rating and adjusts target by target, and the screen says why ("9 days since your last run, finding your level again"). When it ends your rating is updated, and runs go back to one difficulty. A calibration run can't be a breakthrough, and your best held stays as it was.
 
 **Breakthroughs.** Holding 85% for a whole run at a value harder than your best is a breakthrough. The trainer announces it, and it becomes your new best held. A run of 30 targets or more holds the goal at 85% itself. A shorter run needs more, because a few lucky hits can look like skill: all 10 of 10, or 19 of 20. A tracking segment counts as three targets, so a tracking run of 20 seconds or more needs just 85%. A run with fewer than 10 targets or segments never counts. This rule got stricter in November 2026. A best you held before then stays as it is.
@@ -196,7 +198,7 @@ Today shows today's workout. **Scenarios › Program** shows the whole week: eve
 
 ## Workouts {#workout}
 
-A workout is a list of scenarios, each with a number of runs and a mode (standard or adaptive), played back to back.
+A workout is a list of scenarios, each with a number of runs and a mode (standard or adaptive), played back to back. When a scenario has several adaptive runs, they follow a planned order: the first at your level, any stretch runs in the middle and any easy runs last (see [Adaptive mode](#help/adaptive)). Restarting a run keeps its kind.
 
 Built-in workouts:
 - **Quick Warm-up:** five easy minutes: two standard runs to loosen up, then three adaptive ones.
@@ -324,6 +326,7 @@ Nothing is sent anywhere. Deleting one of your scenarios or workouts removes the
 ## What's new {#whats-new}
 
 **November 2026**
+- Runs of the same scenario in a workout now follow a plan from your mix instead of a random draw each time: the first at your level, stretch runs in the middle and easy runs last. A run played on its own still draws its kind at random.
 - The Help page has its filter at the top of the contents list, which now shows only the matching sections and marks the one you're in. The sidebar shows only icons when the window is 1180 pixels wide or less, so the lists on Scenarios keep all their columns down to a narrower window than before. In the scenario editor, sections that hold only default values start folded.
 - After a long break from a scenario (three days or more), its next run is a calibration run that starts from your old rating, and the trainer says how many days it has been. Your rating and best held carry over.
 - Scenarios has three tabs now: **Browse**, **Workouts** and **Program**. Recent and Yours became filters on Browse: **Played**, and a **Yours** button next to Favorites. Once you've played something, Browse opens with your latest plays first. One **Rating or score** column shows your rating, or your best score where there is no rating. **All recent** on Today opens Browse showing what you've played. On a narrow window the lists drop columns so Play stays in view, and the page no longer scrolls sideways.
