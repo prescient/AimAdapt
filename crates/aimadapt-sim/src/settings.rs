@@ -15,7 +15,9 @@ pub struct PlayerSettings {
     /// Overwatch and Valorant). Wider screens see more at the sides.
     pub fov: f32,
     pub display: Display,
-    /// How adaptive mode mixes target difficulties around your rating.
+    /// The adaptive mix as it was set per profile. The trainer now plays with the mix
+    /// in `training.toml` (see `prefs`) once one is chosen there. This one is still
+    /// read, so a mix picked before that carries over, and still written.
     pub challenge: crate::adaptive::Mix,
     pub show_fps: bool,
     pub crosshair: Crosshair,

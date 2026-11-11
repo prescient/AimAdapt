@@ -320,6 +320,12 @@ function playingWith() {
   return `<a class="chip-link" href="#settings/aim" title="${esc(sensText(p))} · FOV ${num(p.settings.fov)}. Change it in Settings."><span class="muted">Playing with</span> <strong>${esc(p.name)}</strong> <span>${cmText(profileCm(p))} cm/360 · FOV ${num(p.settings.fov)}</span></a>`;
 }
 
+// The adaptive mix in use, linking to where it is set. For trainer scenarios and
+// workouts only: a KovaaK's scenario has no mix.
+function mixChip() {
+  return `<a class="chip-link" href="#settings/training" title="How adaptive runs mix target difficulty. Change it in Settings."><span class="muted">Mix</span> <strong>${esc(mixName(ui.trainer.data.training.mix))}</strong></a>`;
+}
+
 // Shown on Scenarios and Today: the trainer is open or closed with an error, or a
 // message from the last action.
 function trainerBanners() {
@@ -514,7 +520,7 @@ function itemPage(item, all, tab) {
   const link = typeof helpLink === "function" ? helpLink() : "";
   return `<div class="page">
     <div class="back-row"><a class="back-link" href="#scenarios/${listTab}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg>Scenarios · ${esc(TAB_LABELS[listTab])}</a>
-      <div class="head-actions">${playingWith()}${link}</div></div>
+      <div class="head-actions">${playingWith()}${item && item.kind !== "kovaaks" ? mixChip() : ""}${link}</div></div>
     ${trainerBanners()}
     ${item ? `<div class="detail" id="scenario-detail">${itemDetail(item, tab)}</div>`
       : `<div class="card note-body">This scenario or workout isn't here any more. <a href="#scenarios/${listTab}">Back to ${esc(TAB_LABELS[listTab])}</a></div>`}

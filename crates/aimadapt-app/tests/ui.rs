@@ -1339,3 +1339,54 @@ fn the_plan_check_card_is_shared_and_survives_a_missing_plan() {
     let program = ui("program.js");
     assert!(decl(&program, "skillsTab").contains("planCheckCard(d.plan)"));
 }
+
+/// Plan L5: Settings has a Training tab in place of Goals and time, and the old
+/// `#settings/goals` address still opens it.
+#[test]
+fn settings_has_a_training_tab_and_the_old_goals_address_opens_it() {
+    let app = ui("app.js");
+    let settings = ui("settings.js");
+    assert!(app.contains(r#"["training", "Training"]"#));
+    let tabs_line = app.lines().find(|l| l.contains("const SETTINGS_TABS")).expect("SETTINGS_TABS");
+    assert!(!tabs_line.contains("\"goals\""), "the Goals and time tab is back: {tabs_line}");
+    let moved_to = decl(&app, "movedTo");
+    assert!(moved_to.contains("goals") && moved_to.contains("#settings/training"), "{moved_to}");
+    assert!(decl(&settings, "settingsPage").contains("trainingTab"));
+    for (name, src) in scripts() {
+        assert!(!src.contains("Goals and time"), "{name} still says Goals and time");
+    }
+}
+
+/// Plan L5: the mix is one setting for every profile, set on the Training tab with the
+/// daily goal and saved as it changes, not through the profile draft.
+#[test]
+fn the_mix_and_the_goal_are_set_on_the_training_tab() {
+    let app = ui("app.js");
+    let settings = ui("settings.js");
+    let tab = decl(&settings, "trainingTab");
+    assert!(tab.contains(r#"data-training="mix""#));
+    assert!(tab.contains(r#"data-training="daily_goal_min""#));
+    assert!(tab.contains("fixed for now"));
+    let save = decl(&settings, "saveTraining");
+    assert!(save.contains(r#"invoke("save_training""#));
+    // Two changes made together are saved one after the other. Built side by side from
+    // the same loaded settings, the second save undid the first.
+    assert!(save.contains("trainingSaves = trainingSaves.then("), "saves aren't queued: {save}");
+    assert!(!settings.contains("settings.challenge"), "the mix is back in the profile editor");
+    assert!(decl(&app, "PREVIEW").contains("save_training"), "the browser preview can't save the Training tab");
+    assert!(include_str!("../src/main.rs").contains("trainer::save_training"), "the command isn't registered");
+}
+
+/// Plan L5: Today's workout and a scenario's page show the mix in use and link to
+/// the Training tab. A KovaaK's scenario has no mix, and the list's header has no chip.
+#[test]
+fn today_and_a_scenarios_page_show_the_mix_and_link_to_training() {
+    let today = ui("today.js");
+    let scenarios = ui("scenarios.js");
+    let workout = decl(&today, "todayWorkout");
+    assert!(workout.contains("#settings/training") && workout.contains("mixName("));
+    assert!(decl(&scenarios, "mixChip").contains("#settings/training"));
+    let item = decl(&scenarios, "itemPage");
+    assert!(item.contains("mixChip()") && item.contains("kovaaks"));
+    assert!(!decl(&scenarios, "scenariosHead").contains("mixChip"));
+}

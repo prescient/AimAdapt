@@ -1,7 +1,12 @@
 // Settings, in four tabs: Aim and display (the trainer's settings profiles, one per
-// game typically), Goals and time, KovaaK's, and Your data (the last three drawn by
-// app.js). Loaded after trainer.js; profiles come with the `trainer` payload and are
-// saved with `save_profiles`.
+// game typically), Training, KovaaK's and Your data. Aim and Training are drawn here;
+// the last two are drawn by app.js. Loaded after trainer.js; profiles come with the
+// `trainer` payload and are saved with `save_profiles`. The Training tab's mix and
+// daily goal come with it too and are saved with `save_training`.
+
+// The adaptive mixes: id, name and what each does.
+const MIXES = [["steady", "Steady", "mostly near your rating"], ["balanced", "Balanced", "some stretch and easy runs"], ["push", "Push", "more stretch runs"]];
+const mixName = (id) => MIXES.find(([v]) => v === id)?.[1] ?? "Balanced";
 
 ui.settings = {
   draft: null, // a copy of trainer.profiles being edited
@@ -12,6 +17,7 @@ ui.settings = {
   active: 0,
   problems: [],
   sizeHelper: { monitor: 32, target: 24 },
+  training: { saved: null, error: null }, // the Training field last saved, and why the last save failed
 };
 
 const RESOLUTIONS = ["3840x2160", "2560x1440", "1920x1080", "1728x1080", "1680x1050", "1600x900", "1440x1080", "1280x960", "1280x1024", "1024x768"];
@@ -86,9 +92,8 @@ function settingsPage(arg) {
   const ready = Boolean(tr.data && ui.settings.draft);
   // Your data shows the trainer's folders, so every tab asks for its data.
   const wait = waitFor([{ ...trainerNeed(), have: ready }], "Loading settings…");
-  const body = tab === "aim"
-    ? tr.error ? `<div class="card error">${esc(tr.error)}</div>` : wait ?? settingsAim()
-    : { goals: goalsTab, kovaaks: kovaaksTab, data: dataTab }[tab]();
+  const loaded = (draw) => (tr.error ? `<div class="card error">${esc(tr.error)}</div>` : wait ?? draw());
+  const body = tab === "aim" ? loaded(settingsAim) : tab === "training" ? loaded(trainingTab) : { kovaaks: kovaaksTab, data: dataTab }[tab]();
   const actions = tab === "aim" && ready ? `<span class="chips" id="settings-actions">${settingsActions()}</span>` : "";
   return `<div class="page">${head("How AimAdapt is set up", "Settings", actions)}${tabs("settings", SETTINGS_TABS, tab)}${body}</div>`;
 }
@@ -126,6 +131,61 @@ function settingsAim() {
       <div style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column;gap:16px">${profileEditor(p)}</div>
     </div>`;
 }
+
+// The Training tab: the adaptive mix and the daily goal, saved as they change, then
+// the time rules that stay fixed.
+function trainingTab() {
+  const tr = ui.trainer.data.training;
+  const ts = ui.snap.time_settings;
+  const st = ui.settings.training;
+  // A card's title, with "Saved" beside it once its field has been saved.
+  const cardHead = (title, key) => `<div class="card-head"><h2>${title}</h2>${st.saved === key ? `<span class="small muted" role="status">Saved</span>` : ""}</div>`;
+  const problems = st.error ? `<section class="banner"><div><div class="banner-title">Not saved</div><ul class="problems"><li>${esc(st.error)}</li></ul></div></section>` : "";
+  return `<div style="display:flex;flex-direction:column;gap:16px;max-width:760px">
+    ${problems}
+    <section class="card">${cardHead("Adaptive target mix", "mix")}
+      <label class="form-row"><span>Mix for every profile</span><select class="select" data-training="mix" style="max-width:360px">
+        ${MIXES.map(([v, name, what]) => `<option value="${v}" ${tr.mix === v ? "selected" : ""}>${name}: ${what}</option>`).join("")}
+      </select><span class="help">Stretch targets are faster than you can reliably hit. Hitting them moves your rating the most. <a href="#help/adaptive">How the mix works</a></span></label>
+    </section>
+    <section class="card">${cardHead("Daily goal", "daily_goal_min")}
+      <label class="form-row"><span>Active time a day</span><span class="field" style="max-width:360px"><input type="number" data-training="daily_goal_min" min="1" max="600" step="1" value="${esc(tr.daily_goal_min)}"><span class="muted small">minutes</span></span><span class="help">Today, your streak and the daily-time chart use it. The weekly goal is seven times this.</span></label>
+      <div class="note"><div class="note-title">How long to train</div><div class="note-body">Half an hour a day is a sound default, and nothing suggests it is a ceiling. In the largest study of aim training, gains on a single task kept growing up to about an hour of it in a day, with most of the benefit reached within 30 to 60 minutes. Training on more days mattered more than the length of any one day.</div></div>
+    </section>
+    <section class="card"><h2>How time is counted</h2>
+      <div class="small muted">These rules are fixed for now.</div>
+      <div class="note"><div class="note-title">New session after a ${ts.session_gap_min}-minute break</div><div class="note-body">Session time runs from a session's first run to its last, so it includes menus and breaks. Active time is time inside runs.</div></div>
+      <div class="note"><div class="note-title">Training day starts at ${ts.day_start_hour}:00</div><div class="note-body">A late-night session counts toward the day it started on.</div></div>
+      <div class="note"><div class="note-title">Restarted if under ${Math.round(ts.restart_fraction * 100)}% of the usual length</div><div class="note-body">Compared per scenario (with ${ts.restart_min_runs}+ runs), so 1-second scenarios aren't flagged. Restarted runs never count as bests.</div></div>
+    </section>
+  </div>`;
+}
+
+// Training settings are saved as they change: there is no draft and no Save button.
+// Saves run one after another, so a change made while one is on its way builds on it
+// and doesn't undo it. The app checks the goal's range and says why it refused.
+let trainingSaves = Promise.resolve();
+function saveTraining(el) {
+  const key = el.dataset.training;
+  const value = key === "daily_goal_min" ? Number(el.value) : el.value;
+  trainingSaves = trainingSaves.then(async () => {
+    const training = { ...ui.trainer.data.training, [key]: value };
+    const st = ui.settings.training;
+    try {
+      await invoke("save_training", { training });
+      ui.trainer.data.training = training;
+      Object.assign(st, { saved: key, error: null });
+      await Promise.all([load(), loadTrainer()]);
+    } catch (e) {
+      Object.assign(st, { saved: null, error: String(e) });
+      render();
+    }
+  });
+}
+
+// "Saved" and a refused save's reason belong to one visit, so they go when the page
+// changes. Capturing, so this runs before app.js draws the new page.
+window.addEventListener("hashchange", () => Object.assign(ui.settings.training, { saved: null, error: null }), true);
 
 function settingsActions() {
   const dirty = settingsDirty();
@@ -189,9 +249,6 @@ function profileEditor(p) {
           ? num_(`${esc(g.name)} sensitivity`, "game_sens", 'min="0.001" max="1000" step="0.01"', "", `= <span id="cm-readout" class="num">${cmText(profileCm(p), 2)}</span> cm/360 at your DPI`)
           : num_("Sensitivity", "settings.cm_per_360", 'min="1" max="500" step="0.1"', "cm/360", "Centimeters of mouse movement for a full turn.")}
         ${num_("Mouse DPI", "settings.dpi", 'min="50" max="50000" step="50"')}
-        <label class="form-row"><span>Adaptive target mix</span><select class="select" data-pfield="settings.challenge">
-          ${[["steady", "Steady: mostly near your rating"], ["balanced", "Balanced: some stretch and easy runs"], ["push", "Push: more stretch runs"]].map(([v, l]) => `<option value="${v}" ${st.challenge === v ? "selected" : ""}>${l}</option>`).join("")}
-        </select><span class="help">Stretch targets are faster than you can reliably hit. Hitting them moves your rating the most.</span></label>
         ${num_("Field of view", "settings.fov", 'min="30" max="150" step="0.1"', "° horizontal (16:9)", `${esc(g?.fov_note ?? "")}${g?.fov ? ` <button class="link-btn" type="button" data-action="game-fov">Use ${g.fov}</button>` : ""}`)}
       </div>
     </section>
@@ -417,6 +474,7 @@ document.addEventListener("change", (e) => {
     render();
     recheckProfiles();
   }
+  else if (el.dataset.training) saveTraining(el);
   else if (el.dataset.pfield && (el.tagName === "SELECT" || el.type === "checkbox" || el.type === "color")) {
     setProfileField(el);
     render();

@@ -88,10 +88,13 @@ pub fn save_profiles(data_dir: &Path, profiles: &Profiles) -> Result<(), String>
 /// Settings to play with: the named profile, or the active one.
 pub fn load(data_dir: &Path, db: Option<&Db>, profile: Option<&str>) -> Result<PlayerSettings, String> {
     let ps = load_profiles(data_dir, db);
-    match profile {
-        Some(name) => ps.get(name).map(Profile::resolved).ok_or(format!("no profile called {name}")),
-        None => Ok(ps.active().resolved()),
-    }
+    let mut settings = match profile {
+        Some(name) => ps.get(name).map(Profile::resolved).ok_or(format!("no profile called {name}"))?,
+        None => ps.active().resolved(),
+    };
+    // One mix holds for every profile once it is chosen on Settings › Training.
+    settings.challenge = aimadapt_sim::prefs::load(data_dir).mix_or(settings.challenge);
+    Ok(settings)
 }
 
 /// Settings matching the latest KovaaK's run, when its sensitivity scale is known.
@@ -120,6 +123,8 @@ pub fn kovaaks_profile(db: &Db) -> Option<Profile> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aimadapt_sim::adaptive::Mix;
+    use aimadapt_sim::prefs::TrainingPrefs;
     use aimadapt_sim::profiles::Profile;
 
     #[test]
@@ -166,6 +171,39 @@ mod tests {
             .collect();
         assert!(kept.iter().any(|t| t == broken), "the old file is gone");
         assert!(profiles_note(dir.path()).is_none(), "the new file loads");
+    }
+
+    fn two_profiles(dir: &Path) {
+        let with = |name: &str, challenge| Profile {
+            name: name.into(),
+            settings: PlayerSettings { challenge, ..Default::default() },
+            ..Default::default()
+        };
+        let ps = Profiles { active: "A".into(), profiles: vec![with("A", Mix::Steady), with("B", Mix::Balanced)] };
+        save_profiles(dir, &ps).unwrap();
+    }
+
+    #[test]
+    fn a_chosen_mix_is_used_for_every_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        two_profiles(dir.path());
+        let prefs = TrainingPrefs { mix: Some(Mix::Push), ..Default::default() };
+        aimadapt_sim::prefs::save(dir.path(), &prefs).unwrap();
+        assert_eq!(load(dir.path(), None, Some("A")).unwrap().challenge, Mix::Push);
+        assert_eq!(load(dir.path(), None, Some("B")).unwrap().challenge, Mix::Push);
+        assert_eq!(load(dir.path(), None, None).unwrap().challenge, Mix::Push);
+    }
+
+    #[test]
+    fn without_a_chosen_mix_the_profiles_own_is_used() {
+        let dir = tempfile::tempdir().unwrap();
+        two_profiles(dir.path());
+        assert_eq!(load(dir.path(), None, Some("A")).unwrap().challenge, Mix::Steady);
+        assert_eq!(load(dir.path(), None, Some("B")).unwrap().challenge, Mix::Balanced);
+        // A training file that only sets a goal leaves the profiles' mixes alone.
+        std::fs::write(aimadapt_sim::prefs::path(dir.path()), "daily_goal_min = 45.0\n").unwrap();
+        assert_eq!(load(dir.path(), None, Some("A")).unwrap().challenge, Mix::Steady);
+        assert_eq!(load(dir.path(), None, Some("B")).unwrap().challenge, Mix::Balanced);
     }
 
     #[test]

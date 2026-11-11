@@ -49,9 +49,9 @@ enum Command {
         /// Hour a training day starts (so late-night sessions count toward the previous day)
         #[arg(long, default_value_t = 4)]
         day_start: u32,
-        /// Daily goal in minutes of active time
-        #[arg(long, default_value_t = 30.0)]
-        goal: f64,
+        /// Daily goal in minutes of active time (default: the goal set in the app, or 30)
+        #[arg(long)]
+        goal: Option<f64>,
         /// How many recent sessions to list
         #[arg(long, default_value_t = 10)]
         sessions: usize,
@@ -126,7 +126,7 @@ fn main() -> Result<()> {
             let settings = TimeSettings {
                 session_gap_min: gap,
                 day_start_hour: day_start,
-                daily_goal_min: goal,
+                daily_goal_min: daily_goal(goal, aimadapt_core::db::data_dir().ok().as_deref()),
                 ..Default::default()
             };
             print_time(&training::report(&db, &settings, Local::now().naive_local())?, &settings, sessions);
@@ -714,6 +714,13 @@ fn hm(seconds: f64) -> String {
     format!("{}h {:02}m", minutes / 60, minutes % 60)
 }
 
+/// The goal to count against: the one given, else the one saved in the app, else the default.
+fn daily_goal(given: Option<f64>, data_dir: Option<&Path>) -> f64 {
+    given
+        .or_else(|| data_dir.map(|d| aimadapt_sim::prefs::load(d).daily_goal_min))
+        .unwrap_or(TimeSettings::default().daily_goal_min)
+}
+
 fn num(v: f64) -> String {
     if v.fract() == 0.0 { format!("{v:.0}") } else { format!("{v:.1}") }
 }
@@ -721,6 +728,19 @@ fn num(v: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_time_command_uses_the_goal_saved_in_the_app() {
+        let dir = std::env::temp_dir().join(format!("aimadapt-cli-goal-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(daily_goal(None, Some(&dir)), 30.0, "no file");
+        let prefs = aimadapt_sim::prefs::TrainingPrefs { daily_goal_min: 45.0, ..Default::default() };
+        aimadapt_sim::prefs::save(&dir, &prefs).unwrap();
+        assert_eq!(daily_goal(None, Some(&dir)), 45.0, "saved");
+        assert_eq!(daily_goal(Some(20.0), Some(&dir)), 20.0, "given wins");
+        assert_eq!(daily_goal(None, None), 30.0, "no folder");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     fn fixture(name: &str) -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../aimadapt-sce/tests/fixtures/AimAdapt Test - {name}.sce"))

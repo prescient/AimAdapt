@@ -11,10 +11,12 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use aimadapt_core::insights;
+use aimadapt_sim::adaptive::Mix;
+use aimadapt_sim::prefs::TrainingPrefs;
 use aimadapt_sim::profiles::{self, Profile, Profiles};
 use aimadapt_sim::workout::{self, Workout};
 use aimadapt_sim::{Scenario, library, spec};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::marks::{self, Marks};
@@ -69,6 +71,13 @@ pub struct TrainerWorkout {
     last_played: Option<String>,
 }
 
+/// The Training tab's settings as the pages use them: the mix in use and the daily goal.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Training {
+    mix: Mix,
+    daily_goal_min: f64,
+}
+
 #[derive(Serialize)]
 pub struct Trainer {
     scenarios: Vec<TrainerScenario>,
@@ -90,6 +99,8 @@ pub struct Trainer {
     playing: bool,
     /// Favorites and hidden items on the Scenarios page.
     marks: Marks,
+    /// The mix in use (for every profile) and the daily goal.
+    training: Training,
 }
 
 #[tauri::command(async)]
@@ -159,10 +170,14 @@ pub fn build_trainer(state: &AppData, t: &TrainerState) -> Result<Trainer, Strin
         })
         .collect();
 
+    let profiles = aimadapt_engine::load_profiles(&t.data_dir, Some(&db));
+    let prefs = aimadapt_sim::prefs::load(&t.data_dir);
+    let training =
+        Training { mix: prefs.mix_or(profiles.active().resolved().challenge), daily_goal_min: prefs.daily_goal_min };
     Ok(Trainer {
         scenarios,
         workouts,
-        profiles: aimadapt_engine::load_profiles(&t.data_dir, Some(&db)),
+        profiles,
         games: profiles::GAMES,
         settings_saved: aimadapt_engine::settings_path(&t.data_dir).exists(),
         profiles_note: aimadapt_engine::profiles_note(&t.data_dir),
@@ -173,6 +188,7 @@ pub fn build_trainer(state: &AppData, t: &TrainerState) -> Result<Trainer, Strin
         workouts_dir: t.workouts_dir().display().to_string(),
         playing: t.playing.load(Ordering::SeqCst),
         marks: marks::load(&t.data_dir),
+        training,
     })
 }
 
@@ -226,6 +242,15 @@ pub fn delete_workout(t: State<'_, TrainerState>, id: String) -> Result<(), Stri
 #[tauri::command]
 pub fn save_marks(t: State<'_, TrainerState>, marks: Marks) -> Result<Marks, String> {
     marks::save(&t.data_dir, marks)
+}
+
+/// Saves the Training tab's mix and daily goal, and counts against the new goal from now on.
+#[tauri::command]
+pub fn save_training(state: State<'_, AppData>, t: State<'_, TrainerState>, training: Training) -> Result<(), String> {
+    let prefs = TrainingPrefs { mix: Some(training.mix), daily_goal_min: training.daily_goal_min };
+    aimadapt_sim::prefs::save(&t.data_dir, &prefs)?;
+    state.set_daily_goal(training.daily_goal_min);
+    Ok(())
 }
 
 /// Saves every settings profile and which one is active.
@@ -575,7 +600,7 @@ pub fn build_program(state: &AppData, t: &TrainerState) -> Result<ProgramPage, S
         .collect();
     let plan: Vec<(String, u32)> = days.iter().map(|d| (d.day.to_string(), d.runs)).collect();
     let now = chrono::Local::now().naive_local();
-    let progress = aimadapt_core::programs::progress(&db, &prog.name, now, &plan, &state.time).map_err(err)?;
+    let progress = aimadapt_core::programs::progress(&db, &prog.name, now, &plan, &state.time()).map_err(err)?;
     let plan_check = aimadapt_core::plan_check::by_kind(&db, None).map_err(err)?;
     Ok(ProgramPage {
         id: id.into(),

@@ -38,7 +38,7 @@ function todayWorkout() {
   return `<section class="card today-card">
     <div class="card-head" style="align-items:flex-start">
       <div><div class="eyebrow accent">${esc(d.name)} · ${esc(today.name)}</div><h2 class="detail-title">${esc(today.focus)}</h2>
-        <div class="small muted">${today.workout.items.length} drills · ${today.runs} runs · about ${Math.round(today.minutes)} min</div></div>
+        <div class="small muted">${today.workout.items.length} drills · ${today.runs} runs · about ${Math.round(today.minutes)} min · <a href="#settings/training" title="How adaptive runs mix target difficulty. Change it in Settings.">${esc(mixName(ui.trainer.data.training.mix))} mix</a></div></div>
       <span class="chips"><button class="btn" type="button" data-action="list-tab-open" data-tab="browse">Something else</button>
         ${sessionButton(today.day, stat)}</span>
     </div>

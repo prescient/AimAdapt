@@ -48,7 +48,7 @@ Each scenario has one difficulty setting, chosen for what it trains: target life
   | Stretch | 55–72% | 20% |
   | Easy | 93–97% | 15% |
 
-  The Steady and Push mixes change these shares. A stretch run never follows another stretch run, or a run well below 85%. When a workout plays a scenario several times in a row, the runs follow a plan from the mix instead of a draw: the first at your level, stretch runs in the middle, easy runs last.
+  The Steady and Push mixes change these shares. The mix is one setting for every profile, on Settings › Training. A stretch run never follows another stretch run, or a run well below 85%. When a workout plays a scenario several times in a row, the runs follow a plan from the mix instead of a draw: the first at your level, stretch runs in the middle, easy runs last.
 - **Breakthroughs:** holding 85% for a whole run at a value harder than your best. A run of 30 targets or more holds it at 85%. A shorter run has to beat 85% by a margin (10 of 10, or 19 of 20), so a short lucky run doesn't count. A tracking segment counts as three targets.
 - **What counts:**
   - **Clicking:** a target is a success if it's destroyed before it times out, with at most one miss on it.
@@ -99,7 +99,7 @@ Four pages, in the sidebar:
   - **Time:** totals, daily time, a calendar and sessions, with a fold for more about when you train.
 - **Settings:** four tabs.
   - **Aim and display:** settings profiles.
-  - **Goals and time:** the daily goal and how time is counted.
+  - **Training:** the adaptive mix, your daily goal, advice on how long to train and how time is counted.
   - **KovaaK's:** the stats folder, import status and sensitivity history.
   - **Your data:** where your files are.
 
@@ -136,7 +136,8 @@ Each run can also be **replayed** from your own view at any speed, with the targ
 
 - **Scenarios** are TOML files. The editor is a form built from the engine's list of supported fields, and checks values as you type. Built-in scenarios are copied before editing. [SCENARIOS.md](SCENARIOS.md) documents every field, the adaptive settings, workouts and programs.
 - **Workouts** are lists of scenarios with a run count and a mode for each, played back to back in one session.
-- **Settings profiles** each hold sensitivity, DPI, FOV, adaptive mix, crosshair and display settings, typically one per game. The first profile is matched to your latest KovaaK's run, if there is one.
+- **Settings profiles** each hold sensitivity, DPI, FOV, crosshair and display settings, typically one per game. The first profile is matched to your latest KovaaK's run, if there is one.
+- **Training settings** hold for every profile: the adaptive mix and the daily goal (30 minutes of active time unless you change it).
 
 ![Scenario editor](docs/screenshots/editor.png)
 
@@ -159,6 +160,7 @@ Playing your own KovaaK's scenarios in the trainer is being built (Voltaic bench
 Everything is stored locally in `%APPDATA%\AimAdapt`:
 - `aimadapt.db`: SQLite.
 - `engine.toml`: settings profiles. If it can't be read, Settings says so and saving keeps the old file as `engine (unusable).toml`.
+- `training.toml`: the adaptive mix and the daily goal.
 - `list.json`: favorites and hidden items on the Scenarios page.
 - `scenarios\` and `workouts\`: your own files.
 - `crash.log`: written only if AimAdapt crashes, with what went wrong.

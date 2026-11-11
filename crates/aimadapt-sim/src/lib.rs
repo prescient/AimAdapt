@@ -19,6 +19,7 @@ pub mod adaptive;
 pub mod collide;
 pub mod library;
 pub mod motion;
+pub mod prefs;
 pub mod profiles;
 pub mod program;
 pub mod rng;

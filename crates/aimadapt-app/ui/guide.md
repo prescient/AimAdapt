@@ -12,14 +12,14 @@ The app has four pages, in the sidebar: **Today** (what to play now), **Scenario
 4. **Expect a calibration run.** Your first adaptive run on each scenario finds your level as you play, so it gets harder and easier along the way. After that, every run plays at one difficulty. A scenario you come back to after several days away gets a calibration run again.
 5. **Check your progress.** Progress shows your skill profile and how your week went. Each scenario's page on Scenarios breaks it down: where you miss, how fast you react, how steady your tracking is, with replays of your recent runs.
 
-Train most days, keep sessions to about half an hour, and take Sunday off. Day-to-day changes under about 5% are mostly luck. Look at the trend over a week or two.
+Train most days and take Sunday off. Half an hour a day is a sound default, and nothing suggests it is a ceiling: in the largest study of aim training, gains on a single task kept growing up to about an hour of it in a day, with most of the benefit reached within 30 to 60 minutes. Training on more days mattered more than the length of any one day. Your daily goal is on [Settings › Training](#help/settings). Day-to-day changes under about 5% are mostly luck. Look at the trend over a week or two.
 
 ## Today {#today}
 
 Today is the home page: what to play now and how the week is going.
 
-- **Streak and today's time** at the top: the days in a row you've trained, and today's active time against your daily goal.
-- **Today's workout:** today's day of the Core Week program, with each drill's block (warm-up, main, secondary, maintenance), its runs and your current 85% rating. The bar shows how many of today's runs you've done. The button says **Start session**, **Continue session** if you've done part of it, or **Repeat session** once it's done. **Something else** opens Scenarios on Browse. A drill's name opens it on Scenarios. On a rest day it tells you what's next.
+- **Streak and today's time** at the top: the days in a row you've trained, and today's active time against your daily goal, which you set on Settings › Training.
+- **Today's workout:** today's day of the Core Week program, with each drill's block (warm-up, main, secondary, maintenance), its runs and your current 85% rating. The bar shows how many of today's runs you've done. The button says **Start session**, **Continue session** if you've done part of it, or **Repeat session** once it's done. **Something else** opens Scenarios on Browse. A drill's name opens it on Scenarios. On a rest day it tells you what's next. The line under the title names your adaptive mix and links to Settings › Training, where you change it.
 - **This week:** each day's minutes in the program, coloured done, partial or missed. **Whole week** opens the Program tab on Scenarios, with every day's drills.
 - **Favorites:** the scenarios and workouts you've starred (up to six), with **Play** on scenarios and **Start session** on workouts.
 - **Recently played:** your last five scenarios or workouts, with your current figure and **Play** on scenarios or **Start session** on workouts. Play starts an adaptive run. KovaaK's scenarios have no button here unless AimAdapt can play them (then it says **Play in AimAdapt**); the rest you play in KovaaK's.
@@ -27,7 +27,7 @@ Today is the home page: what to play now and how the week is going.
 
 ## Scenarios {#scenarios}
 
-Scenarios has three tabs across the page: two lists, **Browse** and **Workouts**, and **Program**, which shows the week's plan (see below). Each scenario and workout opens on its own page; **Scenarios ·** and the list's name, at the top of that page, take you back to the tab where you left it. The Scenarios link in the sidebar opens the tab you were last on.
+Scenarios has three tabs across the page: two lists, **Browse** and **Workouts**, and **Program**, which shows the week's plan (see below). Each scenario and workout opens on its own page; **Scenarios ·** and the list's name, at the top of that page, take you back to the tab where you left it. The Scenarios link in the sidebar opens the tab you were last on. A trainer scenario's or workout's page shows the adaptive mix in use at the top, with a link to Settings › Training.
 
 - **Browse:** every scenario, played or not: the trainer's, and your KovaaK's scenarios (every `.sce` file in your KovaaK's and Workshop folders, plus any you've played in KovaaK's). A KovaaK's scenario's skill is its aim type (Clicking, Tracking or Target switching) and its tags are the game and weapon tags in its file. Filter by **Type** (AimAdapt, KovaaK's, or KovaaK's that play here: the ones AimAdapt's trainer can play), **Skill**, **Played** (played or not played yet), or pick tags (for example *tracking* and *smooth*) to show only scenarios that have all of them. Each tag shows how many scenarios have it; **N more** shows the rest of the tags. The **Yours** button next to **Favorites** shows only the scenarios you made or copied with Copy & edit, and it appears once you have some. Once you've played anything, Browse opens with the most recently played first, grouped by day (Today, Yesterday, then weekdays and dates), and scenarios you haven't played at the end. Before that it opens grouped by skill. Set the **Played** filter to Played to see only what you've played, here or in KovaaK's. KovaaK's rows are scenarios you played in KovaaK's: their page shows your scores, but you play them in KovaaK's.
 - **Workouts:** the built-in workouts and yours, with how many scenarios and runs each has and about how long it takes. Filter by **Made by** (built-in or you). The Core Week's daily sessions aren't listed here. They're on Today and the Program tab.
@@ -113,7 +113,7 @@ Target speed is in degrees per second because that's how fast your hand has to t
 | Stretch | 55–72% | 20% | 5% | 35% |
 | Easy | 93–97% | 15% | 10% | 15% |
 
-The mix (Steady, Balanced or Push) is a setting in your profile. A stretch run never follows another stretch run, or a run more than 10 points below the goal. Before a run the trainer names its kind and what to expect, for example "Stretch run: 0.52 s" and "About 6 in 10 expected". Afterwards a stretch or easy run is judged against that plan, and a run at your level against the 85% goal (see [In the trainer](#help/trainer)).
+The mix (Steady, Balanced or Push) is one setting for every profile, on [Settings › Training](#help/settings). A stretch run never follows another stretch run, or a run more than 10 points below the goal. Before a run the trainer names its kind and what to expect, for example "Stretch run: 0.52 s" and "About 6 in 10 expected". Afterwards a stretch or easy run is judged against that plan, and a run at your level against the 85% goal (see [In the trainer](#help/trainer)).
 
 **Several runs in a row.** When a workout plays a scenario more than once in a row, the kind of each run follows a plan built from your mix instead of a random draw. The first run is at your level. Stretch runs sit in the middle, never last and never two in a row. Easy runs come at the end. Five runs on Balanced go: at your level, at your level, stretch, at your level, easy. The shares are rounded to the number of runs, so a short block has fewer kinds: on Balanced and Push a block needs three runs for a stretch run and four for an easy one, and on Steady it needs ten and five. A planned stretch run still becomes a run at your level if the run before it was more than 10 points below the goal. A run played on its own picks its kind at random from the mix.
 
@@ -238,7 +238,7 @@ Progress shows how you're doing across all your scenarios, in three tabs.
 
 **Benchmarks from KovaaK's** lists your best scores on the Voltaic Season 5 benchmark scenarios, read from your KovaaK's stats files. Each opens the scenario on Scenarios. AimAdapt's own scenarios aren't here: they're rated on their own pages and on Skills. If you haven't played any of them in KovaaK's, the tab says so and links to Settings › KovaaK's, where the stats folder is set up.
 
-**Time** shows when and how much you train, counting KovaaK's runs and trainer runs together: totals (active time, session time, days trained, days the daily goal was met), daily time for the last seven days, a calendar of daily time (use the arrows to change month) and every session newest first. **More about when you train** opens four more cards: the last seven days as session blocks, time by day of the week, runs by hour of day, and active against idle time. It starts closed, and stays open or closed as you use the page. How time is counted is in [Settings › Goals and time](#help/settings).
+**Time** shows when and how much you train, counting KovaaK's runs and trainer runs together: totals (active time, session time, days trained, days the daily goal was met), daily time for the last seven days, a calendar of daily time (use the arrows to change month) and every session newest first. **More about when you train** opens four more cards: the last seven days as session blocks, time by day of the week, runs by hour of day, and active against idle time. It starts closed, and stays open or closed as you use the page. How time is counted is in [Settings › Training](#help/settings).
 
 ## Playing KovaaK's scenarios {#kovaaks-play}
 
@@ -274,14 +274,13 @@ A replay is redrawn from what the run recorded: your aim 240 times a second and 
 
 ## Settings {#settings}
 
-Settings has four tabs: **Aim and display**, **Goals and time**, **KovaaK's** and **Your data**.
+Settings has four tabs: **Aim and display**, **Training**, **KovaaK's** and **Your data**.
 
-**Aim and display** holds your profiles. Each profile has its own sensitivity, DPI, field of view, adaptive mix, crosshair and display settings, typically one per game. The trainer plays with the active one (Scenarios shows which); **Use this one** makes the selected profile active. **Add**, **Duplicate** and **Delete** manage them. Changes aren't used until you press **Save settings**; **Undo changes** throws them away.
+**Aim and display** holds your profiles. Each profile has its own sensitivity, DPI, field of view, crosshair and display settings, typically one per game. The trainer plays with the active one (Scenarios shows which); **Use this one** makes the selected profile active. **Add**, **Duplicate** and **Delete** manage them. Changes aren't used until you press **Save settings**; **Undo changes** throws them away.
 
 **Aim**
 - **Game:** pick the game, then type your sensitivity exactly as it is in that game. AimAdapt converts it to cm/360 at your DPI. Choose cm/360 to enter it directly.
 - **Mouse DPI.**
-- **Adaptive target mix:** Steady (mostly near your rating), Balanced (some stretch and easy runs) or Push (more stretch runs). See [Adaptive mode](#help/adaptive).
 - **Field of view:** horizontal, at 16:9. Where a game uses another FOV measure, **Use** fills in the matching value.
 - **Match my KovaaK's settings** copies the sensitivity, DPI and FOV of your latest KovaaK's run.
 
@@ -296,7 +295,12 @@ Settings has four tabs: **Aim and display**, **Goals and time**, **KovaaK's** an
 
 Sensitivity is in degrees per mouse count, so it stays the same at any resolution or play-area size.
 
-**Goals and time** shows your daily goal (30 minutes active; the weekly goal is seven times it) and how time is counted:
+**Training** holds what shapes your practice. Each change is saved as you make it.
+- **Adaptive target mix:** Steady (mostly near your rating), Balanced (some stretch and easy runs) or Push (more stretch runs). One mix holds for every profile. If your profiles had mixes of their own, the active profile's carries over, and your first change on this tab sets it for every profile. See [Adaptive mode](#help/adaptive).
+- **Daily goal:** minutes of active time a day, from 1 to 600. It starts at 30. Today, your streak and the daily-time chart use it, and the weekly goal is seven times it.
+- **How long to train:** half an hour a day is a sound default, and nothing suggests it is a ceiling. In the largest study of aim training (Listman and others, 2021, on about 7,000 Aim Lab players and one task), gains kept growing up to about an hour of that task in a day, with most of the benefit reached within 30 to 60 minutes. Training on more days mattered more than the length of any one day.
+
+How time is counted is fixed for now:
 - A new session starts after a 15-minute break.
 - Session time runs from a session's first run to its last, so it includes menus and breaks. Active time is time inside runs.
 - The training day starts at 4 AM.
@@ -311,6 +315,7 @@ Sensitivity is in degrees per mouse count, so it stays the same at any resolutio
 Everything is stored on your computer in `%APPDATA%\AimAdapt`:
 - `aimadapt.db`: your runs and ratings (SQLite).
 - `engine.toml`: your settings profiles. If AimAdapt can't read it, Settings tells you and shows the defaults, and saving keeps the old file as `engine (unusable).toml` so nothing in it is lost.
+- `training.toml`: the adaptive mix and the daily goal from Settings › Training.
 - `scenarios\` and `workouts\`: your own scenario and workout files.
 - `crash.log`: only there if AimAdapt has crashed. It says what went wrong, which helps with a bug report.
 
@@ -331,6 +336,7 @@ Nothing is sent anywhere. Deleting one of your scenarios or workouts removes the
 ## What's new {#whats-new}
 
 **November 2026**
+- Settings has a **Training** tab in place of Goals and time. The adaptive mix moved there and is now one setting for every profile (the active profile's mix carries over). The daily goal can be changed. Today's workout and a scenario's page show the mix in use and link to the tab. The advice on how long to train no longer treats half an hour as a limit.
 - Progress › Skills shows a likely range on every change (the skill profile, reps and carry-over, the week's comparison and the biggest gain) and greys a change that is inside its own noise. Carry-over has a **By drill** summary that appears after three sessions of a drill. The note about the skill furthest behind now names your least improved skill, once two skills have three sessions each. Saturday's weak-spots day picks the skills you've trained least first and ranks a skill by its change only after three sessions, so its drills may differ from before. Ratings and scoring are unchanged.
 - A scenario's Runs tab has a **Kind** column (Calibration, At your level, Stretch or Easy), a **Breakthrough** tag on runs that held a harder level than before, and a **Planned against actual** card comparing how often you succeeded on each kind of run with what the trainer planned. The same card for all scenarios is at the bottom of Progress › Skills. Runs from before this version are left out of it.
 - The trainer names each run's kind with what to expect ("Stretch run: 0.52 s", then "About 6 in 10 expected"), and the results judge a stretch or easy run against that plan: as planned, above plan or below plan. A stretch run that went as planned no longer reads as below the 85% goal, and during the run its success rate is shown beside the plan. Ratings and scoring are unchanged.

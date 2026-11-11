@@ -33,8 +33,25 @@ pub(crate) struct AppData {
     db_path: PathBuf,
     stats_dir: Option<PathBuf>,
     last_import: Mutex<Option<ImportReport>>,
-    time: TimeSettings,
+    /// The daily goal can change while the app runs (Settings › Training).
+    time: Mutex<TimeSettings>,
     progress: ProgressSettings,
+}
+
+impl AppData {
+    /// A copy of the time settings. A poisoned lock still gives them.
+    pub(crate) fn time(&self) -> TimeSettings {
+        self.time.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
+    }
+
+    pub(crate) fn set_daily_goal(&self, minutes: f64) {
+        self.time.lock().unwrap_or_else(std::sync::PoisonError::into_inner).daily_goal_min = minutes;
+    }
+}
+
+/// The time settings at startup: the defaults, with the daily goal saved on Settings › Training.
+fn time_settings(data_dir: &std::path::Path) -> TimeSettings {
+    TimeSettings { daily_goal_min: aimadapt_sim::prefs::load(data_dir).daily_goal_min, ..TimeSettings::default() }
 }
 
 /// Everything the screens need in one call.
@@ -80,15 +97,16 @@ fn build_snapshot(state: &AppData) -> Result<Snapshot, String> {
         return Err(e.clone());
     }
     let db = state.db.lock().map_err(err)?;
-    let training = training::report(&db, &state.time, Local::now().naive_local()).map_err(err)?;
-    let p = progress::load(&db, &state.time).map_err(err)?;
+    let time = state.time();
+    let training = training::report(&db, &time, Local::now().naive_local()).map_err(err)?;
+    let p = progress::load(&db, &time).map_err(err)?;
     let game = db.latest_game_info().map_err(err)?;
     Ok(Snapshot {
         db_path: state.db_path.display().to_string(),
         stats_dir: state.stats_dir.as_ref().map(|d| d.display().to_string()),
         last_import: state.last_import.lock().map_err(err)?.clone(),
         import_errors: db.import_errors().map_err(err)?,
-        time_settings: state.time.clone(),
+        time_settings: time,
         progress_settings: state.progress.clone(),
         training,
         scenarios: p.stats(&state.progress),
@@ -101,7 +119,7 @@ fn build_snapshot(state: &AppData) -> Result<Snapshot, String> {
 
 fn build_scenario(state: &AppData, name: &str) -> Result<Option<ScenarioDetail>, String> {
     let db = state.db.lock().map_err(err)?;
-    let p = progress::load(&db, &state.time).map_err(err)?;
+    let p = progress::load(&db, &state.time()).map_err(err)?;
     Ok(scenario_detail(&p, &state.progress, name))
 }
 
@@ -120,7 +138,7 @@ fn scenario_detail(p: &progress::Progress, settings: &ProgressSettings, name: &s
 fn dump_snapshot(state: &AppData, path: &std::path::Path) -> Result<(), String> {
     let snapshot = build_snapshot(state)?;
     let db = state.db.lock().map_err(err)?;
-    let p = progress::load(&db, &state.time).map_err(err)?;
+    let p = progress::load(&db, &state.time()).map_err(err)?;
     let scenarios: std::collections::BTreeMap<String, ScenarioDetail> = p
         .scenarios()
         .into_iter()
@@ -289,6 +307,8 @@ fn main() {
         Ok(db) => (db, None),
         Err(e) => (Db::open_in_memory().expect("an in-memory database"), Some(e)),
     };
+    // Without a data folder the database didn't open either, and the app only shows that.
+    let data_dir = aimadapt_core::db::data_dir().unwrap_or_default();
     let data = AppData {
         db: Mutex::new(db),
         startup_error: startup_error.clone(),
@@ -297,7 +317,7 @@ fn main() {
         // nothing is imported into a database that didn't open.
         stats_dir: if no_import || startup_error.is_some() { None } else { discover::find_stats_dir() },
         last_import: Mutex::new(None),
-        time: TimeSettings::default(),
+        time: Mutex::new(time_settings(&data_dir)),
         progress: ProgressSettings::default(),
     };
     // Catch up on runs played while the app was closed before the first screen loads.
@@ -316,12 +336,7 @@ fn main() {
     }
 
     let watch_dir = data.stats_dir.clone();
-    let trainer_state = trainer::TrainerState {
-        // Without a data folder the database didn't open either, and the app only
-        // shows that.
-        data_dir: aimadapt_core::db::data_dir().unwrap_or_default(),
-        playing: std::sync::atomic::AtomicBool::new(false),
-    };
+    let trainer_state = trainer::TrainerState { data_dir, playing: std::sync::atomic::AtomicBool::new(false) };
 
     tauri::Builder::default()
         .manage(data)
@@ -343,6 +358,7 @@ fn main() {
             trainer::delete_scenario,
             trainer::save_profiles,
             trainer::save_marks,
+            trainer::save_training,
             trainer::check_profiles,
             trainer::save_workout,
             trainer::delete_workout,
@@ -377,6 +393,31 @@ mod tests {
         assert_eq!(path, dir);
         let e = db.err().expect("an error");
         assert!(e.starts_with("couldn't open"), "{e}");
+    }
+
+    /// The goal saved on Settings › Training is the one the app counts against at startup.
+    #[test]
+    fn the_app_starts_with_the_saved_goal() {
+        let dir = std::env::temp_dir().join(format!("aimadapt-goal-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let none = time_settings(&dir);
+        assert_eq!(none.daily_goal_min, TimeSettings::default().daily_goal_min);
+        let prefs = aimadapt_sim::prefs::TrainingPrefs { daily_goal_min: 45.0, ..Default::default() };
+        aimadapt_sim::prefs::save(&dir, &prefs).unwrap();
+        let t = time_settings(&dir);
+        assert_eq!(t.daily_goal_min, 45.0);
+        let expected = TimeSettings { daily_goal_min: 45.0, ..TimeSettings::default() };
+        assert_eq!(t, expected, "only the goal changes");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The sim crate writes the default goal a second time; the two must agree.
+    #[test]
+    fn the_default_goal_is_the_same_in_sim_and_core() {
+        assert_eq!(
+            aimadapt_sim::prefs::TrainingPrefs::default().daily_goal_min,
+            TimeSettings::default().daily_goal_min
+        );
     }
 
     fn args(a: &[&str]) -> Vec<String> {

@@ -28,6 +28,7 @@ const PREVIEW = {
   check_scenario: () => [],
   check_profiles: () => [[], []],
   save_marks: (d, a) => a.marks,
+  save_training: (d, a) => ((d.trainer.training = a.training), (d.snapshot.time_settings.daily_goal_min = a.training.daily_goal_min), null),
   insights_overview: (d) => ({ scenarios: d.insights_overview }),
   insights: (d, a) => d.insights?.[a.scenario] ?? null,
   replay: (d, a) => d.replays?.[a.runId] ?? null,
@@ -196,7 +197,7 @@ const MOVED = {
   library: "settings/kovaaks",
 };
 const PROGRESS_TABS = [["skills", "Skills"], ["benchmarks", "Benchmarks from KovaaK's"], ["time", "Time"]];
-const SETTINGS_TABS = [["aim", "Aim and display"], ["goals", "Goals and time"], ["kovaaks", "KovaaK's"], ["data", "Your data"]];
+const SETTINGS_TABS = [["aim", "Aim and display"], ["training", "Training"], ["kovaaks", "KovaaK's"], ["data", "Your data"]];
 
 // The tabs of a scenario's own page. Overview is also the bare address.
 const ITEM_TABS = [["overview", "Overview"], ["insights", "Insights"], ["runs", "Runs"]];
@@ -219,6 +220,8 @@ function movedTo({ view, arg }) {
   if (view === "insights") return arg ? `#scenarios/${encodeURIComponent(`name:${arg}`)}` : "#scenarios";
   // #progress/<scenario> was a scenario's history; it's on Scenarios now.
   if (view === "progress" && arg && !PROGRESS_TABS.some(([id]) => id === arg)) return `#scenarios/${encodeURIComponent(`name:${arg}`)}`;
+  // #settings/goals was the Training tab's address under its old name.
+  if (view === "settings" && arg === "goals") return "#settings/training";
   return null;
 }
 
@@ -722,16 +725,6 @@ function kovaaksTab() {
         <div class="tile"><div class="small muted">Resolution</div><div class="num">${esc(game.resolution ?? "–")}</div></div>
         <div class="tile"><div class="small muted">Game version</div><div class="num">${esc((game.game_version ?? "–").split(".").slice(0, 3).join("."))}</div></div></div>` : ""}
       ${fpsCapped ? `<div class="note note-body">FPS sits at the ${num(game.max_fps)} cap. If your monitor refreshes faster, raising the cap in KovaaK's can make tracking feel smoother.</div>` : ""}
-    </section>`;
-}
-
-function goalsTab() {
-  const ts = ui.snap.time_settings;
-  return `<section class="card" style="max-width:760px"><h2>Goals and how time is counted</h2>
-      <div class="note"><div class="note-title">Daily goal: ${ts.daily_goal_min} minutes active</div><div class="note-body">Today, the streak and the daily-time chart use it. The weekly goal is seven times this.</div></div>
-      <div class="note"><div class="note-title">New session after a ${ts.session_gap_min}-minute break</div><div class="note-body">Session time runs from a session's first run to its last, so it includes menus and breaks. Active time is time inside runs.</div></div>
-      <div class="note"><div class="note-title">Training day starts at ${ts.day_start_hour}:00</div><div class="note-body">A late-night session counts toward the day it started on.</div></div>
-      <div class="note"><div class="note-title">Restarted if under ${Math.round(ts.restart_fraction * 100)}% of the usual length</div><div class="note-body">Compared per scenario (with ${ts.restart_min_runs}+ runs), so 1-second scenarios aren't flagged. Restarted runs never count as bests.</div></div>
     </section>`;
 }
 

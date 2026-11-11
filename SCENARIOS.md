@@ -37,7 +37,7 @@ per_miss = -30.0
 - Targets are placed by angle and distance. `yaw` is degrees left (−) or right (+) of straight ahead, and `pitch` is degrees below (−) or above (+) eye level.
 - Moving targets travel in angle space and bounce off the edges of the spawn area and the room. They keep one distance (and on-screen size) unless they move forward and back, and they can jump straight up from where they are.
 - A sphere of radius `r` at distance `d` is `2 × atan(r / d)` degrees wide. For example, a 0.3 m target at 10 m is about 3.4° wide.
-- Your sensitivity (cm/360 and DPI), FOV and crosshair are player settings, not part of the scenario. They're stored in `%APPDATA%\AimAdapt\engine.toml`.
+- Your sensitivity (cm/360 and DPI), FOV and crosshair are player settings, not part of the scenario. They're stored in `%APPDATA%\AimAdapt\engine.toml`. The adaptive mix and the daily goal are in `training.toml` beside it.
 
 ## Fields
 

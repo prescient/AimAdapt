@@ -74,7 +74,7 @@ Last reviewed: Nov 10, 2026 (after the layout review and the adaptive review; th
 - [x] Adapt between runs, not during them (from [playtesting](PLAYTEST.md): changing difficulty target by target felt chaotic).
   - The first adaptive run on a scenario is a calibration run that adapts as you play. So is the next run after a break: three days or more away, with the rating's uncertainty widened back to 0.12 or more (about five and a half days for a settled rating). It starts from the old rating and keeps the old best, and the HUD and results say how many days it has been. It's automatic, because an offer would need a prompt in the middle of a session (plan A4).
   - Every later run plays at one value, shown up front with its kind ("At your level: 0.62 s"), picked from the mix: at your level (80–90% chance), stretch (55–72%) and easy (93–97%).
-  - Steady, Balanced and Push mixes are set per profile.
+  - One Steady, Balanced or Push mix for every profile, set on Settings › Training (plan L5). A mix saved in a profile before that carries over until a change is saved there.
   - Guard rails: no stretch run after a stretch run, or after a run more than 10 points below the goal.
   - Inside a block (a scenario played two or more times in a row in a workout or program day) the kind of each run is planned from the mix: the first at your level, stretch runs in the middle with none side by side, easy runs last. A run on its own still draws its kind (plan A5).
   - The trainer names the kind of run with what to expect before it starts ("Stretch run: 0.52 s" with "About 6 in 10 expected" under it), and the results judge a stretch or easy run against its plan (as planned, above or below), with room for the luck of a short run and at least five points. During a stretch or easy run the live success rate is shown beside the plan instead of the goal (plan A2).
@@ -146,17 +146,18 @@ Last reviewed: Nov 10, 2026 (after the layout review and the adaptive review; th
 ## 6. Settings and profiles
 
 ### Done
-- [x] Settings tab with profiles, usually one per game. Each profile holds sensitivity in that game's units (Overwatch 2, Valorant, CS2, Apex, Call of Duty, or cm/360), DPI, FOV with the game's usual value, adaptive mix, crosshair with a preview, and display settings.
+- [x] Settings tab with profiles, usually one per game. Each profile holds sensitivity in that game's units (Overwatch 2, Valorant, CS2, Apex, Call of Duty, or cm/360), DPI, FOV with the game's usual value, crosshair with a preview, and display settings.
 - [x] Profiles switch in Settings (Scenarios shows the active one); `--profile <name>` in the engine. The first profile is matched to your latest KovaaK's run.
 
 ### To do
 - [ ] `todo` P2 More games (Fortnite, Rainbow Six Siege, Marvel Rivals, The Finals) once their sensitivity formulas are checked.
-- [ ] `todo` P2 Settings › Training: the mix, an editable daily goal and advice on session length in one tab (plan L5). The other training-time rules (session gap, day start) stay fixed for now.
+- [x] Settings › Training: the mix (one for every profile), a daily goal that can be changed, and advice on session length, in one tab that replaces Goals and time (plan L5). Both are saved in training.toml.
+- [ ] `todo` P2 Session gap, day start and the restart rule that can be changed. They are fixed and listed on Settings › Training.
 
 ## 7. App screens
 
 ### Done
-- [x] Four pages instead of ten (mockups on the design canvas): Today, Scenarios, Progress (Skills, Benchmarks, Time) and Settings (Aim and display, Goals and time, KovaaK's, Your data), with Help at the bottom of the sidebar. Old addresses redirect.
+- [x] Four pages instead of ten (mockups on the design canvas): Today, Scenarios, Progress (Skills, Benchmarks, Time) and Settings (Aim and display, Training, KovaaK's, Your data), with Help at the bottom of the sidebar. Old addresses redirect.
 - [x] Scenarios: one list of trainer scenarios, workouts and KovaaK's scenarios, newest first by day, with name search and Skill, Tag and Trainer filters, beside the selected one as a single scrolling page (Play, figures, rating chart, what to work on, Insights, runs with replays).
 - [x] Today: the program day with each drill's rating, the week, recently played and two notes.
 - [x] Progress › Time lists every session.
