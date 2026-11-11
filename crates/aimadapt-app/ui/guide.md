@@ -23,7 +23,7 @@ Today is the home page: what to play now and how the week is going.
 - **This week:** each day's minutes in the program, coloured done, partial or missed. **Whole week** opens the Program tab on Scenarios, with every day's drills.
 - **Favorites:** the scenarios and workouts you've starred (up to six), with **Play** on scenarios and **Start session** on workouts.
 - **Recently played:** your last five scenarios or workouts, with your current figure and **Play** on scenarios or **Start session** on workouts. Play starts an adaptive run. KovaaK's scenarios have no button here unless AimAdapt can play them (then it says **Play in AimAdapt**); the rest you play in KovaaK's.
-- **Worth knowing:** the top note: the most important one from your skill profile and history (see Worth knowing under [Progress](#help/progress)). When the skill furthest behind is the top note, it links to that skill's scenarios on Browse. **All notes** opens the full list on Progress › Skills. With no notes, the card isn't shown.
+- **Worth knowing:** the top note: the most important one from your skill profile and history (see Worth knowing under [Progress](#help/progress)). When your least improved skill is the top note, it links to that skill's scenarios on Browse. **All notes** opens the full list on Progress › Skills. With no notes, the card isn't shown.
 
 ## Scenarios {#scenarios}
 
@@ -191,10 +191,12 @@ Core Week is a six-day plan of about 29 minutes a day, built around reps rather 
 | Wednesday | Switching |
 | Thursday | Precise and dynamic clicking |
 | Friday | Smooth and precise tracking |
-| Saturday | Weak spots: drills for your weakest sub-skills |
+| Saturday | Weak spots: drills for the sub-skills you've trained least and improved least |
 | Sunday | Rest |
 
 Each day has a warm-up (one drill, two standard runs), two main drills of five reps, two secondary drills of four, and a maintenance drill from another skill group (three reps). Most drills alternate week by week with a variant that trains the same sub-skill, for example Strafe Track one week and Hop Strafe Track the next. The training day starts at 4 AM, so a late-night session counts toward the day it started on.
+
+Saturday picks its skills in this order: skills you haven't trained come first, then skills with fewer than three sessions (fewest first), then the rest by their change since you started, smallest first. A change measured on fewer than three sessions is mostly noise, which is why it isn't used earlier. This order changed in November 2026, so Saturday's drills may differ from before.
 
 Today shows today's workout. **Scenarios › Program** shows the whole week: every day's drills, with a start button on each day. **Progress › Skills** shows the results: your skill profile, how each drill moves across its reps, and how each day went. Start buttons are only on Today and the Program tab.
 
@@ -227,11 +229,11 @@ The editor is a form with every scenario setting, grouped as in the file format:
 Progress shows how you're doing across all your scenarios, in three tabs.
 
 **Skills**
-- **Key figures:** days done this week in the program, minutes, your overall change since you started each drill, and your biggest gain over the last seven days.
-- **Skill profile:** the change in each of the nine sub-skills, each group and overall, measured from the end of your first day on each drill.
-- **Worth knowing:** every note, most important first: the skill furthest behind, a plateau, warming up first, repeating a scenario before you switch, skills you haven't trained in a week, a change of settings, and what Saturday's weak-spots day will play. Today shows only the first. A note appears only while it applies.
-- **Reps and carry-over:** your first rep against your last rep of each drill, and how much of the previous session's rating carried over to the next.
-- **This week:** the results for each Core Week day: done, partial or missed, with runs and minutes, and each day's main drills compared with the same day last week. A day counts as done at 75% of its runs. Skills has no start buttons: **The plan** opens the Program tab, where you start a day or make up a missed one.
+- **Key figures:** days done this week in the program, minutes, your overall change since you started each drill, and your biggest gain over the last seven days. The biggest gain is shown with its range, and only when it is outside its own noise.
+- **Skill profile:** the change in each of the nine sub-skills, each group and overall, measured from the end of your first day on each drill. Every change has its likely range (one standard deviation either side, built from the ratings' own ranges), drawn as a thin line on the bar and as a ± figure. A grey bar or figure has zero inside its range, so the change may be noise. Changes from runs saved before ranges were stored show no range.
+- **Worth knowing:** every note, most important first: your least improved skill, a plateau, warming up first, repeating a scenario before you switch, skills you haven't trained in a week, a change of settings, and what Saturday's weak-spots day will play. Today shows only the first. A note appears only while it applies. A least improved skill is named once two skills have three sessions each, and the skill profile says how many sessions are still to go.
+- **Reps and carry-over:** a **By drill** summary first: how much of a drill's rating carries from one session to the next, averaged over its latest sessions. It shows after three sessions of a drill, and says how many more each other drill needs. Then each session: your first rep against your last rep of each drill, and how much of the previous session's rating carried over to the next, with ranges and greyed figures when zero is inside the range.
+- **This week:** the results for each Core Week day: done, partial or missed, with runs and minutes, and each day's main drills compared with the same day last week. The comparison has its range, and is greyed and marked "within noise" when zero is inside it. A day counts as done at 75% of its runs. Skills has no start buttons: **The plan** opens the Program tab, where you start a day or make up a missed one.
 - **Planned against actual:** at the bottom, the table from a scenario's Runs tab for all your scenarios together: how often you succeeded on runs at your level, stretch runs and easy runs, beside the chance the trainer planned. A gap is marked only when it is bigger than luck explains for that many targets. Older runs that didn't record their length are left out (see Runs under [Scenarios](#help/scenarios)).
 
 **Benchmarks from KovaaK's** lists your best scores on the Voltaic Season 5 benchmark scenarios, read from your KovaaK's stats files. Each opens the scenario on Scenarios. AimAdapt's own scenarios aren't here: they're rated on their own pages and on Skills. If you haven't played any of them in KovaaK's, the tab says so and links to Settings › KovaaK's, where the stats folder is set up.
@@ -329,6 +331,7 @@ Nothing is sent anywhere. Deleting one of your scenarios or workouts removes the
 ## What's new {#whats-new}
 
 **November 2026**
+- Progress › Skills shows a likely range on every change (the skill profile, reps and carry-over, the week's comparison and the biggest gain) and greys a change that is inside its own noise. Carry-over has a **By drill** summary that appears after three sessions of a drill. The note about the skill furthest behind now names your least improved skill, once two skills have three sessions each. Saturday's weak-spots day picks the skills you've trained least first and ranks a skill by its change only after three sessions, so its drills may differ from before. Ratings and scoring are unchanged.
 - A scenario's Runs tab has a **Kind** column (Calibration, At your level, Stretch or Easy), a **Breakthrough** tag on runs that held a harder level than before, and a **Planned against actual** card comparing how often you succeeded on each kind of run with what the trainer planned. The same card for all scenarios is at the bottom of Progress › Skills. Runs from before this version are left out of it.
 - The trainer names each run's kind with what to expect ("Stretch run: 0.52 s", then "About 6 in 10 expected"), and the results judge a stretch or easy run against that plan: as planned, above plan or below plan. A stretch run that went as planned no longer reads as below the 85% goal, and during the run its success rate is shown beside the plan. Ratings and scoring are unchanged.
 - Runs of the same scenario in a workout now follow a plan from your mix instead of a random draw each time: the first at your level, stretch runs in the middle and easy runs last. A run played on its own still draws its kind at random.

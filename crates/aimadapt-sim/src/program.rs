@@ -85,7 +85,7 @@ pub struct Day {
     /// Workout id, unless this is a weak-spots day.
     #[serde(default)]
     pub workout: Option<String>,
-    /// Build the day from the player's weakest skills instead.
+    /// Build the day from the skills the player has trained least and improved least instead.
     #[serde(default)]
     pub weak_spots: bool,
 }
@@ -152,8 +152,9 @@ pub fn drills(skill: Skill) -> &'static [&'static str] {
     }
 }
 
-/// A weak-spots workout from skills ordered weakest first: a standard warm-up, the
-/// two weakest ×5, the next two ×4, and the strongest ×3 so it doesn't fade. Each
+/// A weak-spots workout from skills ordered most in need first (least trained, then
+/// least improved): a standard warm-up, the first two skills ×5, the next two ×4, and
+/// the last, the skill least in need, ×3 so it doesn't fade. Each
 /// skill's drill rotates with the week like the other days' variants.
 pub fn weak_spots(name: &str, ranked: &[Skill]) -> Workout {
     let item = |s: Skill, runs: u32, block: Block| {
@@ -250,7 +251,7 @@ mod tests {
     }
 
     #[test]
-    fn weak_spots_drill_the_weakest_skills_most() {
+    fn weak_spots_drill_the_first_skills_most() {
         let ranked = [
             Skill::LinearClicking,
             Skill::PreciseTracking,

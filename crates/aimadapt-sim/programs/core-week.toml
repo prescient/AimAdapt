@@ -1,5 +1,5 @@
 name = "Core Week"
-description = "Monday to Saturday, about 30 minutes a day. Each day works one skill group with few exercises and lots of reps: a warm-up, two main drills for five reps each, two related drills for four, and one from another group so it doesn't fade. Saturday is built from your weakest skills. Sunday is rest."
+description = "Monday to Saturday, about 30 minutes a day. Each day works one skill group with few exercises and lots of reps: a warm-up, two main drills for five reps each, two related drills for four, and one from another group so it doesn't fade. Saturday is built from the skills you have trained least and improved least. Sunday is rest."
 
 [[days]]
 day = "mon"

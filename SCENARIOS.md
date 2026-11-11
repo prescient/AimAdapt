@@ -216,7 +216,7 @@ Each run is saved on its own, with the workout's name attached.
 
 ## Programs
 
-A program maps weekdays to workouts. Built-ins live in [`crates/aimadapt-sim/programs`](crates/aimadapt-sim/programs). Days that aren't listed are rest days. A day can be `weak_spots = true` instead of naming a workout. That day is then built from your skill profile: a standard warm-up, your two weakest skills ×5, the next two ×4, and your strongest ×3. Untrained skills count as weakest.
+A program maps weekdays to workouts. Built-ins live in [`crates/aimadapt-sim/programs`](crates/aimadapt-sim/programs). Days that aren't listed are rest days. A day can be `weak_spots = true` instead of naming a workout. That day is then built from your skill profile: a standard warm-up, the two skills most in need ×5, the next two ×4, and the skill least in need ×3. Skills come in need order: untrained skills first, then skills with fewer than three sessions (fewest first), then the rest by their change since you started, smallest first. A change measured on fewer than three sessions is mostly noise, so it isn't used earlier.
 
 ```toml
 name = "Core Week"

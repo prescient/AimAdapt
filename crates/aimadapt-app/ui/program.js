@@ -21,6 +21,21 @@ const STATUS_LABELS = { done: "Done", partial: "Partial", missed: "Missed", toda
 
 const pctChange = (v, digits = 0) => (v === null || v === undefined ? "–" : `${v >= 0 ? "+" : "−"}${Math.abs(v * 100).toFixed(digits)}%`);
 
+// A change's likely range, e.g. "+2% to +9%". `sp` is { low, high, noise } (Spread in programs.rs).
+const rangeText = (sp, digits = 0) => `${pctChange(sp.low, digits)} to ${pctChange(sp.high, digits)}`;
+// Half the range's width in points, e.g. "±3.5".
+const plusMinus = (sp, digits = 0) => `±${(((sp.high - sp.low) / 2) * 100).toFixed(digits)}`;
+
+// A change with its range after it. Blue or salmon when zero is outside the range,
+// grey when it is inside (the change may be noise). With no range (older runs), the bare figure.
+function changeSpan(v, sp, digits = 0) {
+  if (v === null || v === undefined) return "–";
+  const tone = v >= 0 ? "pos" : "neg";
+  if (!sp) return `<span class="${tone}">${pctChange(v, digits)}</span>`;
+  const title = `Likely ${rangeText(sp, digits)}${sp.noise ? ". Zero is inside that range, so this may be noise." : ""}`;
+  return `<span class="${sp.noise ? "muted" : tone}" title="${title}">${pctChange(v, digits)} <span class="small">${plusMinus(sp, digits)}</span></span>`;
+}
+
 async function loadProgram(force = false) {
   if (ui.program.data && !force) return;
   try {
@@ -80,10 +95,10 @@ function rankedNotes() {
   const sc = s.scenarios;
   if (sum.lagging) {
     const skill = SKILL_LABELS[sum.lagging];
-    const trained = d.progress.profile.skills.find((x) => x.skill === sum.lagging)?.runs;
+    const stat = d.progress.profile.skills.find((x) => x.skill === sum.lagging);
     notes.push({
-      title: `${skill} is furthest behind`,
-      body: `${trained ? "Your smallest gain since you started." : "Not trained yet."} The program's weak-spots day leans on it.`,
+      title: `${skill} is least improved`,
+      body: `${pctChange(stat.change)} since you started${stat.spread ? ` (likely ${rangeText(stat.spread)})` : ""}, the smallest change among your skills with three or more sessions. The program's weak-spots day leans on it.`,
       skill,
     });
   }
@@ -130,7 +145,7 @@ function rankedNotes() {
     const focus = sat.workout?.items.filter((i) => i.block === "main" || i.block === "secondary").map((i) => scenarioName(i.scenario)) ?? [];
     notes.push({
       title: `${sat.name}'s weak spots`,
-      body: `${focus.length ? focus.join(", ") : "Built from your profile"}. Rebuilt from your skill profile, so they change as you improve.`,
+      body: `${focus.length ? focus.join(", ") : "Built from your profile"}. Chosen from the skills you've trained least, then the ones that improved least. A skill is ranked by its change once it has three sessions.`,
     });
   }
   return notes;
@@ -158,13 +173,13 @@ function skillsTab() {
     <section class="kpis" aria-label="This week in numbers">
       ${kpi("Days done", `${s.days_done} <small>of ${s.days_planned}</small>`, `${esc(d.name)} this week`)}
       ${kpi("Minutes", Math.round(s.minutes), "This week, in the program")}
-      ${s.best ? kpi("Biggest gain", esc(SKILL_LABELS[s.best[0]]), `${pctChange(s.best[1], 1)} over the last 7 days`) : ""}
+      ${s.best ? kpi("Biggest gain", esc(SKILL_LABELS[s.best[0]]), `${pctChange(s.best[1], 1)}${s.best_spread ? ` ${plusMinus(s.best_spread, 1)}` : ""} over the last 7 days`) : ""}
     </section>
     <div class="row" style="align-items:flex-start">
-      ${profileCard(p.profile)}
+      ${profileCard(p.profile, s)}
       ${notesCard()}
     </div>
-    ${sessionsCard(p.sessions)}
+    ${sessionsCard(p.sessions, p.carry)}
     ${weekCard(d)}
     ${planCheckCard(d.plan)}`;
 }
@@ -181,10 +196,10 @@ function weekCard(d) {
         ${w.planned ? `<div class="bar-track"><div class="bar-fill" style="width:${share * 100}%"></div></div>
           <div class="small">${w.done} / ${w.planned} runs${w.minutes ? ` · ${Math.round(w.minutes)} min` : ""}</div>` : `<div class="small muted">Rest day</div>`}
         ${STATUS_LABELS[w.status] ? `<span class="tag ${w.status === "done" ? "" : "grey"}">${STATUS_LABELS[w.status]}</span>` : ""}
-        ${w.focus_change !== null ? `<div class="small"><span class="${w.focus_change >= 0 ? "pos" : "neg"}">${pctChange(w.focus_change, 1)}</span> vs last ${esc(info.name)}</div>` : ""}
+        ${w.focus_change !== null ? `<div class="small">${changeSpan(w.focus_change, w.focus_spread, 1)} vs last ${esc(info.name)}${w.focus_spread?.noise ? " (within noise)" : ""}</div>` : ""}
       </div>`;
     }).join("")}</div>
-    <div class="small muted">A day counts as done at 75% of its runs. The change compares the day's main drills with the same day last week. Start or make up a day on the <a href="#scenarios/program">Program tab</a>.</div>
+    <div class="small muted">A day counts as done at 75% of its runs. The change compares the day's main drills with the same day last week, with its likely range after it. Grey means zero is inside that range. Start or make up a day on the <a href="#scenarios/program">Program tab</a>.</div>
   </section>`;
 }
 
@@ -244,38 +259,77 @@ function dayCard(d, w, info, drill) {
   </article>`;
 }
 
-function profileCard(pr) {
-  const max = Math.max(0.1, ...pr.skills.map((s) => Math.abs(s.change ?? 0)));
-  const bar = (v) => {
+// One tile of the profile card: a change under a label, with its range under it.
+function profileTile(label, change, sp) {
+  const range = sp ? `<div class="small muted">${sp.noise ? "within noise · " : ""}${rangeText(sp)}</div>` : "";
+  return `<div class="tile"><div class="small muted">${label}</div><div class="kpi-value${sp?.noise ? " noise" : ""}">${pctChange(change)}</div>${range}</div>`;
+}
+
+// `summary` is the week's summary: it says how many sessions a least improved skill still needs.
+function profileCard(pr, summary) {
+  const max = Math.max(0.1, ...pr.skills.flatMap((s) => [s.change, s.spread?.low, s.spread?.high].map((x) => Math.abs(x ?? 0))));
+  const at = (x) => 50 + (Math.max(-max, Math.min(max, x)) / max) * 50;
+  const bar = (s) => {
+    const v = s.change;
     if (v === null || v === undefined) return `<span class="track"></span>`;
     const w = (Math.min(Math.abs(v), max) / max) * 50;
-    return `<span class="track diverge"><span class="fill ${v < 0 ? "neg-fill" : ""}" style="${v < 0 ? `right:50%` : `left:50%`};width:${w}%"></span></span>`;
+    const tone = s.spread?.noise ? "noise-fill" : v < 0 ? "neg-fill" : "";
+    const range = s.spread
+      ? `<span class="range" style="left:${at(s.spread.low).toFixed(1)}%;width:${(at(s.spread.high) - at(s.spread.low)).toFixed(1)}%"></span>`
+      : "";
+    return `<span class="track diverge"><span class="fill ${tone}" style="${v < 0 ? `right:50%` : `left:50%`};width:${w}%"></span>${range}</span>`;
+  };
+  const val = (s) => {
+    if (s.change === null) return s.runs ? '<span class="muted small" title="Play it on another day to see a change">1st day</span>' : '<span class="muted small">new</span>';
+    return `${pctChange(s.change)}${s.spread ? ` <span class="small">${plusMinus(s.spread)}</span>` : ""}`;
   };
   const groups = ["clicking", "tracking", "switching"];
+  const needs = summary.lagging_needs;
+  const lagNote = needs > 0 ? ` A least improved skill is named once two skills have three sessions each: ${needs} more session${needs === 1 ? "" : "s"} to go.` : "";
   return `<section class="card grow-2"><div class="card-head"><h2>Skill profile</h2><span class="small muted">Change since you started each drill</span></div>
     <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px">
-      <div class="tile"><div class="small muted">Overall</div><div class="kpi-value">${pctChange(pr.overall)}</div></div>
-      ${pr.groups.map((g) => `<div class="tile"><div class="small muted">${g.group[0].toUpperCase() + g.group.slice(1)}</div><div class="kpi-value">${pctChange(g.change)}</div></div>`).join("")}
+      ${profileTile("Overall", pr.overall, pr.overall_spread)}
+      ${pr.groups.map((g) => profileTile(g.group[0].toUpperCase() + g.group.slice(1), g.change, g.spread)).join("")}
     </div>
     ${groups.map((g) => `<div class="hbars">${pr.skills.filter((s) => s.group === g).map((s) => `<div class="hbar">
-      <span class="lbl skill-lbl">${esc(SKILL_LABELS[s.skill])}</span>${bar(s.change)}
-      <span class="val">${s.change !== null ? pctChange(s.change) : s.runs ? '<span class="muted small" title="Play it on another day to see a change">1st day</span>' : '<span class="muted small">new</span>'}</span></div>`).join("")}</div>`).join("")}
-    <div class="small muted">Each drill's rating at the end of your latest day vs. the end of your first day on it (last three runs each, so the first run's search for your level doesn't count). Faster lifetimes and higher tracking speeds are both gains. A change shows once you've played a drill on two days.</div>
+      <span class="lbl skill-lbl">${esc(SKILL_LABELS[s.skill])}</span>${bar(s)}
+      <span class="val wide${s.spread?.noise ? " noise" : ""}"${s.spread ? ` title="Likely ${rangeText(s.spread)}"` : ""}>${val(s)}</span></div>`).join("")}</div>`).join("")}
+    <div class="small muted">Each drill's rating at the end of your latest day vs. the end of your first day on it (last three runs each, so the first run's search for your level doesn't count). Faster lifetimes and higher tracking speeds are both gains. A change shows once you've played a drill on two days. The thin line on each bar and the ± figure are the change's likely range, built from the ratings' own ranges. A grey bar has zero inside that range, so the change may be noise.${lagNote}</div>
   </section>`;
 }
 
-function sessionsCard(sessions) {
+// "By drill" in the sessions card: carry-over averaged over a drill's latest sessions, once it has three.
+function carryByDrill(carry) {
+  const ready = carry.filter((c) => c.needed === 0);
+  const waiting = carry.filter((c) => c.needed > 0);
+  const table = ready.length
+    ? `<div class="table-wrap"><table><thead><tr><th>Drill</th><th class="r">Sessions</th><th class="r">Kept between sessions</th></tr></thead><tbody>
+      ${ready.map((c) => `<tr><td>${esc(c.scenario)}</td><td class="r mono">${c.sessions}</td>
+        <td class="r mono" style="white-space:nowrap">${changeSpan(c.kept, c.spread, 1)}${c.spread?.noise ? ' <span class="small muted">within noise</span>' : ""}</td></tr>`).join("")}
+      </tbody></table></div>`
+    : "";
+  const shown = waiting.slice(0, 8).map((c) => `${esc(c.scenario)} (${c.needed} more)`);
+  const more = waiting.length > 8 ? ` and ${waiting.length - 8} others` : "";
+  const pending = waiting.length
+    ? `<div class="small muted">A drill's figure shows after three sessions. Still to come: ${shown.join(", ")}${more}.</div>`
+    : "";
+  return carry.length ? `<h3 class="small muted">By drill</h3>${table}${pending}` : "";
+}
+
+function sessionsCard(sessions, carry) {
   if (!sessions.length) {
     return `<section class="card"><h2>Reps and carry-over</h2><div class="note-body">Play a program day to see how each drill moves across its reps and how much sticks to the next session.</div></section>`;
   }
   return `<section class="card"><div class="card-head"><h2>Reps and carry-over</h2><span class="small muted">Most recent first</span></div>
+    ${carryByDrill(carry)}
+    <h3 class="small muted">Each session</h3>
     <div class="table-wrap"><table><thead><tr><th>When</th><th>Drill</th><th class="r">Reps</th><th class="r">Rep 1</th><th class="r">Last rep</th><th class="r">Within session</th><th class="r">Kept from last time</th></tr></thead><tbody>
     ${sessions.slice(0, 25).map((s) => `<tr><td style="white-space:nowrap">${esc(fmtShort(day(s.date)))}</td><td>${esc(s.scenario)} <span class="small muted">${esc(BLOCK_LABELS[s.block ?? "none"] || "")}</span></td>
       <td class="r mono">${s.reps}</td><td class="r mono">${esc(fmtKnob(s.knob, s.first))}</td><td class="r mono">${esc(fmtKnob(s.knob, s.last))}</td>
-      <td class="r mono"><span class="${s.within >= 0 ? "pos" : "neg"}">${pctChange(s.within, 1)}</span></td>
-      <td class="r mono">${s.carryover === null ? "–" : `<span class="${s.carryover >= 0 ? "pos" : "neg"}">${pctChange(s.carryover, 1)}</span>`}</td></tr>`).join("")}
+      <td class="r mono" style="white-space:nowrap">${changeSpan(s.within, s.within_spread, 1)}</td>
+      <td class="r mono" style="white-space:nowrap">${changeSpan(s.carryover, s.carryover_spread, 1)}</td></tr>`).join("")}
     </tbody></table></div>
-    <div class="small muted">"Within session" is your last rep vs. your first. "Kept from last time" compares your first rep with where the previous session ended. If you keep gaining within sessions but lose it by the next one, the skill isn't sticking yet: more sessions of the same drill will help.</div>
+    <div class="small muted">"Within session" is your last rep vs. your first. "Kept from last time" compares your first rep with where the previous session ended. Each has its likely range after it (±, in points). A grey figure has zero inside its range, so on its own it may be noise. "By drill" averages a drill's carry-over over its latest sessions. If that average stays below zero, the skill isn't sticking between sessions yet: more sessions of the same drill will help.</div>
   </section>`;
 }
 

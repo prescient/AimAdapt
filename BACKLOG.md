@@ -92,11 +92,11 @@ Last reviewed: Nov 10, 2026 (after the layout review and the adaptive review; th
   - Control Track moves in real curves (`curve` movement: steady speed, turning heading).
   - Insights adds centering while on target and, on lifetime ratings, the share that's reaction time.
 - [x] Replaced the first version, which used 0–100 levels and a staircase.
+- [x] Ranges and noise on the figures derived from ratings (plan A7). Every change on Progress › Skills (the skill profile, each day's change against last week, reps and carry-over, the biggest gain) has a likely range built from the ratings' stored ranges (`rating_sd`, or half the distance between `rating_low` and `rating_high` on the knob's log scale), and one with zero inside its range is greyed as noise. A change from runs with no stored range shows no range and is never flagged. Carry-over has a By drill summary, and both it and a least improved skill need three sessions. Saturday's day ranks untrained skills first, then skills with under three sessions (fewest first), then the rest by change. "Weakest" is no longer used for a gain. Ratings and scoring are unchanged and there is no migration.
 
 ### To do
 - [ ] `spike` P1 Tune against real play. The default easy/hard ranges, first guesses and the "consistent vs. fades gradually" cut-off are educated guesses that have only been checked with the bot.
 - [ ] `todo` P3 The Insights charts cover the last ten runs whatever their version, so for a few runs after an edit they mix old and new settings. Keep them to the current version, as the ratings are.
-- [ ] `todo` P2 Ranges on gains, carry-over and the skill profile; changes inside the noise greyed; weak spots named only after three sessions (plan A7).
 
 ## 4. Programs and workouts
 

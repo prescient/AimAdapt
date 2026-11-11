@@ -83,7 +83,7 @@ Every day uses five drills, with reps instead of variety. Most drills alternate 
 | Secondary | 2 | 4 |
 | Maintenance | 1 (another skill group) | 3 |
 
-Saturday's drills are chosen from your weakest sub-skills.
+Saturday's drills are chosen from the sub-skills you've trained least and improved least.
 
 Today shows today's day. Scenarios › Program shows the whole week, with every day's drills and a start button on each. Progress › Skills shows how the week went.
 
@@ -94,7 +94,7 @@ Four pages, in the sidebar:
 - **Today:** today's program workout with each drill's runs and 85% rating, and Start session, Continue session or Repeat session. Also the week at a glance (**Whole week** opens the Program tab), your favorites and what you played last (each with Play, or Start session for a workout), and the top note from your history.
 - **Scenarios:** everything you can play or have played (the trainer's scenarios, your workouts and your KovaaK's scenarios) in three tabs across the page: Browse (every scenario, the trainer's and your KovaaK's files, with tag chips; it opens on what you played last once you've played something), Workouts and Program (the week's plan: a card for each day with its drills, your progress and a Start session button). Browse and Workouts are tables you can sort by any column, with a search over names, skills, tags and descriptions and filters for skill, type, played or not, your own scenarios and favorites. One column shows your 85% rating on an AimAdapt scenario or your best score where there is no rating. Star favorites and hide what you don't want listed. Each scenario and workout has its own page: Play (adaptive) and Standard run at the top with your latest rating, then three tabs: Overview (key figures, rating chart, latest runs and a few notes), Insights (what to work on and the charts below) and Runs (every run, with replays). A KovaaK's scenario's page has Overview (score history) and Runs.
 - **Progress:** three tabs.
-  - **Skills:** the skill profile (the change in each of the nine sub-skills, each group and overall, measured from the end of your first day on each drill) beside the notes (every note, most important first), reps and carry-over (rep 1 against the last rep of each drill, and how much of the previous session's rating carried over), and the week's results (each day done, partial or missed, its minutes and its main drills against the same day last week).
+  - **Skills:** the skill profile (the change in each of the nine sub-skills, each group and overall, measured from the end of your first day on each drill) beside the notes (every note, most important first), reps and carry-over (a By drill carry-over summary after three sessions of a drill, then rep 1 against the last rep of each drill and how much of the previous session's rating carried over), and the week's results (each day done, partial or missed, its minutes and its main drills against the same day last week). Every change shows its likely range and is greyed when zero is inside it, because a change that small may be noise.
   - **Benchmarks from KovaaK's:** your Voltaic Season 5 bests, read from your KovaaK's stats.
   - **Time:** totals, daily time, a calendar and sessions, with a fold for more about when you train.
 - **Settings:** four tabs.

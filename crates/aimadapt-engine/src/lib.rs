@@ -220,8 +220,8 @@ pub fn training_week() -> u32 {
 }
 
 /// The workout for a program day in a given week: its own workout, or a
-/// weak-spots workout built from the skill profile (untrained skills count as
-/// weakest), with each drill's variant for that week.
+/// weak-spots workout built from the skill profile (the skills least trained first,
+/// then the least improved), with each drill's variant for that week.
 pub fn workout_for_day(
     prog: &Program,
     day: Weekday,

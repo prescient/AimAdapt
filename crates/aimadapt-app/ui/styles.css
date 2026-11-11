@@ -276,6 +276,10 @@ svg text { font-family: var(--font); }
 .hbar .track.diverge::before { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; border-left: 1px solid var(--control); }
 .hbar .track.diverge .fill { position: absolute; top: 0; bottom: 0; }
 .neg-fill { background: #c65a5a !important; }
+.hbar .val.wide { width: 92px; white-space: nowrap; }
+.kpi-value.noise, .hbar .val.noise { color: var(--dim); }
+.noise-fill { background: var(--session) !important; }
+.hbar .track.diverge .range { position: absolute; top: 50%; height: 2px; margin-top: -1px; background: var(--text-strong); opacity: 0.8; border-radius: 1px; }
 
 /* Help */
 .head-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }

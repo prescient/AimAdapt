@@ -841,7 +841,7 @@ fn notes_are_ranked_once_and_both_pages_draw_from_the_list() {
     let program = ui("program.js");
     let ranked = decl(&program, "rankedNotes");
     let order = [
-        "is furthest behind",
+        "is least improved",
         "Plateau on",
         "Warm up first",
         "Repeat before you switch",
@@ -876,10 +876,41 @@ fn notes_are_ranked_once_and_both_pages_draw_from_the_list() {
         .map(|s| s.matches("rankedNotes()").count() - s.matches("function rankedNotes()").count())
         .sum();
     assert_eq!(calls, 2, "Today and Progress call rankedNotes, and nothing else does");
-    // A note is data: drawn escaped, with the one skill button the furthest-behind note has.
+    // A note is data: drawn escaped, with the one skill button the least-improved note has.
     let view = decl(&program, "noteView");
     assert!(view.contains("esc(n.title)") && view.contains("esc(n.body)"), "{view}");
     assert!(view.contains("data-action=\"browse-skill\"") && view.contains("esc(n.skill)"), "{view}");
+}
+
+/// Plan A7: every change on Progress › Skills carries its likely range, and one inside
+/// its noise is greyed. No script calls the gain-based order "furthest behind", and the
+/// program pages don't call it "weakest" (a word kept for measures of level).
+#[test]
+fn changes_show_their_range_and_noise_is_greyed() {
+    let program = ui("program.js");
+    let span = decl(&program, "changeSpan");
+    assert!(span.contains("sp.noise") && span.contains("plusMinus("), "{span}");
+    for (name, parts) in [
+        ("weekCard", &["focus_spread"][..]),
+        ("sessionsCard", &["within_spread", "carryover_spread"][..]),
+        ("carryByDrill", &["needed"][..]),
+        ("profileCard", &["overall_spread", "noise-fill", "class=\"range\"", "lagging_needs"][..]),
+        ("skillsTab", &["best_spread"][..]),
+    ] {
+        let body = decl(&program, name);
+        for part in parts {
+            assert!(body.contains(part), "{name} should have {part}");
+        }
+    }
+    assert!(decl(&program, "sessionsCard").contains("carryByDrill("), "the By drill block is in the sessions card");
+    let css = ui("styles.css");
+    assert!(css.contains(".noise-fill") && css.contains(".hbar .track.diverge .range"), "range and noise styles");
+    for (file, src) in scripts() {
+        assert!(!src.contains("furthest behind"), "{file} still says \"furthest behind\"");
+    }
+    for file in ["program.js", "today.js"] {
+        assert!(!ui(file).to_lowercase().contains("weakest"), "{file} calls a gain \"weakest\"");
+    }
 }
 
 // ---------- plan L6a: Browse takes in Recent and Yours ----------
