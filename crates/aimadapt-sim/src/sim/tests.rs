@@ -888,6 +888,30 @@ fn later_runs_play_at_one_difficulty() {
     assert_ne!(a.value, start, "and moved");
 }
 
+/// The summary carries the run's evidence in target-equivalents, so the results
+/// screen judges a run against its plan with the same measure the rating uses.
+#[test]
+fn the_summary_reports_evidence_like_the_rating() {
+    let mut s = no_countdown(Scenario::default());
+    s.timing.duration_s = 20.0;
+    let mut sim = Sim::adaptive(s, 4, Some(prior_at(Knob::Lifetime, 0.8, None)), Mix::Balanced);
+    let mut i = 0;
+    while sim.phase() != Phase::Finished {
+        if let Some(t) = sim.targets().first()
+            && i % 40 == 0
+        {
+            let at = t.pos;
+            sim.step(FRAME, shoot(at));
+        } else {
+            sim.step(FRAME, idle());
+        }
+        i += 1;
+    }
+    let a = sim.result().adaptive.unwrap();
+    assert!(a.outcomes >= 10);
+    assert_eq!(a.evidence, a.outcomes as f32, "a clicking target is one target-equivalent");
+}
+
 /// After a long break the old rating is a poor guess, so the next run is a
 /// calibration run again: it starts from the old rating and adapts target by
 /// target, and the result says how long the break was.

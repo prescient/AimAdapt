@@ -40,7 +40,7 @@ Each scenario has one difficulty setting, chosen for what it trains: target life
 
 - **How it updates:** a Bayesian estimate similar to Glicko. A surprising result moves the rating more than an expected one. The next run starts from your last rating on the same version of the scenario, including how well your consistency is known, so a steady player's rating holds still between runs. The uncertainty grows with the days since you last played. Changing a scenario's settings starts it over.
 - **Calibration run:** your first adaptive run on a scenario changes difficulty as you play, to find your level within the run. A scenario you come back to after several days gets one again, starting from your old rating.
-- **One difficulty per run after that:** every later run plays at a single value for the whole run, shown at the start ("This run: 0.62 s"). The value is picked by chance of success:
+- **One difficulty per run after that:** every later run plays at a single value for the whole run, shown at the start with the kind of run and what to expect ("Stretch run: 0.52 s" with "About 6 in 10 expected" under it). Afterwards a stretch or easy run is judged against that plan, and a run at your level against the 85% goal. The value is picked by chance of success:
 
   | Run | Chance of success | Balanced |
   |---|---|---|

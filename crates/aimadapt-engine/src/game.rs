@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use aimadapt_sim::adaptive::Knob;
+use aimadapt_sim::adaptive::{Knob, Pick, PlanVerdict, judge_against_plan};
 use aimadapt_sim::scenario::{Shape, parse_color};
 use aimadapt_sim::settings::DisplayMode;
 use aimadapt_sim::sim::from_angles;
@@ -1087,16 +1087,18 @@ fn update_hud(
     match sim.rating() {
         Some((knob, value, rate)) => {
             let goal = sim.scenario().adaptive.goal * 100.0;
-            texts.p1().0 = match sim.run_pick() {
-                Some((v, pick)) => format!("This run: {}\n{}", fmt_value(knob, v), pick.run_label()),
+            let plan = sim.run_plan();
+            texts.p1().0 = match plan {
+                Some((v, chance, pick)) => run_intro(pick, &fmt_value(knob, v), chance, sim.scenario().adaptive.goal),
                 None => {
                     let note = sim.break_days().map_or(String::new(), |d| format!("\n{}", break_note(d)));
                     format!("Calibration run{note}\n{goal:.0}%: {}", fmt_value(knob, value))
                 }
             };
             let rate = rate.map_or("-".into(), |r| format!("{:.0}%", r * 100.0));
+            let target = rate_target(plan.map(|(_, chance, pick)| (chance, pick)), sim.scenario().adaptive.goal);
             let mut stats =
-                format!("{} {rate} (goal {goal:.0}%)\n{}", rate_word(knob, sim.rated_per_target()), kills_line(sim));
+                format!("{} {rate} ({target})\n{}", rate_word(knob, sim.rated_per_target()), kills_line(sim));
             if let Some((_, left)) = sim.pace() {
                 stats += &if left >= 0.0 { format!("\nNext kill within {left:.1} s") } else { "\nOff pace".into() };
             }
@@ -1148,18 +1150,80 @@ fn calibration_close(break_days: Option<f32>) -> &'static str {
     }
 }
 
-/// The verdict line after a fixed run. `goal` and `rate` are fractions (0.85). A run
-/// can be at the goal rate and still not hold it, when it was too short to count.
-fn run_verdict(goal: f32, rate: Option<f32>, held: bool, breakthrough: bool) -> String {
-    let pct = goal * 100.0;
-    if breakthrough {
-        format!("Breakthrough: you held {pct:.0}% faster than ever before")
-    } else if held {
-        format!("You held the {pct:.0}% goal")
-    } else if rate.is_some_and(|r| r >= goal) {
-        format!("At the {pct:.0}% goal, but too few targets to count as held")
-    } else {
-        format!("Below the {pct:.0}% goal this time")
+/// What to expect from a run planned at this chance of success: "about 6 in 10", or
+/// out of 20 for the likelier runs.
+fn expected_text(chance: f32) -> String {
+    let out_of = if chance >= 0.9 { 20.0 } else { 10.0 };
+    format!("about {} in {}", (chance * out_of).round() as u32, out_of as u32)
+}
+
+/// The HUD text before and during a fixed-difficulty run: its kind, its difficulty and
+/// what to expect. `goal` and `chance` are fractions.
+fn run_intro(pick: Pick, value_text: &str, chance: f32, goal: f32) -> String {
+    let label = pick.run_label();
+    match pick {
+        Pick::Stretch | Pick::Easy => {
+            let expected = expected_text(chance).replacen("about", "About", 1);
+            format!("{label}: {value_text}\n{expected} expected")
+        }
+        _ => format!("{label}: {value_text}\nGoal {:.0}%", goal * 100.0),
+    }
+}
+
+/// What the live success rate is measured against, for the HUD: the plan on a stretch
+/// or easy run, the goal on any other. `plan` is the run's planned chance and kind.
+fn rate_target(plan: Option<(f32, Pick)>, goal: f32) -> String {
+    match plan {
+        Some((chance, Pick::Stretch | Pick::Easy)) => format!("{} expected", expected_text(chance)),
+        _ => format!("goal {:.0}%", goal * 100.0),
+    }
+}
+
+/// What the results need to say how a fixed-difficulty run went. `goal`, `rate` and
+/// `planned` are fractions (0.85); `evidence` is in target-equivalents.
+#[derive(Clone, Copy)]
+struct RunJudgment {
+    pick: Pick,
+    goal: f32,
+    rate: Option<f32>,
+    planned: Option<f32>,
+    evidence: f32,
+    held: bool,
+    breakthrough: bool,
+}
+
+/// The verdict line after a fixed run. A run at your level is judged against the goal
+/// (it can be at the goal rate and still not hold it, when it was too short to count).
+/// A stretch or easy run is judged against the chance it was planned at.
+fn run_verdict(j: RunJudgment) -> String {
+    let pct = j.goal * 100.0;
+    if j.breakthrough {
+        return format!("Breakthrough: you held {pct:.0}% faster than ever before");
+    }
+    let kind = match j.pick {
+        Pick::Stretch => "a stretch run",
+        Pick::Easy => "an easy run",
+        _ => {
+            return if j.held {
+                format!("You held the {pct:.0}% goal")
+            } else if j.rate.is_some_and(|r| r >= j.goal) {
+                format!("At the {pct:.0}% goal, but too few targets to count as held")
+            } else {
+                format!("Below the {pct:.0}% goal this time")
+            };
+        }
+    };
+    if j.pick == Pick::Stretch && j.held {
+        return format!("Above plan: you held the {pct:.0}% goal on a stretch run");
+    }
+    let (Some(rate), Some(planned)) = (j.rate, j.planned) else {
+        return "Too few targets to judge against the plan".into();
+    };
+    let expected = expected_text(planned);
+    match judge_against_plan(planned, rate, j.evidence) {
+        PlanVerdict::Below => format!("Below plan for {kind}: {expected} expected"),
+        PlanVerdict::AsPlanned => format!("As planned for {kind}: {expected} expected"),
+        PlanVerdict::Above => format!("Above plan for {kind}: {expected} expected"),
     }
 }
 
@@ -1199,7 +1263,15 @@ fn update_overlay(
                     calibration_close(a.break_days),
                 ),
                 Some(v) => {
-                    let verdict = run_verdict(a.goal, a.success_rate, a.fastest.is_some(), a.breakthrough);
+                    let verdict = run_verdict(RunJudgment {
+                        pick: a.pick,
+                        goal: a.goal,
+                        rate: a.success_rate,
+                        planned: a.planned_chance,
+                        evidence: a.evidence,
+                        held: a.fastest.is_some(),
+                        breakthrough: a.breakthrough,
+                    });
                     format!(
                         "{}: {}   {} {hit:.0}%\n{verdict}\nRating {} (was {}) | {best}",
                         a.pick.run_label(),
@@ -1312,14 +1384,99 @@ fn rate_word(knob: Knob, per_target: bool) -> &'static str {
 mod tests {
     use super::*;
 
+    fn judgment(pick: Pick, rate: Option<f32>, planned: f32) -> RunJudgment {
+        RunJudgment {
+            pick,
+            goal: 0.85,
+            rate,
+            planned: Some(planned),
+            evidence: 100.0,
+            held: false,
+            breakthrough: false,
+        }
+    }
+
     /// Bug: a run at 90% but too short to hold the goal said "Below the 85% goal".
     #[test]
     fn the_run_verdict_names_all_four_outcomes() {
-        assert_eq!(run_verdict(0.85, Some(0.95), true, true), "Breakthrough: you held 85% faster than ever before");
-        assert_eq!(run_verdict(0.85, Some(0.95), true, false), "You held the 85% goal");
-        assert_eq!(run_verdict(0.85, Some(0.9), false, false), "At the 85% goal, but too few targets to count as held");
-        assert_eq!(run_verdict(0.85, Some(0.7), false, false), "Below the 85% goal this time");
-        assert_eq!(run_verdict(0.85, None, false, false), "Below the 85% goal this time");
+        let near = |rate, held, breakthrough| RunJudgment { held, breakthrough, ..judgment(Pick::Near, rate, 0.85) };
+        assert_eq!(run_verdict(near(Some(0.95), true, true)), "Breakthrough: you held 85% faster than ever before");
+        assert_eq!(run_verdict(near(Some(0.95), true, false)), "You held the 85% goal");
+        assert_eq!(run_verdict(near(Some(0.9), false, false)), "At the 85% goal, but too few targets to count as held");
+        assert_eq!(run_verdict(near(Some(0.7), false, false)), "Below the 85% goal this time");
+        assert_eq!(run_verdict(near(None, false, false)), "Below the 85% goal this time");
+    }
+
+    /// Bug: a stretch run planned at 60% that came out at 58% read "Below the 85% goal
+    /// this time", as if it had failed.
+    #[test]
+    fn a_stretch_run_near_its_plan_is_not_called_below_the_goal() {
+        let verdict = run_verdict(judgment(Pick::Stretch, Some(0.58), 0.6));
+        assert_eq!(verdict, "As planned for a stretch run: about 6 in 10 expected");
+        assert!(!verdict.contains("Below the"));
+    }
+
+    #[test]
+    fn stretch_and_easy_runs_are_judged_against_their_plan() {
+        let v = |pick, rate, planned| run_verdict(judgment(pick, Some(rate), planned));
+        assert_eq!(v(Pick::Stretch, 0.6, 0.6), "As planned for a stretch run: about 6 in 10 expected");
+        assert_eq!(v(Pick::Stretch, 0.8, 0.6), "Above plan for a stretch run: about 6 in 10 expected");
+        assert_eq!(v(Pick::Stretch, 0.4, 0.6), "Below plan for a stretch run: about 6 in 10 expected");
+        assert_eq!(v(Pick::Easy, 0.95, 0.95), "As planned for an easy run: about 19 in 20 expected");
+        assert_eq!(v(Pick::Easy, 0.97, 0.93), "As planned for an easy run: about 19 in 20 expected");
+        assert_eq!(v(Pick::Easy, 0.8, 0.95), "Below plan for an easy run: about 19 in 20 expected");
+        assert_eq!(v(Pick::Easy, 1.0, 0.8), "Above plan for an easy run: about 8 in 10 expected");
+    }
+
+    #[test]
+    fn a_held_stretch_run_is_above_plan_and_a_breakthrough_still_leads() {
+        let held = RunJudgment { held: true, ..judgment(Pick::Stretch, Some(0.9), 0.6) };
+        assert_eq!(run_verdict(held), "Above plan: you held the 85% goal on a stretch run");
+        let broke = RunJudgment { breakthrough: true, ..held };
+        assert_eq!(run_verdict(broke), "Breakthrough: you held 85% faster than ever before");
+        let easy_broke = RunJudgment { pick: Pick::Easy, ..broke };
+        assert_eq!(run_verdict(easy_broke), "Breakthrough: you held 85% faster than ever before");
+    }
+
+    #[test]
+    fn a_stretch_run_with_no_rate_or_no_plan_says_so() {
+        let none = "Too few targets to judge against the plan";
+        assert_eq!(run_verdict(judgment(Pick::Stretch, None, 0.6)), none);
+        assert_eq!(run_verdict(RunJudgment { planned: None, ..judgment(Pick::Easy, Some(0.9), 0.95) }), none);
+    }
+
+    #[test]
+    fn a_short_stretch_run_gets_room_for_luck() {
+        let short = RunJudgment { evidence: 10.0, ..judgment(Pick::Stretch, Some(0.4), 0.6) };
+        assert_eq!(run_verdict(short), "As planned for a stretch run: about 6 in 10 expected");
+    }
+
+    #[test]
+    fn expected_text_rounds_to_tenths_or_twentieths() {
+        assert_eq!(expected_text(0.55), "about 6 in 10");
+        assert_eq!(expected_text(0.64), "about 6 in 10");
+        assert_eq!(expected_text(0.72), "about 7 in 10");
+        assert_eq!(expected_text(0.93), "about 19 in 20");
+        assert_eq!(expected_text(0.97), "about 19 in 20");
+        assert_eq!(expected_text(0.89), "about 9 in 10");
+        assert_eq!(expected_text(0.9), "about 18 in 20");
+    }
+
+    #[test]
+    fn the_hud_names_the_kind_of_run_and_what_to_expect() {
+        assert_eq!(run_intro(Pick::Stretch, "0.52 s", 0.6, 0.85), "Stretch run: 0.52 s\nAbout 6 in 10 expected");
+        assert_eq!(run_intro(Pick::Easy, "0.71 s", 0.95, 0.85), "Easy run: 0.71 s\nAbout 19 in 20 expected");
+        assert_eq!(run_intro(Pick::Near, "0.60 s", 0.85, 0.85), "At your level: 0.60 s\nGoal 85%");
+    }
+
+    /// The live rate on a stretch run sat beside "(goal 85%)", so a run going to plan
+    /// looked like one going badly. It sits beside the plan now.
+    #[test]
+    fn the_live_rate_is_shown_against_the_plan_on_stretch_and_easy_runs() {
+        assert_eq!(rate_target(Some((0.6, Pick::Stretch)), 0.85), "about 6 in 10 expected");
+        assert_eq!(rate_target(Some((0.95, Pick::Easy)), 0.85), "about 19 in 20 expected");
+        assert_eq!(rate_target(Some((0.85, Pick::Near)), 0.85), "goal 85%");
+        assert_eq!(rate_target(None, 0.85), "goal 85%", "a calibration run");
     }
 
     /// The calibration run after a break says why, in whole days.

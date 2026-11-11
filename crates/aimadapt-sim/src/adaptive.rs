@@ -314,6 +314,36 @@ impl Pick {
     }
 }
 
+/// How a run came out against the chance of success it was planned at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlanVerdict {
+    Below,
+    AsPlanned,
+    Above,
+}
+
+/// The gap from plan that luck alone explains in a run with this much evidence (in
+/// target-equivalents, as for `holds_goal`): 1.5 binomial standard deviations, never
+/// under five points. Zero evidence means anything goes.
+pub fn plan_tolerance(planned: f32, evidence: f32) -> f32 {
+    if evidence <= 0.0 {
+        return 1.0;
+    }
+    (1.5 * (planned * (1.0 - planned) / evidence).sqrt()).max(0.05)
+}
+
+/// Judges a run's success rate against the chance it was planned at.
+pub fn judge_against_plan(planned: f32, rate: f32, evidence: f32) -> PlanVerdict {
+    let gap = rate - planned;
+    if gap.abs() <= plan_tolerance(planned, evidence) + 1e-6 {
+        PlanVerdict::AsPlanned
+    } else if gap > 0.0 {
+        PlanVerdict::Above
+    } else {
+        PlanVerdict::Below
+    }
+}
+
 /// A rating carried between runs.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Prior {
@@ -612,6 +642,12 @@ impl Rating {
         self.outcomes.len()
     }
 
+    /// The outcomes so far in target-equivalents: 1 per clicking target, a tracking
+    /// segment counts more.
+    pub fn evidence(&self) -> f32 {
+        self.evidence
+    }
+
     /// The chance of success at a value, from the current estimate.
     pub fn chance_at(&self, value: f32) -> f32 {
         let e = self.estimate();
@@ -622,6 +658,37 @@ impl Rating {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plan_tolerance_has_a_five_point_floor_and_widens_for_short_runs() {
+        // Long run: luck alone explains under a point, so the floor applies.
+        assert_eq!(plan_tolerance(0.95, 200.0), 0.05);
+        // Short run: 1.5 * sqrt(0.6 * 0.4 / 10) is about 0.232.
+        assert!((plan_tolerance(0.6, 10.0) - 0.232).abs() < 0.001);
+        assert!(plan_tolerance(0.6, 10.0) > plan_tolerance(0.6, 40.0));
+        // No evidence: anything is as planned.
+        assert_eq!(plan_tolerance(0.6, 0.0), 1.0);
+    }
+
+    #[test]
+    fn a_run_is_judged_against_its_plan_with_room_for_luck() {
+        // Stretch (0.6) over 100 targets: tolerance 1.5 * sqrt(0.0024) = 0.0735.
+        assert_eq!(judge_against_plan(0.6, 0.6, 100.0), PlanVerdict::AsPlanned);
+        assert_eq!(judge_against_plan(0.6, 0.67, 100.0), PlanVerdict::AsPlanned);
+        assert_eq!(judge_against_plan(0.6, 0.54, 100.0), PlanVerdict::AsPlanned);
+        assert_eq!(judge_against_plan(0.6, 0.68, 100.0), PlanVerdict::Above);
+        assert_eq!(judge_against_plan(0.6, 0.52, 100.0), PlanVerdict::Below);
+        // Easy (0.95) over 200 targets: the five-point floor, so 90% is the edge.
+        assert_eq!(judge_against_plan(0.95, 0.90, 200.0), PlanVerdict::AsPlanned);
+        assert_eq!(judge_against_plan(0.95, 0.89, 200.0), PlanVerdict::Below);
+        assert_eq!(judge_against_plan(0.95, 1.0, 200.0), PlanVerdict::AsPlanned);
+        assert_eq!(judge_against_plan(0.7, 0.76, 200.0), PlanVerdict::Above);
+        // A short run: 3 of 10 against a plan of 0.6 is still as planned.
+        assert_eq!(judge_against_plan(0.6, 0.4, 10.0), PlanVerdict::AsPlanned);
+        assert_eq!(judge_against_plan(0.6, 0.3, 10.0), PlanVerdict::Below);
+        // No evidence.
+        assert_eq!(judge_against_plan(0.6, 0.0, 0.0), PlanVerdict::AsPlanned);
+    }
 
     /// Playtest: whole degrees per second were too coarse to see a change (a rating
     /// moving from 48.4 to 48.9 °/s showed as 48 → 49, or not at all).

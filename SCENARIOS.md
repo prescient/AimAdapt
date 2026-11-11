@@ -158,6 +158,8 @@ A stretch run never comes straight after another stretch run, or after a run mor
 
 **Planned order in a block.** When a workout or a program day plays a scenario two or more times in a row, the kind of each run is planned from the mix instead of drawn. The stretch and easy shares are rounded to the number of runs. The first run is at your level, stretch runs go in the middle with none side by side and none last, and easy runs close the block. Five Balanced runs go at your level, at your level, stretch, at your level, easy. A calibration run still comes first when one is due, and a planned stretch run becomes a run at your level after a run more than 10 points below the goal. A run on its own draws its kind as described above.
 
+**Judged against its plan.** Before a run the game names its kind with what to expect: "about 6 in 10" on a stretch run, "about 19 in 20" on an easy run, and the goal on a run at your level. Afterwards a stretch or easy run is called as planned, above plan or below plan. As planned means the success rate is within 1.5 binomial standard deviations of the planned chance for the run's length (a tracking segment counts as three targets), and never less than five points. Over 30 targets, a stretch run planned at 60% is as planned from 47% to 73%. A run at your level is judged against the goal. The verdict is wording only: the rating takes every run in the same way.
+
 | Field | Default | Meaning |
 |---|---|---|
 | `adaptive.goal` | `0.85` | Your rating is the value you succeed at this share of the time (0.6–0.95). |

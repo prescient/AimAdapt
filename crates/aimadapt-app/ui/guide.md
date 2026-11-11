@@ -75,12 +75,12 @@ The trainer is a separate game window. It opens over the app window: centered ac
 | F2 | Show or hide the FPS counter. |
 
 **On screen:**
-- **Top left:** "Calibration run" or "This run" with the run's difficulty, and your rating ("85%: 0.62 s"). A calibration run after a long break also says how many days it has been.
+- **Top left:** on a calibration run, "Calibration run" with your rating ("85%: 0.62 s"). On every other run there are two lines: the kind of run with its difficulty, then what to expect. A stretch run reads "Stretch run: 0.52 s" over "About 6 in 10 expected", an easy run "Easy run: 0.71 s" over "About 19 in 20 expected", and a run at your level "At your level: 0.60 s" over "Goal 85%". A calibration run after a long break also says how many days it has been.
 - **Top center:** the time left.
-- **Top right:** your success rate so far against the goal (named for what's counted: "Hit rate", "On target", "On pace" or "Finished in time"), kills and kills a minute. Kill-pace scenarios also show how long you have for the next kill.
+- **Top right:** your success rate so far (named for what's counted: "Hit rate", "On target", "On pace" or "Finished in time") beside what it is measured against. That is the goal, or on a stretch or easy run what the plan expects ("about 6 in 10 expected"). Under it are kills and kills a minute. Kill-pace scenarios also show how long you have for the next kill.
 - **Targets:** timed targets show a bar that empties as their time runs out, and change color by wave so newer ones stand out (three red, then three blue, then red again on Timed Grid). Switching targets show a health bar.
 
-**After a run** the results show your rating and its likely range, your success rate, accuracy, kills, timeouts and average time to kill. Once a scenario has a rating, a line also says whether you held the goal, and a run that reached it but was too short to count says so. A breakthrough gets a banner (see [Adaptive mode](#help/adaptive)).
+**After a run** the results show your rating and its likely range, your success rate, accuracy, kills, timeouts and average time to kill. Once a scenario has a rating, a line also says how the run went. A run at your level is judged against the 85% goal: you held it, you reached it in a run too short to count, or you came in below. A stretch or easy run is judged against its own plan: "As planned", "Above plan" or "Below plan", with what the plan expected. "As planned" allows for the luck of a run that length and never less than five points either way, so a short run has more room than a long one. A stretch run that holds 85% says so. The line only describes the run: every run counts toward your rating in the same way. A breakthrough gets a banner (see [Adaptive mode](#help/adaptive)).
 
 ## Adaptive mode {#adaptive}
 
@@ -103,7 +103,7 @@ Target speed is in degrees per second because that's how fast your hand has to t
 - **Tracking:** each 2-second segment is scored by the share of time your crosshair is on the target. On Stability Switch, Switch Track and their variants, only time while a target is damaged and not yet healed counts, so moving to the next target isn't held against you.
 - **Finished in time:** on Unbroken Strafes and Unbroken Float, each target needs a stretch of beam and heals fast when you slip off. Finishing it before it times out is a success, so only unbroken tracking counts.
 
-**Calibration run, then one difficulty per run.** Your first adaptive run on a scenario is a calibration run: it changes the difficulty as you play to find your level. Every run after that plays at one value for the whole run, shown when it starts ("This run: 0.62 s"), and your rating updates as you play. Each run is one of three kinds:
+**Calibration run, then one difficulty per run.** Your first adaptive run on a scenario is a calibration run: it changes the difficulty as you play to find your level. Every run after that plays at one value for the whole run, shown when it starts, and your rating updates as you play. Each run is one of three kinds:
 
 | Run | Chance of success | Balanced | Steady | Push |
 |---|---|---|---|---|
@@ -111,7 +111,7 @@ Target speed is in degrees per second because that's how fast your hand has to t
 | Stretch | 55–72% | 20% | 5% | 35% |
 | Easy | 93–97% | 15% | 10% | 15% |
 
-The mix (Steady, Balanced or Push) is a setting in your profile. A stretch run never follows another stretch run, or a run more than 10 points below the goal.
+The mix (Steady, Balanced or Push) is a setting in your profile. A stretch run never follows another stretch run, or a run more than 10 points below the goal. Before a run the trainer names its kind and what to expect, for example "Stretch run: 0.52 s" and "About 6 in 10 expected". Afterwards a stretch or easy run is judged against that plan, and a run at your level against the 85% goal (see [In the trainer](#help/trainer)).
 
 **Several runs in a row.** When a workout plays a scenario more than once in a row, the kind of each run follows a plan built from your mix instead of a random draw. The first run is at your level. Stretch runs sit in the middle, never last and never two in a row. Easy runs come at the end. Five runs on Balanced go: at your level, at your level, stretch, at your level, easy. The shares are rounded to the number of runs, so a short block has fewer kinds: on Balanced and Push a block needs three runs for a stretch run and four for an easy one, and on Steady it needs ten and five. A planned stretch run still becomes a run at your level if the run before it was more than 10 points below the goal. A run played on its own picks its kind at random from the mix.
 
@@ -326,6 +326,7 @@ Nothing is sent anywhere. Deleting one of your scenarios or workouts removes the
 ## What's new {#whats-new}
 
 **November 2026**
+- The trainer names each run's kind with what to expect ("Stretch run: 0.52 s", then "About 6 in 10 expected"), and the results judge a stretch or easy run against that plan: as planned, above plan or below plan. A stretch run that went as planned no longer reads as below the 85% goal, and during the run its success rate is shown beside the plan. Ratings and scoring are unchanged.
 - Runs of the same scenario in a workout now follow a plan from your mix instead of a random draw each time: the first at your level, stretch runs in the middle and easy runs last. A run played on its own still draws its kind at random.
 - The Help page has its filter at the top of the contents list, which now shows only the matching sections and marks the one you're in. The sidebar shows only icons when the window is 1180 pixels wide or less, so the lists on Scenarios keep all their columns down to a narrower window than before. In the scenario editor, sections that hold only default values start folded.
 - After a long break from a scenario (three days or more), its next run is a calibration run that starts from your old rating, and the trainer says how many days it has been. Your rating and best held carry over.

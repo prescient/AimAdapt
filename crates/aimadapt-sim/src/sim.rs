@@ -338,6 +338,9 @@ pub struct AdaptiveSummary {
     pub pick: Pick,
     /// The chance of success the run was planned at.
     pub planned_chance: Option<f32>,
+    /// The outcomes in target-equivalents (1 per clicking target, more per tracking
+    /// segment), the measure the goal and plan rules use.
+    pub evidence: f32,
     pub breakthrough: bool,
     /// Days since the last run, for a calibration run that follows a long break.
     pub break_days: Option<f32>,
@@ -604,7 +607,13 @@ impl Sim {
     /// Adaptive mode: the value this whole run plays at and what kind of run it is,
     /// or `None` for a calibration run (and standard runs).
     pub fn run_pick(&self) -> Option<(f32, Pick)> {
-        self.adaptive.as_ref().and_then(|a| a.run).map(|(v, _, p)| (v, p))
+        self.run_plan().map(|(v, _, p)| (v, p))
+    }
+
+    /// Adaptive mode: the value this whole run plays at, the chance of success it is
+    /// planned at and what kind of run it is, or `None` for a calibration run.
+    pub fn run_plan(&self) -> Option<(f32, f32, Pick)> {
+        self.adaptive.as_ref().and_then(|a| a.run)
     }
 
     pub fn phase(&self) -> Phase {

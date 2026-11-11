@@ -35,6 +35,7 @@ impl Sim {
                 run_value: a.run.map(|x| x.0),
                 pick: a.run.map_or(Pick::Calibrate, |x| x.2),
                 planned_chance: a.run.map(|x| x.1),
+                evidence: r.evidence(),
                 breakthrough: a.breakthrough,
                 break_days: a.break_days,
             }
