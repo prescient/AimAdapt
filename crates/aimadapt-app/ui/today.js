@@ -94,7 +94,7 @@ function favoritesCard() {
 function recentlyPlayed() {
   const recent = scenarioItems().filter((x) => x.last && !isHidden(x.key)).slice(0, 5);
   if (!recent.length) return "";
-  return `<section class="card"><div class="card-head"><h2>Recently played</h2><button type="button" class="link-btn" data-action="list-tab-open" data-tab="recent">All recent</button></div>
+  return `<section class="card"><div class="card-head"><h2>Recently played</h2><button type="button" class="link-btn" data-action="list-tab-open" data-tab="browse" data-played="yes">All recent</button></div>
     <div>${recent.map((x) => playRow(x, `${dayLabel(x.last)}, ${fmtTime(dt(x.last))}${x.kind === "kovaaks" ? " · KovaaK's" : ""}`)).join("")}</div>
   </section>`;
 }

@@ -1,9 +1,11 @@
 // Scenarios: everything you can play or have played (the trainer's scenarios, your
 // workouts and your KovaaK's scenarios).
 //
-// - #scenarios/<tab> is a list across the whole page, one tab each for Recent,
-//   Browse, Workouts and Yours (plus Hidden): a search, the tab's filters, and a
-//   table you can sort by any column, a hundred rows at a time. Program (the week's
+// - #scenarios/<tab> is a list across the whole page, one tab each for Browse and
+//   Workouts (plus Hidden): a search, the tab's filters, and a table you can sort by
+//   any column, a hundred rows at a time. Recent and Yours are Browse's Played and
+//   Yours filters now; their old addresses open Browse with the filter set (see
+//   OLD_TABS). Program (the week's
 //   plan, drawn by programTab in program.js) sits in the same row of tabs but is not
 //   a list: it has no search, filters or table.
 // - #scenarios/<key> is one item's own page: Play at the top, then key figures, the
@@ -14,7 +16,9 @@
 // (ui.trainer.data, ui.insights, ui.snap).
 
 // The row of tabs: the one list of what Scenarios has. Hidden is added when something is hidden.
-const SCENARIO_TABS = [["recent", "Recent"], ["browse", "Browse"], ["workouts", "Workouts"], ["program", "Program"], ["yours", "Yours"]];
+const SCENARIO_TABS = [["browse", "Browse"], ["workouts", "Workouts"], ["program", "Program"]];
+// Addresses from when Recent and Yours were tabs: each opens Browse with one filter set.
+const OLD_TABS = { recent: { played: "yes" }, yours: { owner: "mine" } };
 const TAB_LABELS = Object.fromEntries([...SCENARIO_TABS, ["hidden", "Hidden"]]);
 const isScenarioTab = (arg) => Object.hasOwn(TAB_LABELS, arg ?? "");
 // A tab that is a list (has TAB_SETUP, filters and a table): every tab but Program.
@@ -134,18 +138,15 @@ function dayLabel(last) {
   return fmtShort(d);
 }
 
-// The list Scenarios opens on: the last one you were on, else Recent once you've
-// played something, else Browse.
-const defaultTab = (all) => ui.list.tab ?? (all.some((x) => x.last && !isHidden(x.key)) ? "recent" : "browse");
+// The tab Scenarios opens on: the last one you were on, else Browse.
+const defaultTab = () => (isScenarioTab(ui.list.tab) ? ui.list.tab : "browse");
 
 // What a tab holds before its filters. Hidden items only show on Hidden.
 function tabItems(all, tab) {
   if (tab === "hidden") return all.filter((x) => isHidden(x.key));
   const shown = all.filter((x) => !isHidden(x.key));
-  if (tab === "recent") return shown.filter((x) => x.last);
   if (tab === "browse") return shown.filter((x) => x.kind !== "workout");
-  if (tab === "workouts") return shown.filter((x) => x.kind === "workout");
-  return shown.filter((x) => x.mine);
+  return shown.filter((x) => x.kind === "workout");
 }
 
 const skillOrder = (label) => {
@@ -164,6 +165,19 @@ function byRating(a, b, d) {
   if (a.knob !== b.knob) return a.knob < b.knob ? -1 : 1;
   const v = (x) => (higherIsHarder(x.knob) ? x.rating : -x.rating);
   return (v(a) - v(b)) * d;
+}
+
+// The "Rating or score" column: ratings first (by kind, then best first, as byRating),
+// then best scores, then rows with neither. The order of those three groups stays put
+// whichever way the column is sorted, so blanks are always last.
+const figureGroup = (x) => (!blank(x.rating) ? 0 : !blank(x.best) ? 1 : 2);
+function byFigure(a, b, d) {
+  const ga = figureGroup(a);
+  const gb = figureGroup(b);
+  if (ga !== gb) return ga - gb;
+  if (ga === 0) return byRating(a, b, d);
+  if (ga === 1) return (a.best - b.best) * d;
+  return 0;
 }
 
 // What a table row's last-played cell says: the day, with the time today and
@@ -193,9 +207,9 @@ function starButton(x) {
   return `<button type="button" class="star-btn ${on ? "on" : ""}" data-action="favorite" data-key="${esc(x.key)}" aria-pressed="${on}" aria-label="Favorite ${esc(x.name)}" title="${on ? "Remove from favorites" : "Add to favorites"}">${starIcon(on)}</button>`;
 }
 
-function nameCell(x, tab) {
+function nameCell(x) {
   const sub = x.kind === "workout" ? x.description : x.tags.join(" · ");
-  return `<a class="row-name" href="${scenarioHref(x.key)}">${esc(x.name)}</a>${x.mine && tab !== "yours" && x.kind === "trainer" ? ' <span class="tag gold">Yours</span>' : ""}
+  return `<a class="row-name" href="${scenarioHref(x.key)}">${esc(x.name)}</a>${x.mine && x.kind === "trainer" ? ' <span class="tag gold">Yours</span>' : ""}
     ${sub ? `<div class="row-sub" title="${esc(sub)}">${esc(sub)}</div>` : ""}`;
 }
 
@@ -210,13 +224,12 @@ const COLUMNS = {
     cell: (x) => `<span class="tag ${x.kind === "kovaaks" ? "blue" : x.kind === "workout" ? "grey" : ""}">${kindLabel(x)}</span>${x.sce?.playable ? ' <span class="small muted" title="Its file plays in AimAdapt\'s trainer">plays here</span>' : ""}`,
   },
   skill: { label: "Skill", dir: 1, key: (x) => (x.skill ? `${String(skillOrder(x.skill)).padStart(2, "0")} ${x.skill}` : null), group: (x) => x.skill || "No skill", cell: (x) => esc(x.skill) },
-  rating: {
-    label: "Rating", cls: "r", dir: -1, cmp: byRating,
-    group: (x) => (blank(x.rating) ? "No rating yet" : `Rated on ${knobWord(x.knob)}`),
-    title: "Your 85% rating from adaptive runs. Sorts by kind of rating, then best first.",
-    cell: (x) => (blank(x.rating) ? dash : `<span class="num" title="85% ${esc(knobWord(x.knob))}">${esc(fmtKnob(x.knob, x.rating))}</span>`),
+  figure: {
+    label: "Rating or score", cls: "r", dir: -1, cmp: byFigure,
+    group: (x) => (figureGroup(x) === 0 ? `Rated on ${knobWord(x.knob)}` : figureGroup(x) === 1 ? "Best score" : "No rating or score yet"),
+    title: "Your 85% rating on AimAdapt scenarios, or your best score where there is no rating. Sorts by kind, then best first.",
+    cell: (x) => (figureGroup(x) === 0 ? `<span class="num" title="85% ${esc(knobWord(x.knob))}">${esc(fmtKnob(x.knob, x.rating))}</span>` : figureGroup(x) === 1 ? `<span class="mono" title="Best score">${num(x.best)}</span>` : dash),
   },
-  best: { label: "Best score", cls: "r", dir: -1, key: (x) => x.best, cell: (x) => (blank(x.best) ? dash : `<span class="mono">${num(x.best)}</span>`) },
   plays: { label: "Runs", cls: "r", dir: -1, key: (x) => x.plays, cell: (x) => (x.plays ? `<span class="mono">${x.plays}</span>` : dash) },
   last: { label: "Last played", dir: -1, key: (x) => x.last, group: (x) => (x.last ? dayLabel(x.last) : "Never played"), cell: (x) => (x.last ? `<span title="${esc(`${fmtShort(dt(x.last))}, ${fmtTime(dt(x.last))}`)}">${esc(lastText(x))}</span>` : `<span class="dim">Never</span>`) },
   owner: { label: "Made by", dir: 1, key: (x) => (x.mine ? 0 : 1), group: (x) => (x.mine ? "Yours" : "Built-in"), cell: (x) => (x.mine ? '<span class="tag gold">Yours</span>' : '<span class="muted">Built-in</span>') },
@@ -227,16 +240,25 @@ const COLUMNS = {
 };
 
 // What each tab shows: its columns, its first sort and its filters. The search is
-// on every tab, and Favorites on every tab but Hidden.
+// on every tab, and Favorites on every tab but Hidden. "mine" is the Yours chip (it
+// sets the owner filter); "owner" is the Made by select.
 const TAB_SETUP = {
-  recent: { cols: ["fav", "name", "kind", "skill", "rating", "best", "plays", "last", "play"], sort: ["last", -1], filters: ["kind", "skill"], note: "Everything you've played, here or in KovaaK's" },
-  browse: { cols: ["fav", "name", "kind", "skill", "rating", "best", "plays", "last", "play"], sort: ["skill", 1], filters: ["kind", "skill", "played", "tags"], note: "The trainer's scenarios and your KovaaK's scenarios" },
+  browse: { cols: ["fav", "name", "kind", "skill", "figure", "plays", "last", "play"], sort: ["skill", 1], filters: ["kind", "skill", "played", "tags", "mine"], note: "The trainer's scenarios and your KovaaK's scenarios" },
   workouts: { cols: ["fav", "name", "owner", "steps", "length", "last", "play"], sort: ["name", 1], filters: ["owner"], note: "Built-in workouts and yours" },
-  yours: { cols: ["fav", "name", "kind", "skill", "rating", "best", "plays", "last", "play"], sort: ["last", -1], filters: ["kind", "skill"], note: "Scenarios and workouts you made or copied" },
   hidden: { cols: ["name", "kind", "skill", "plays", "last", "unhide"], sort: ["name", 1], filters: ["kind"], note: "Kept off the other tabs. Their runs stay." },
 };
 
-const sortOf = (tab) => ui.list.sort[tab] ?? TAB_SETUP[tab].sort;
+// What a tab is sorted by, as [column, direction]: the sort you picked, else its first
+// sort. Browse opens by Last played (newest first, so rows group by day with the never
+// played ones last) once anything in it has been played, and by skill before that.
+// base is the tab's rows before filters. Everything that draws or acts on the sort
+// asks here.
+function sortOf(tab, base) {
+  const picked = ui.list.sort[tab];
+  if (picked) return picked;
+  if (tab === "browse" && base.some((x) => x.last)) return ["last", -1];
+  return TAB_SETUP[tab].sort;
+}
 
 // Every word of the search has to be in the name, skill, tags or description.
 function matches(x, words) {
@@ -254,7 +276,7 @@ function filterRows(items, tab) {
     (!on.has("skill") || !f.skill || x.skill === f.skill) &&
     (!on.has("kind") || !f.kind || (f.kind === "kovaaks-play" ? Boolean(x.sce?.playable) : x.kind === f.kind)) &&
     (!on.has("played") || !f.played || (f.played === "yes" ? Boolean(x.last) : !x.last)) &&
-    (!on.has("owner") || !f.owner || (f.owner === "mine") === x.mine) &&
+    (!(on.has("owner") || on.has("mine")) || !f.owner || (f.owner === "mine") === x.mine) &&
     (!on.has("tags") || f.tags.every((t) => x.tags.includes(t))) &&
     (tab === "hidden" || !f.favorites || isFavorite(x.key)));
 }
@@ -262,11 +284,11 @@ function filterRows(items, tab) {
 function isFiltering(tab) {
   const f = listFilters(tab);
   const on = new Set(TAB_SETUP[tab].filters);
-  return Boolean(f.query.trim() || f.favorites || [...on].some((k) => (k === "tags" ? f.tags.length : f[k])));
+  return Boolean(f.query.trim() || f.favorites || [...on].some((k) => (k === "tags" ? f.tags.length : f[k === "mine" ? "owner" : k])));
 }
 
-function sortRows(rows, tab) {
-  const [id, dir] = sortOf(tab);
+function sortRows(rows, sort) {
+  const [id, dir] = sort;
   const c = COLUMNS[id];
   const cmp = c.cmp ?? ((a, b, d) => byKey(c.key(a), c.key(b), d));
   return [...rows].sort((a, b) => cmp(a, b, dir) || byName(a, b));
@@ -276,12 +298,17 @@ function sortRows(rows, tab) {
 const scenarioHref = (key, tab = "overview") => `#scenarios/${encodeURIComponent(key)}${tab && tab !== "overview" ? `/${tab}` : ""}`;
 const scenarioHrefByName = (name) => scenarioHref(`name:${name}`);
 
-// Opens a Scenarios tab with its filters cleared, optionally to one skill (Today's
-// links).
-function openScenariosTab(tab, skill = "") {
-  ui.list.filters[tab] = { ...structuredClone(NO_FILTERS), skill };
+// A tab's filters cleared except the ones in set, from the first rows and the top.
+function resetTab(tab, set = {}) {
+  ui.list.filters[tab] = { ...structuredClone(NO_FILTERS), ...set };
   delete ui.list.limit[tab];
   ui.list.scroll[tab] = 0;
+}
+
+// Opens a Scenarios tab with its filters cleared except those in set, for example
+// { skill } or { played: "yes" } (Today's links).
+function openScenariosTab(tab, set = {}) {
+  resetTab(tab, set);
   const hash = `#scenarios/${tab}`;
   if (location.hash === hash) render();
   else location.hash = hash;
@@ -317,7 +344,14 @@ function scenariosPage(arg, tab) {
     return "";
   }
   if (!arg) {
-    location.replace(`#scenarios/${defaultTab(all)}`);
+    location.replace(`#scenarios/${defaultTab()}`);
+    return "";
+  }
+  if (Object.hasOwn(OLD_TABS, arg)) {
+    // The old Recent and Yours addresses: Browse with that filter. Swap the address,
+    // so Back doesn't land on it again.
+    resetTab("browse", OLD_TABS[arg]);
+    location.replace("#scenarios/browse");
     return "";
   }
   if (arg === "program") {
@@ -332,10 +366,16 @@ function scenariosPage(arg, tab) {
 }
 
 function emptyTab(tab) {
-  if (tab === "recent") return `Nothing played yet. <a href="#scenarios/browse">Browse</a> has every scenario you can play.`;
-  if (tab === "yours") return "Nothing of yours yet. Use Copy &amp; edit on any scenario or workout, or New scenario above.";
   if (tab === "hidden") return `Nothing hidden. Hide something from its page to keep it off the lists.`;
   return "Nothing here yet.";
+}
+
+// What a list says when its filters leave nothing. The Clear filters button is above it.
+function noMatches(tab, base) {
+  const f = listFilters(tab);
+  if (f.owner === "mine" && !base.some((x) => x.mine)) return "Nothing of yours yet. Use Copy &amp; edit on any scenario, or New scenario above. Clear the filters above to see everything.";
+  if (f.played === "yes" && !base.some((x) => x.last)) return "Nothing played yet. Clear the filters above to see every scenario you can play.";
+  return "Nothing matches these filters.";
 }
 
 const option = (v, label, sel) => `<option value="${esc(v)}" ${sel ? "selected" : ""}>${esc(label)}</option>`;
@@ -363,6 +403,11 @@ function listTools(tab, base) {
   if (favCount || f.favorites) {
     parts.push(`<button type="button" class="chip fav-chip ${f.favorites ? "on" : ""}" data-action="fav-only" aria-pressed="${f.favorites}">${starIcon(f.favorites)}Favorites <span class="dim">${favCount}</span></button>`);
   }
+  const mineOn = f.owner === "mine";
+  const mineCount = base.filter((x) => x.mine).length;
+  if (on.includes("mine") && (mineCount || mineOn)) {
+    parts.push(`<button type="button" class="chip fav-chip ${mineOn ? "on" : ""}" data-action="yours-only" aria-pressed="${mineOn}">Yours <span class="dim">${mineCount}</span></button>`);
+  }
   return `<div class="lib-tools">
     <label for="list-q" class="sr-only">Search</label>
     <div class="field lib-search"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9aa1ac" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg>
@@ -384,8 +429,8 @@ function tagChips(tab, base) {
     ${tags.length > TAGS_SHOWN ? `<button type="button" class="link-btn" data-action="more-tags">${ui.list.moreTags ? "Fewer tags" : `${tags.length - visible.length} more`}</button>` : ""}</div>`;
 }
 
-function listTable(tab, rows) {
-  const [sortCol, sortDir] = sortOf(tab);
+function listTable(tab, rows, sort) {
+  const [sortCol, sortDir] = sort;
   const cols = TAB_SETUP[tab].cols.map((id) => [id, COLUMNS[id]]);
   const limit = ui.list.limit[tab] ?? PAGE_ROWS;
   const th = ([id, c]) => {
@@ -443,10 +488,11 @@ function programPage(all) {
 
 function listPage(all, tab) {
   const base = tabItems(all, tab);
-  const rows = sortRows(filterRows(base, tab), tab);
+  const sort = sortOf(tab, base);
+  const rows = sortRows(filterRows(base, tab), sort);
   const filtering = isFiltering(tab);
   const noun = tab === "workouts" ? "workout" : tab === "browse" ? "scenario" : "item";
-  const reading = ui.sceLibrary === "loading" && ["browse", "recent"].includes(tab) ? " · Reading your KovaaK's scenarios…" : "";
+  const reading = ui.sceLibrary === "loading" && tab === "browse" ? " · Reading your KovaaK's scenarios…" : "";
   const count = (filtering ? `${rows.length} of ${base.length} match` : `${base.length} ${noun}${base.length === 1 ? "" : "s"} · ${TAB_SETUP[tab].note}`) + reading;
   return `<div class="page">
     ${scenariosHead()}
@@ -456,7 +502,7 @@ function listPage(all, tab) {
       ${tab === "workouts" ? `<div class="small muted">The Core Week's daily sessions are on the <a href="#scenarios/program">Program</a> tab.</div>` : ""}
       ${base.length ? `${listTools(tab, base)}${tagChips(tab, base)}
         <div class="lib-count small muted"><span>${esc(count)}</span>${filtering ? `<button type="button" class="link-btn" data-action="clear-list">Clear filters</button>` : ""}</div>
-        ${rows.length ? listTable(tab, rows) : `<div class="note-body">Nothing matches these filters.</div>`}`
+        ${rows.length ? listTable(tab, rows, sort) : `<div class="note-body">${noMatches(tab, base)}</div>`}`
         : `<div class="note-body">${emptyTab(tab)}</div>`}
     </section>
   </div>`;
@@ -464,7 +510,7 @@ function listPage(all, tab) {
 
 // One scenario's or workout's own page, with a link back to the list you came from.
 function itemPage(item, all, tab) {
-  const listTab = defaultTab(all);
+  const listTab = defaultTab();
   const link = typeof helpLink === "function" ? helpLink() : "";
   return `<div class="page">
     <div class="back-row"><a class="back-link" href="#scenarios/${listTab}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg>Scenarios · ${esc(TAB_LABELS[listTab])}</a>
@@ -682,8 +728,8 @@ document.addEventListener("click", (e) => {
   const tab = shownTab();
   if (a === "favorite") toggleMark("favorites", btn.dataset.key);
   else if (a === "hide") toggleMark("hidden", btn.dataset.key);
-  else if (a === "browse-skill") openScenariosTab("browse", btn.dataset.skill ?? "");
-  else if (a === "list-tab-open") openScenariosTab(btn.dataset.tab);
+  else if (a === "browse-skill") openScenariosTab("browse", { skill: btn.dataset.skill ?? "" });
+  else if (a === "list-tab-open") openScenariosTab(btn.dataset.tab, btn.dataset.played ? { played: btn.dataset.played } : {});
   else if (a === "play-sce") startSce(btn.dataset.path);
   else if (!tab) return;
   else if (a === "clear-list") {
@@ -691,7 +737,7 @@ document.addEventListener("click", (e) => {
     refilter(tab);
   } else if (a === "sort") {
     const col = btn.dataset.col;
-    const [now, dir] = sortOf(tab);
+    const [now, dir] = sortOf(tab, tabItems(scenarioItems(), tab));
     ui.list.sort[tab] = now === col ? [col, -dir] : [col, COLUMNS[col].dir ?? 1];
     render();
   } else if (a === "list-tag") {
@@ -705,6 +751,10 @@ document.addEventListener("click", (e) => {
   } else if (a === "fav-only") {
     const f = listFilters(tab);
     f.favorites = !f.favorites;
+    refilter(tab);
+  } else if (a === "yours-only") {
+    const f = listFilters(tab);
+    f.owner = f.owner === "mine" ? "" : "mine";
     refilter(tab);
   } else if (a === "more-rows") {
     ui.list.limit[tab] = (ui.list.limit[tab] ?? PAGE_ROWS) + PAGE_ROWS;

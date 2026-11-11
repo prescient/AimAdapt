@@ -55,6 +55,7 @@ Last reviewed: Nov 10, 2026 (after the layout review and the adaptive review; th
 
 ### To do
 - [x] Scenarios page tabs: Recent, Browse (every playable scenario by skill, tag chips you can combine, sort by skill, name, most played or longest since played), Workouts and Yours. Favorites (starred, first on the lists and on Today) and Hidden, saved in `list.json` in the data folder. Today's favorites and recently played have Play.
+- [x] Scenarios tabs are Browse, Workouts and Program: Recent and Yours became Browse's Played filter and a Yours chip (the old addresses open Browse with the filter set), Browse opens by last played once anything is played, and one Rating or score column replaces Rating and Best score. Narrow windows drop Runs, Type and Skill so Play stays in view and the page doesn't scroll sideways (plan L6a).
 - [x] Scenarios lists across the whole page, one tab each, with each scenario and workout on its own page: a table sortable by every column (headings over each skill, type, kind of rating or day), a search over names, skills, tags and descriptions, Type (including KovaaK's that play here), Played, Made by and Favorites filters, 100 rows at a time, and each tab remembering its filters, sort and scroll.
 - [ ] `todo` P2 Scenario and workout manager: one place to rename, edit, copy, delete (one or many) and archive your scenarios and workouts, imported KovaaK's scenarios included. Create, edit and delete already work one at a time in the editor, and hiding works from each item's page. Renaming needs care: history is stored by name, so a rename must carry the runs over (or scenarios get a stable id).
 - [ ] `todo` P3 Noise-based drift for control tracking (curve movement and acceleration already make smooth paths).
@@ -167,7 +168,6 @@ Last reviewed: Nov 10, 2026 (after the layout review and the adaptive review; th
 ### To do (second step of the simpler layout)
 - [ ] `todo` P1 Today: "Since your last session" (rating changes and breakthroughs since the session before) and each drill's change against the same day last week, with a session summary when the trainer closes (plan L3b).
 - [x] Progress trimmed: Skills leads with the profile and carry-over and has no start buttons, Benchmarks says it comes from KovaaK's, Time folds its extra cards, and notes are ranked once, with Today showing the top one (plan L4).
-- [ ] `todo` P3 Scenarios tabs become Browse, Workouts and Program, with Recent and Yours as Browse filters, and the rating in the Best score column (plan L6a).
 - [ ] `todo` P3 Help contents rail with a filter, icon-only sidebar on narrow windows, and editor sections that hold defaults start folded (plan L6b).
 - [ ] `todo` P2 One streak: the program streak and the all-runs streak still differ (Today shows the all-runs one).
 - [ ] `todo` P2 Settings save as you change them, instead of Save and Undo.

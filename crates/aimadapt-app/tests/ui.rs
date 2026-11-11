@@ -246,7 +246,7 @@ fn favorite_and_hide_act_on_the_item_they_name() {
     let page = decl(&scenarios, "scenariosPage");
     assert!(page.contains("itemPage(all.find((x) => x.key === arg)"), "{page}");
     // With no address, Scenarios goes to a list, never to an item.
-    assert!(page.contains("location.replace(`#scenarios/${defaultTab(all)}`)"), "{page}");
+    assert!(page.contains("location.replace(`#scenarios/${defaultTab()}`)"), "{page}");
     // Item keys have a colon (builtin:, user:, workout:, kovaaks:); list names don't.
     let tabs =
         scenarios.split("const SCENARIO_TABS = [").nth(1).and_then(|s| s.split(';').next()).expect("SCENARIO_TABS");
@@ -621,7 +621,7 @@ fn css_rule(css: &str, selector: &str) -> String {
     rest[..rest.find('}').unwrap()].to_string()
 }
 
-/// Rule (plan L4): Scenarios has a Program tab between Workouts and Yours. It sits in
+/// Rule (plan L4): Scenarios has a Program tab after Workouts. It sits in
 /// the same row of tabs as the lists but isn't a list: it has no TAB_SETUP, search or
 /// table, `scenariosPage` sends it to its own page, and that page has the lists' head
 /// and banners. The back link from a drill opened there returns to it.
@@ -631,7 +631,6 @@ fn scenarios_has_a_program_tab_that_is_not_a_list() {
     let tabs =
         scenarios.split("const SCENARIO_TABS = [").nth(1).and_then(|s| s.split(';').next()).expect("SCENARIO_TABS");
     assert!(at(tabs, "[\"workouts\"") < at(tabs, "[\"program\", \"Program\"]"), "{tabs}");
-    assert!(at(tabs, "[\"program\"") < at(tabs, "[\"yours\""), "{tabs}");
 
     assert!(decl(&scenarios, "isListTab").contains("isScenarioTab(arg)"));
     assert!(decl(&scenarios, "scenarioTabList").contains("SCENARIO_TABS"));
@@ -879,4 +878,230 @@ fn notes_are_ranked_once_and_both_pages_draw_from_the_list() {
     let view = decl(&program, "noteView");
     assert!(view.contains("esc(n.title)") && view.contains("esc(n.body)"), "{view}");
     assert!(view.contains("data-action=\"browse-skill\"") && view.contains("esc(n.skill)"), "{view}");
+}
+
+// ---------- plan L6a: Browse takes in Recent and Yours ----------
+
+/// The tab ids and labels in SCENARIO_TABS, in order.
+fn scenario_tabs(scenarios: &str) -> Vec<String> {
+    let tabs =
+        scenarios.split("const SCENARIO_TABS = [").nth(1).and_then(|s| s.split("];").next()).expect("SCENARIO_TABS");
+    tabs.split('[').skip(1).map(|t| t.split(']').next().unwrap().replace(['"', ' '], "")).collect()
+}
+
+/// The body of TAB_SETUP.
+fn tab_setup(scenarios: &str) -> &str {
+    scenarios.split("const TAB_SETUP = {").nth(1).and_then(|s| s.split("\n};").next()).expect("TAB_SETUP")
+}
+
+/// The click handler's text, from its listener to the end of the file's handlers.
+fn click_handler(scenarios: &str) -> &str {
+    scenarios.split("document.addEventListener(\"click\"").nth(1).expect("click handler")
+}
+
+/// Rule (plan L6a): Scenarios has three tabs, Browse, Workouts and Program, in that
+/// order. Recent and Yours are not tabs, so nothing else treats them as one.
+#[test]
+fn scenarios_has_three_tabs_browse_workouts_program() {
+    let scenarios = ui("scenarios.js");
+    assert_eq!(scenario_tabs(&scenarios), ["browse,Browse", "workouts,Workouts", "program,Program"]);
+    let setup = tab_setup(&scenarios);
+    assert!(!setup.contains("recent:") && !setup.contains("yours:"), "no list setup for the old tabs: {setup}");
+    let items = decl(&scenarios, "tabItems");
+    assert!(!items.contains("\"recent\"") && !items.contains("\"yours\""), "{items}");
+    let empty = decl(&scenarios, "emptyTab");
+    assert!(!empty.contains("recent") && !empty.contains("yours"), "{empty}");
+    // Nothing links to a tab that's gone.
+    for (file, src) in scripts() {
+        assert!(
+            !src.contains("data-tab=\"recent\"") && !src.contains("data-tab=\"yours\""),
+            "{file} links to a tab that's gone"
+        );
+    }
+    // Where the last tab is remembered, a value from the old tabs falls back to Browse.
+    let default = decl(&scenarios, "defaultTab");
+    assert!(default.contains("isScenarioTab(ui.list.tab)") && default.contains("\"browse\""), "{default}");
+}
+
+/// Rule (plan L6a): #scenarios/recent opens Browse with Played set to Played and
+/// #scenarios/yours opens Browse with only your own scenarios. The route function
+/// sets the filter, swaps the address (so Back skips it) and draws nothing; the two
+/// words never reach the item page.
+#[test]
+fn old_recent_and_yours_addresses_open_browse_with_a_filter() {
+    let scenarios = ui("scenarios.js");
+    let old = decl(&scenarios, "OLD_TABS");
+    assert!(old.contains("recent: { played: \"yes\" }") && old.contains("yours: { owner: \"mine\" }"), "{old}");
+    let page = decl(&scenarios, "scenariosPage");
+    let branch = at(page, "Object.hasOwn(OLD_TABS, arg)");
+    let item = at(page, "itemPage(");
+    assert!(branch < item, "the old words must be caught before the item page: {page}");
+    let body = &page[branch..item];
+    assert!(body.contains("resetTab(\"browse\", OLD_TABS[arg])"), "{body}");
+    assert!(body.contains("location.replace(\"#scenarios/browse\")") && body.contains("return \"\""), "{body}");
+    // They aren't tabs anywhere else: the address check and the tab row don't know them.
+    assert!(!decl(&scenarios, "isScenarioTab").contains("OLD_TABS"));
+    assert!(!decl(&scenarios, "TAB_LABELS").contains("OLD_TABS"));
+    // resetTab clears the other filters, the row limit and the scroll.
+    let reset = decl(&scenarios, "resetTab");
+    assert!(
+        reset.contains("NO_FILTERS") && reset.contains("ui.list.limit") && reset.contains("ui.list.scroll"),
+        "{reset}"
+    );
+}
+
+/// Rule (plan L6a): Browse opens sorted by Last played, newest first, once anything in
+/// it has been played, and by skill before that. One function (sortOf) answers for the
+/// header arrow, the group headings, the row order and the sort click; a sort you pick
+/// wins.
+#[test]
+fn browse_opens_by_last_played_once_something_is_played() {
+    let scenarios = ui("scenarios.js");
+    let sort = decl(&scenarios, "sortOf");
+    assert!(sort.contains("ui.list.sort[tab]"), "{sort}");
+    assert!(at(sort, "ui.list.sort[tab]") < at(sort, "\"last\", -1"), "a picked sort comes first: {sort}");
+    assert!(
+        sort.contains("tab === \"browse\"") && sort.contains("x.last") && sort.contains("TAB_SETUP[tab].sort"),
+        "{sort}"
+    );
+    assert!(tab_setup(&scenarios).contains("sort: [\"skill\", 1]"), "with nothing played Browse sorts by skill");
+    // The page works the sort out once and gives it to the table and the row sort;
+    // the click handler asks the same function.
+    let page = decl(&scenarios, "listPage");
+    assert!(page.contains("sortOf(tab, base)") && page.contains("sortRows(filterRows(base, tab), sort)"), "{page}");
+    assert!(page.contains("listTable(tab, rows, sort)"), "{page}");
+    assert!(!decl(&scenarios, "listTable").contains("sortOf("), "the table is handed the sort");
+    assert!(!decl(&scenarios, "sortRows").contains("sortOf("));
+    assert_eq!(scenarios.matches("sortOf(").count(), 3, "sortOf's definition and its two callers");
+    assert!(
+        click_handler(&scenarios).contains("sortOf(tab, tabItems(scenarioItems(), tab))"),
+        "the sort click must use the same sort"
+    );
+}
+
+/// Rule (plan L6a): Browse's Yours filter is a chip beside Favorites (aria-pressed,
+/// with a count, shown when you have any or it is on) that sets the owner filter.
+/// Browse has no Made by select, whose Built-in choice would take in KovaaK's
+/// scenarios; Workouts keeps it.
+#[test]
+fn browse_has_a_yours_chip_and_no_made_by_select() {
+    let scenarios = ui("scenarios.js");
+    let setup = tab_setup(&scenarios);
+    let line = |tab: &str| {
+        setup
+            .lines()
+            .find(|l| l.trim_start().starts_with(&format!("{tab}:")))
+            .unwrap_or_else(|| panic!("{tab} in {setup}"))
+    };
+    assert!(line("browse").contains("\"mine\"") && !line("browse").contains("\"owner\""), "{}", line("browse"));
+    assert!(line("workouts").contains("filters: [\"owner\"]"), "{}", line("workouts"));
+    let tools = decl(&scenarios, "listTools");
+    let chip = &tools[at(tools, "data-action=\"yours-only\"") - 120..];
+    assert!(chip.contains("class=\"chip fav-chip") && chip.contains("aria-pressed=\"${mineOn}\""), "{chip}");
+    assert!(tools.contains("on.includes(\"mine\") && (mineCount || mineOn)"), "{tools}");
+    assert!(
+        at(tools, "data-action=\"fav-only\"") < at(tools, "data-action=\"yours-only\""),
+        "Yours sits after Favorites"
+    );
+    assert!(tools.contains("filterSelect(\"owner\", \"Made by\"") && tools.contains("on.includes(\"owner\")"));
+    // The chip toggles the same value the select uses, and counts as filtering.
+    let clicks = click_handler(&scenarios);
+    let on = &clicks[at(clicks, "a === \"yours-only\"")..];
+    assert!(on.contains("f.owner = f.owner === \"mine\" ? \"\" : \"mine\"") && on.contains("refilter(tab)"), "{on}");
+    assert!(decl(&scenarios, "isFiltering").contains("\"mine\" ? \"owner\""));
+    assert!(decl(&scenarios, "filterRows").contains("on.has(\"mine\")"));
+}
+
+/// Rule (plan L6a): one "Rating or score" column replaces Rating and Best score:
+/// ratings first (by kind), then best scores, then blanks, whichever way it sorts.
+/// The "Yours" tag shows on every list. A list whose Played or Yours filter leaves
+/// nothing says why, and Clear filters is on the line above it.
+#[test]
+fn one_rating_or_score_column_replaces_rating_and_best_score() {
+    let scenarios = ui("scenarios.js");
+    let columns = decl(&scenarios, "COLUMNS");
+    assert!(columns.contains("label: \"Rating or score\""), "{columns}");
+    assert!(!columns.contains("label: \"Rating\"") && !columns.contains("label: \"Best score\""), "{columns}");
+    assert!(columns.contains("title: \"Your 85% rating on AimAdapt scenarios, or your best score where there is no rating. Sorts by kind, then best first.\""));
+    assert!(columns.contains("title=\"Best score\"") && columns.contains("\"No rating or score yet\""));
+    assert!(columns.contains("`Rated on ${knobWord(x.knob)}`"));
+    let setup = tab_setup(&scenarios);
+    assert!(setup.contains("\"figure\"") && !setup.contains("\"rating\"") && !setup.contains("\"best\""), "{setup}");
+    assert!(!columns.contains("\n  best:") && !columns.contains("\n  rating:"), "no separate rating or best column");
+    // Ratings, then scores, then blanks; only the first two flip with the direction.
+    let by = decl(&scenarios, "byFigure");
+    assert!(by.contains("ga - gb"), "the groups keep their order: {by}");
+    assert!(at(by, "byRating(a, b, d)") < at(by, "(a.best - b.best) * d"), "{by}");
+    let group = decl(&scenarios, "figureGroup");
+    assert!(at(group, "x.rating") < at(group, "x.best"), "{group}");
+    assert!(!ui("styles.css").contains(".c-best"), "the Best score column is gone");
+    // The Yours tag, on every list.
+    let name = decl(&scenarios, "nameCell");
+    assert!(!name.contains("\"yours\"") && name.contains("x.mine && x.kind === \"trainer\""), "{name}");
+    // Empty states for the filters that replaced the tabs.
+    let none = decl(&scenarios, "noMatches");
+    assert!(
+        none.contains("f.played === \"yes\"")
+            && none.contains("f.owner === \"mine\"")
+            && none.contains("Clear the filters"),
+        "{none}"
+    );
+    assert!(decl(&scenarios, "listPage").contains("noMatches(tab, base)"));
+}
+
+/// Rule (plan L6a): Today's "All recent" opens Browse with Played set to Played and the
+/// other filters cleared, through the same helper as every other link into a tab.
+#[test]
+fn todays_all_recent_opens_browse_filtered_to_played() {
+    let today = ui("today.js");
+    let recent = decl(&today, "recentlyPlayed");
+    assert!(
+        recent.contains("data-action=\"list-tab-open\" data-tab=\"browse\" data-played=\"yes\">All recent"),
+        "{recent}"
+    );
+    let scenarios = ui("scenarios.js");
+    assert!(
+        click_handler(&scenarios)
+            .contains("openScenariosTab(btn.dataset.tab, btn.dataset.played ? { played: btn.dataset.played } : {})")
+    );
+    assert!(decl(&scenarios, "openScenariosTab").contains("resetTab(tab, set)"));
+    assert!(decl(&scenarios, "resetTab").contains("...set"));
+    // Nothing else in the UI names the old tabs as a place to go.
+    for (file, src) in scripts() {
+        assert!(!src.contains("#scenarios/recent") && !src.contains("#scenarios/yours"), "{file}");
+    }
+    let index = ui("index.html");
+    assert!(!index.contains("scenarios/recent") && !index.contains("scenarios/yours"));
+}
+
+/// Bug (found checking plan L6a in a browser): on a window under about 1160 px the lists'
+/// table was wider than its box, so Play, the last column, sat behind a sideways scroll,
+/// and the screen-reader text in the last heading gave the whole page a sideways
+/// scrollbar too. The table now drops Runs, then Type, then Skill as the window narrows,
+/// and its box is positioned, so text placed absolutely inside it scrolls with it.
+/// Widths can't be measured here (they were checked in a browser from 900 to 1440 px),
+/// so this pins the rules that make the columns fit.
+#[test]
+fn a_narrow_window_drops_list_columns_and_keeps_play_in_view() {
+    let css = ui("styles.css");
+    let wrap = css_rule(&css, ".table-wrap");
+    assert!(wrap.contains("overflow-x: auto") && wrap.contains("position: relative"), "{wrap}");
+    assert!(css.contains("@media (max-width: 1160px) { .lib-table .c-plays { display: none; } }"));
+    assert!(css.contains("@media (max-width: 1100px) { .lib-table .c-kind, .lib-table .c-length { display: none; } }"));
+    let narrow = css.split("@media (max-width: 1020px) {").nth(1).expect("the rules for 1020 px and under");
+    let narrow = narrow
+        .split(
+            "
+}",
+        )
+        .next()
+        .unwrap();
+    assert!(narrow.contains(".lib-table .c-skill, .lib-table .c-owner { display: none; }"), "{narrow}");
+    assert!(narrow.contains(".lib-table th.c-figure { white-space: normal;"), "{narrow}");
+    // What a row can't do without is never hidden: its star, name, figure, last played and Play.
+    for line in css.lines().filter(|l| l.contains(".lib-table") && l.contains("display: none")) {
+        for keep in [".c-fav", ".c-name", ".c-figure", ".c-last", ".c-play ", ".c-play,"] {
+            assert!(!line.contains(keep), "{keep} is hidden by: {line}");
+        }
+    }
 }
