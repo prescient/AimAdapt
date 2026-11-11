@@ -31,6 +31,7 @@ Requirements: Windows 10 or 11 with the WebView2 runtime (included with Windows 
 - Sphere and capsule targets, with optional lifetime, shrink, and health regeneration with a delay.
 - Timed targets show a time-left bar and change color by wave (three red, then three blue, then three red on Timed Grid), so newer targets stand out from older ones. Optional health bars.
 - Movement: still, strafing, random or curved (steady speed with a turning heading, on Control Track), with optional acceleration (targets slow down and speed back up at each turn, and random turns curve), movement toward and away from you, and jumps with gravity.
+- The results screen shows the run's rating and how it went against its plan, a chart of your last ten ratings on the scenario, and one note from your recent runs. V opens the run's replay in the app and I the scenario's page.
 
 ![Results screen](docs/screenshots/game-results.jpg)
 

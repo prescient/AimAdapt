@@ -247,9 +247,26 @@ pub struct Segment {
     pub success: Option<f64>,
 }
 
+/// Which part of the analysis a note comes from.
+#[cfg_attr(feature = "serde", derive(serde::Serialize), serde(rename_all = "snake_case"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoteKind {
+    Rating,
+    Switching,
+    Curve,
+    Direction,
+    Shots,
+    Entries,
+    Reaction,
+    Fitts,
+    Tracking,
+    Segments,
+}
+
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Note {
+    pub kind: NoteKind,
     pub title: String,
     pub body: String,
 }
@@ -986,7 +1003,7 @@ fn notes(i: &Insights) -> Vec<Note> {
 
 /// The rating, how it moved since the first one, and the best held.
 fn rating_notes(i: &Insights, out: &mut Vec<Note>) {
-    let mut push = |title: String, body: String| out.push(Note { title, body });
+    let mut push = |title: String, body: String| out.push(Note { kind: NoteKind::Rating, title, body });
     // Ratings in other knobs (a scenario can change what it rates) aren't comparable.
     let rated: Vec<&RunPoint> =
         i.runs.iter().filter(|r| r.current && r.adaptive && r.rating.is_some() && r.knob == i.knob).collect();
@@ -1044,7 +1061,7 @@ fn rating_notes(i: &Insights, out: &mut Vec<Note>) {
 
 /// Kills a minute on switching scenarios.
 fn switching_notes(i: &Insights, out: &mut Vec<Note>) {
-    let mut push = |title: String, body: String| out.push(Note { title, body });
+    let mut push = |title: String, body: String| out.push(Note { kind: NoteKind::Switching, title, body });
     if let Some(sw) = &i.switching
         && let Some(kpm) = sw.kills_per_min
     {
@@ -1062,7 +1079,7 @@ fn switching_notes(i: &Insights, out: &mut Vec<Note>) {
 
 /// How sharply success drops off with difficulty.
 fn curve_notes(i: &Insights, out: &mut Vec<Note>) {
-    let mut push = |title: String, body: String| out.push(Note { title, body });
+    let mut push = |title: String, body: String| out.push(Note { kind: NoteKind::Curve, title, body });
     if let Some(c) = &i.curve {
         let fmt = |v: f64| Knob::from_id(&c.knob).format(v);
         // Spread between reliable (95%) and coin-flip (50%) on a relative scale.
@@ -1084,7 +1101,7 @@ fn curve_notes(i: &Insights, out: &mut Vec<Note>) {
 
 /// Weak and strong flick directions.
 fn direction_notes(i: &Insights, out: &mut Vec<Note>) {
-    let mut push = |title: String, body: String| out.push(Note { title, body });
+    let mut push = |title: String, body: String| out.push(Note { kind: NoteKind::Direction, title, body });
     if i.directions.len() >= 4 {
         let worst = i.directions.iter().min_by(|a, b| a.success.total_cmp(&b.success)).unwrap();
         let best = i.directions.iter().max_by(|a, b| a.success.total_cmp(&b.success)).unwrap();
@@ -1129,7 +1146,7 @@ fn direction_notes(i: &Insights, out: &mut Vec<Note>) {
 
 /// Where misses land: overshoot and a vertical bias.
 fn shot_notes(i: &Insights, out: &mut Vec<Note>) {
-    let mut push = |title: String, body: String| out.push(Note { title, body });
+    let mut push = |title: String, body: String| out.push(Note { kind: NoteKind::Shots, title, body });
     if let Some(m) = &i.shots
         && let Some(share) = m.overshoot_share
     {
@@ -1167,7 +1184,7 @@ fn shot_notes(i: &Insights, out: &mut Vec<Note>) {
 
 /// How often the crosshair enters a target before the kill.
 fn entry_notes(i: &Insights, out: &mut Vec<Note>) {
-    let mut push = |title: String, body: String| out.push(Note { title, body });
+    let mut push = |title: String, body: String| out.push(Note { kind: NoteKind::Entries, title, body });
     if let Some(e) = i.entries_per_kill
         && e >= 1.5
     {
@@ -1182,7 +1199,7 @@ fn entry_notes(i: &Insights, out: &mut Vec<Note>) {
 
 /// Reaction time.
 fn reaction_notes(i: &Insights, out: &mut Vec<Note>) {
-    let mut push = |title: String, body: String| out.push(Note { title, body });
+    let mut push = |title: String, body: String| out.push(Note { kind: NoteKind::Reaction, title, body });
     if let Some(r) = &i.reaction {
         let change = r
             .median_before_ms
@@ -1200,7 +1217,7 @@ fn reaction_notes(i: &Insights, out: &mut Vec<Note>) {
 
 /// Flick time against distance and size.
 fn fitts_notes(i: &Insights, out: &mut Vec<Note>) {
-    let mut push = |title: String, body: String| out.push(Note { title, body });
+    let mut push = |title: String, body: String| out.push(Note { kind: NoteKind::Fitts, title, body });
     if let Some(f) = &i.fitts {
         let change = f
             .throughput_before
@@ -1218,7 +1235,7 @@ fn fitts_notes(i: &Insights, out: &mut Vec<Note>) {
 
 /// Tracking: error, lead and the stretches on target.
 fn tracking_notes(i: &Insights, out: &mut Vec<Note>) {
-    let mut push = |title: String, body: String| out.push(Note { title, body });
+    let mut push = |title: String, body: String| out.push(Note { kind: NoteKind::Tracking, title, body });
     if let Some(t) = &i.tracking {
         if t.lead_deg <= -0.3 {
             push(
@@ -1261,7 +1278,7 @@ fn tracking_notes(i: &Insights, out: &mut Vec<Note>) {
 
 /// Tracking segments over the run.
 fn segment_notes(i: &Insights, out: &mut Vec<Note>) {
-    let mut push = |title: String, body: String| out.push(Note { title, body });
+    let mut push = |title: String, body: String| out.push(Note { kind: NoteKind::Segments, title, body });
     let seg: Vec<f64> = i.segments.iter().filter_map(|s| s.success).collect();
     if seg.len() >= 4 {
         let start = (seg[0] + seg[1]) / 2.0;
@@ -1289,4 +1306,4 @@ fn segment_notes(i: &Insights, out: &mut Vec<Note>) {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

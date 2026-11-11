@@ -71,8 +71,10 @@ The trainer is a separate game window. It opens over the app window: centered ac
 |---|---|
 | Mouse | Aim. The cursor is locked to the window while it has focus, and locks again by itself when you come back from another window. |
 | Left click | Fire. Some scenarios fire while you hold it, or fire all the time. Clicking also locks the cursor again. |
-| R | Restart the current run. |
+| R | Restart the current run. After a run: play it again. |
 | Space | After a run: play it again, or go to the next run in a workout. |
+| V | After a run: close the trainer and open the run's replay in the app. |
+| I | After a run: close the trainer and open the scenario's page in the app. |
 | Esc | Quit the trainer and return to the app. |
 | F2 | Show or hide the FPS counter. |
 
@@ -83,6 +85,10 @@ The trainer is a separate game window. It opens over the app window: centered ac
 - **Targets:** timed targets show a bar that empties as their time runs out, and change color by wave so newer ones stand out (three red, then three blue, then red again on Timed Grid). Switching targets show a health bar.
 
 **After a run** the results show your rating and its likely range, your success rate, accuracy, kills, timeouts and average time to kill. Once a scenario has a rating, a line also says how the run went. A run at your level is judged against the 85% goal: you held it, you reached it in a run too short to count, or you came in below. A stretch or easy run is judged against its own plan: "As planned", "Above plan" or "Below plan", with what the plan expected. "As planned" allows for the luck of a run that length and never less than five points either way, so a short run has more room than a long one. A stretch run that holds 85% says so. The line only describes the run: every run counts toward your rating in the same way. A breakthrough gets a banner (see [Adaptive mode](#help/adaptive)).
+
+Under the figures is a small chart of your last ten ratings on the scenario (scores for a standard run), oldest on the left, with this run marked in green. Up is always better, so on a scenario rated in seconds the shortest time is at the top. Runs of an older version of the scenario are left out, and the chart appears from the second run. Below it is one note from your recent runs, the one most worth acting on next. Every note is on the scenario's page. **V** closes the trainer and opens this run's replay, and **I** opens the scenario's page. In a workout both end the workout where it is. On a small window the chart and the note are left out when they don't fit, so the keys always stay on the screen.
+
+The last run of a workout also lists the workout: one line for each scenario. A scenario you played once shows that run. One you played several times shows how many runs, with the rating you ended on and the rating you had before the workout, or your best score for standard runs.
 
 ## Adaptive mode {#adaptive}
 
@@ -258,7 +264,7 @@ AimAdapt is learning to play your own KovaaK's scenarios (`.sce` files) in its t
 
 ## Replay {#replay}
 
-Your recent runs in the trainer can be watched again. On Scenarios, pick a scenario and click **Replay** next to a run in its **Runs**. **Back to** returns to the scenario.
+Your recent runs in the trainer can be watched again. On Scenarios, pick a scenario and click **Replay** next to a run in its **Runs**. **Back to** returns to the scenario. Straight after a run, **V** on the trainer's results screen opens its replay.
 
 The replay shows your own view: the crosshair stays in the middle and the view turns with it, as it did in the game, at the field of view you played at. The faint dots are a fixed grid, so you can see the view move even with no targets near.
 
@@ -336,6 +342,7 @@ Nothing is sent anywhere. Deleting one of your scenarios or workouts removes the
 ## What's new {#whats-new}
 
 **November 2026**
+- The trainer's results screen shows a chart of your last ten ratings on the scenario with the run marked, and one note from your recent runs. **V** opens the run's replay and **I** the scenario's page, both in the app. The list at the end of a workout has one line for each scenario, where it had one for each run. Ratings and scoring are unchanged.
 - Settings has a **Training** tab in place of Goals and time. The adaptive mix moved there and is now one setting for every profile (the active profile's mix carries over). The daily goal can be changed. Today's workout and a scenario's page show the mix in use and link to the tab. The advice on how long to train no longer treats half an hour as a limit.
 - Progress › Skills shows a likely range on every change (the skill profile, reps and carry-over, the week's comparison and the biggest gain) and greys a change that is inside its own noise. Carry-over has a **By drill** summary that appears after three sessions of a drill. The note about the skill furthest behind now names your least improved skill, once two skills have three sessions each. Saturday's weak-spots day picks the skills you've trained least first and ranks a skill by its change only after three sessions, so its drills may differ from before. Ratings and scoring are unchanged.
 - A scenario's Runs tab has a **Kind** column (Calibration, At your level, Stretch or Easy), a **Breakthrough** tag on runs that held a harder level than before, and a **Planned against actual** card comparing how often you succeeded on each kind of run with what the trainer planned. The same card for all scenarios is at the bottom of Progress › Skills. Runs from before this version are left out of it.

@@ -392,6 +392,18 @@ fn late_editor_checks_only_touch_their_own_editor() {
 
 // ---------- features and tidy-ups that should stay ----------
 
+/// V or I on the trainer's results screen close it and ask for a page (`trainer-closed` carries
+/// `open`). The UI goes there only after the data is reloaded, so the page has the new run.
+#[test]
+fn the_trainer_can_send_the_app_to_a_page() {
+    let trainer = ui("trainer.js");
+    let open = decl(&trainer, "openAfterTrainer");
+    assert!(open.contains("#replay/") && open.contains("scenarioHrefByName("), "{open}");
+    let closed = trainer.split("listen(\"trainer-closed\"").nth(1).expect("trainer-closed listener");
+    let (loaded, opened) = (closed.find("await loadTrainer()"), closed.find("openAfterTrainer("));
+    assert!(loaded.is_some() && opened > loaded, "the page opens after the data is reloaded");
+}
+
 /// The trainer can close with an error (`trainer-closed` carries { error }), and a
 /// settings file can be unusable (`profiles_note`). Both are shown, escaped, as
 /// warnings: the first on the pages that start the trainer until dismissed or the

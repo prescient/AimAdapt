@@ -9,6 +9,7 @@ mod bot;
 mod config;
 mod game;
 pub mod record;
+mod results;
 
 use std::path::PathBuf;
 
@@ -23,6 +24,7 @@ pub use config::{
     settings_path, workouts_dir,
 };
 pub use game::{PlayOptions, PlayStep, run};
+pub use results::Open;
 
 /// Command-line entry point. Returns the process exit code.
 ///
@@ -31,7 +33,8 @@ pub use game::{PlayOptions, PlayStep, run};
 /// - `--program <id> [--day mon…sun]`: a program day (today by default).
 /// - `--sce <file>`: a KovaaK's scenario file, on its own map (standard mode).
 ///
-/// Options: `--profile <name>` (default: the active settings profile), `--db <file>`, `--windowed`, `--no-save`, `--seed <n>`, and
+/// Options: `--profile <name>` (default: the active settings profile), `--db <file>`, `--windowed`, `--no-save`, `--seed <n>`,
+/// `--handoff` (the app is waiting: the results screen offers keys that open a page in it), and
 /// `--smoke <folder>`, which has a bot play short versions of the runs
 /// (`--smoke-seconds`, default 4), saves screenshots in the folder and exits; it's
 /// for checking the engine works.
@@ -62,6 +65,7 @@ fn parse_and_run(args: &[String]) -> Result<(), String> {
     let mut profile = None;
     let mut db = None;
     let mut windowed = false;
+    let mut handoff = false;
     let mut save = true;
     let mut seed = None;
     let mut smoke = None;
@@ -79,6 +83,7 @@ fn parse_and_run(args: &[String]) -> Result<(), String> {
             "--profile" => profile = it.next().cloned(),
             "--db" => db = it.next().map(PathBuf::from),
             "--windowed" => windowed = true,
+            "--handoff" => handoff = true,
             "--no-save" => save = false,
             "--seed" => seed = it.next().and_then(|s| s.parse().ok()),
             "--smoke" => smoke = it.next().map(PathBuf::from),
@@ -193,6 +198,7 @@ fn parse_and_run(args: &[String]) -> Result<(), String> {
         seed,
         anchor: if smoke.is_some() { None } else { anchor },
         smoke,
+        handoff,
     });
     Ok(())
 }

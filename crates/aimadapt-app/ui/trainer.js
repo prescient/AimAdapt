@@ -429,8 +429,15 @@ document.addEventListener("change", (e) => {
   if (e.target.dataset.witem !== undefined && route().view === "workout") render();
 });
 
+// V or I on the trainer's results screen closes the trainer and asks for a page here.
+function openAfterTrainer(open) {
+  if (open?.replay != null) location.hash = `#replay/${open.replay}`;
+  else if (open?.scenario) location.hash = scenarioHrefByName(open.scenario);
+}
+
 // The trainer saved its runs and closed: reload what shows them. The event says
-// whether it closed with an error ({ error: string | null }), for the banner.
+// whether it closed with an error ({ error: string | null }) for the banner, and
+// which page the player asked for ({ replay: id } or { scenario: name }, or null).
 listen("trainer-closed", async (event) => {
   ui.trainer.closedError = event?.payload?.error ?? null;
   await load();
@@ -438,4 +445,5 @@ listen("trainer-closed", async (event) => {
   if (typeof loadInsightsOverview === "function") loadInsightsOverview(true);
   // Imported runs show on the KovaaK's scenario's page.
   if (typeof ui.sceInfo !== "undefined") ui.sceInfo.clear();
+  openAfterTrainer(event?.payload?.open);
 });

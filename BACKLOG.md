@@ -32,6 +32,7 @@ Last reviewed: Nov 10, 2026 (after the layout review and the adaptive review; th
 - [x] Movement like players move, from the FAR comparison: acceleration (slow down and speed back up at turns, curved random turns), movement toward and away from the player, and jumps with gravity.
 - [x] Regen with a delay, and "finished in time" ratings for regen targets, so smoothness drills reward unbroken tracking. Insights shows unbroken stretches on target.
 - [x] At least two scenarios per sub-skill (29 built-ins), with Core Week alternating each drill and its variant week by week.
+- [x] The results screen shows a chart of the scenario's last ten ratings (scores for a standard run) with the run marked, and one note from its recent runs, picked to be what a player can change next. When the app started the trainer, V closes it and opens the run's replay, and I opens the scenario's page (plan L3a). The list at the end of a workout has one line for each scenario, and the chart and note are left out when the window is too short for them. Ratings and scoring are unchanged and there is no migration.
 
 ### To do
 - [ ] `todo` P1 Pause menu and pausing on focus loss (Esc quits straight away today).
@@ -39,7 +40,6 @@ Last reviewed: Nov 10, 2026 (after the layout review and the adaptive review; th
 - [ ] `todo` P2 Measure input-to-photon latency and frame pacing; optional frame cap.
 - [ ] `todo` P2 List the monitor's real video modes in Settings instead of free-typed resolutions (the engine can already read them).
 - [ ] `todo` P2 More crosshair options: outline, and a color change on hit.
-- [ ] `todo` P1 In-game results: a small chart of recent ratings for the scenario, the most relevant note, and keys for the replay and the scenario's page (plan L3a).
 - [ ] `todo` P3 Game font with a degree sign; speeds read "deg/s" in game for now.
 
 ## 2. Scenarios

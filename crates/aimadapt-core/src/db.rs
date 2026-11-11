@@ -259,6 +259,11 @@ impl Db {
         Ok(names)
     }
 
+    /// The id of the run stored under `file_name`, if there is one.
+    pub fn run_id(&self, file_name: &str) -> Result<Option<i64>, DbError> {
+        Ok(self.conn.query_row("SELECT id FROM runs WHERE file_name = ?1", [file_name], |r| r.get(0)).optional()?)
+    }
+
     /// Saves a trainer run and its details in one transaction, so a failure part
     /// way leaves neither. Returns false if the run was already saved.
     pub fn save_trainer_run(
@@ -445,6 +450,26 @@ pub(crate) fn insert_run(tx: &Transaction, run: &RunFile, imported_at: NaiveDate
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A saved run is found by its file name, and a name that was never saved is not.
+    #[test]
+    fn a_runs_id_is_found_by_file_name() {
+        let mut db = Db::open_in_memory().unwrap();
+        let at = chrono::NaiveDate::from_ymd_opt(2026, 11, 4).unwrap().and_hms_opt(8, 0, 0).unwrap();
+        let run = RunFile {
+            file_name: "rustyaim/test/1".into(),
+            scenario: "Timed Flicks".into(),
+            mode: "RustyAim".into(),
+            finished_at: at,
+            fields: Default::default(),
+            kills: vec![],
+            weapons: vec![],
+        };
+        db.insert_runs(&[run], at).unwrap();
+        let id = db.run_id("rustyaim/test/1").unwrap().expect("found");
+        assert!(id > 0);
+        assert_eq!(db.run_id("rustyaim/test/2").unwrap(), None);
+    }
 
     /// Bug: a database from a newer AimAdapt opened without complaint, so an older
     /// build wrote runs into tables it didn't know.

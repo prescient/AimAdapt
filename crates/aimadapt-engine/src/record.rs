@@ -324,12 +324,22 @@ pub fn best_rating(db: &Db, scenario: &Scenario) -> Option<f64> {
         .flatten()
 }
 
-pub fn save(db_path: &Path, info: &RunInfo) -> Result<(), String> {
+/// Saves the run and returns its id.
+pub fn save(db_path: &Path, info: &RunInfo) -> Result<i64, String> {
     let mut db = Db::open(db_path).map_err(|e| e.to_string())?;
     let now = chrono::Local::now().naive_local();
     let run = to_run_file(info);
     db.save_trainer_run(&run, &to_engine_run(info), now).map_err(|e| e.to_string())?;
-    Ok(())
+    db.run_id(&run.file_name)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "the run was not found after saving".to_string())
+}
+
+/// The chart and note for the results screen of the run just saved. `None` when
+/// they can't be read: the results then show without them.
+pub fn extras(db_path: &Path, scenario: &Scenario, run_id: i64) -> Option<aimadapt_core::results::RunExtras> {
+    let db = Db::open(db_path).ok()?;
+    aimadapt_core::results::for_run(&db, &scenario.name, run_id).ok().flatten()
 }
 
 #[cfg(test)]
@@ -476,6 +486,28 @@ mod tests {
         let mut changed = scenario.clone();
         changed.targets.radius *= 0.7;
         assert_eq!(best_rating(&db, &changed), None);
+    }
+
+    /// The results screen charts the run just saved and offers its replay, so `save`
+    /// has to give back the run's id, the same one on a second save of the same run.
+    #[test]
+    fn a_saved_run_gets_its_chart_and_can_be_replayed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("t.db");
+        let scenario = Scenario { name: "Timed Flicks".into(), ..Default::default() };
+        let settings = PlayerSettings::default();
+        let first = play(&scenario, true, None);
+        let a = save(&path, &info(&scenario, &first, &settings, 0)).unwrap();
+        let b = save(&path, &info(&scenario, &first, &settings, 1)).unwrap();
+        let c = save(&path, &info(&scenario, &first, &settings, 3)).unwrap();
+        assert!(a != b && b != c && a != c, "{a} {b} {c}");
+        assert_eq!(save(&path, &info(&scenario, &first, &settings, 3)).unwrap(), c, "the same run, the same id");
+        let extras = extras(&path, &scenario, c).expect("extras");
+        assert_eq!(extras.run_id, c);
+        assert!(extras.replay);
+        let chart = extras.chart.expect("three rated runs make a chart");
+        assert_eq!(chart.points.len(), 3);
+        assert_eq!(chart.points.last().unwrap().run_id, c);
     }
 
     #[test]

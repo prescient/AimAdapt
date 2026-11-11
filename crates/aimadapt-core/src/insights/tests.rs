@@ -14,7 +14,7 @@ use crate::telemetry::{EngineRun, SampleRow, ShotRow, TargetRow};
 use chrono::NaiveDate;
 use std::collections::BTreeMap;
 
-fn save(db: &mut Db, n: u32, e: &EngineRun) {
+pub(crate) fn save(db: &mut Db, n: u32, e: &EngineRun) {
     save_versioned(db, n, e, None);
 }
 
@@ -49,7 +49,7 @@ fn save_versioned(db: &mut Db, n: u32, e: &EngineRun, hash: Option<&str>) {
 
 /// A clicking run where flicks to the left are slow and often time out, and
 /// misses land past the target.
-fn clicking_run(rating: f64) -> EngineRun {
+pub(crate) fn clicking_run(rating: f64) -> EngineRun {
     let mut targets = Vec::new();
     let mut shots = Vec::new();
     for i in 0..80 {

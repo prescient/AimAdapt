@@ -321,19 +321,45 @@ pub(crate) fn anchor_args(x: i32, y: i32, width: u32) -> [String; 2] {
     ["--anchor".into(), format!("{x},{y},{width}")]
 }
 
+/// A page the trainer asked the app to open as it closed.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum OpenPage {
+    /// The replay of the run with this id.
+    Replay(i64),
+    /// The page of the scenario with this name.
+    Scenario(String),
+}
+
+impl From<aimadapt_engine::Open> for OpenPage {
+    fn from(open: aimadapt_engine::Open) -> Self {
+        match open {
+            aimadapt_engine::Open::Replay(id) => OpenPage::Replay(id),
+            aimadapt_engine::Open::Scenario(name) => OpenPage::Scenario(name),
+        }
+    }
+}
+
 /// What the UI hears when the trainer closes.
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct TrainerClosed {
     /// Why the trainer failed, in its own words, or `None` when it closed normally.
     pub error: Option<String>,
+    /// The page to open, when the player asked for one with a key on the results screen.
+    pub open: Option<OpenPage>,
 }
 
 /// The trainer reports problems on stderr (`aimadapt: <message>`, or a panic) and
 /// exits with a non-zero code. Release builds have no console, so the app passes
 /// them on.
-pub(crate) fn closed_report(success: bool, code: Option<i32>, stderr: &[String]) -> TrainerClosed {
+pub(crate) fn closed_report(
+    success: bool,
+    code: Option<i32>,
+    stderr: &[String],
+    open: Option<OpenPage>,
+) -> TrainerClosed {
     if success {
-        return TrainerClosed { error: None };
+        return TrainerClosed { error: None, open };
     }
     let own: Vec<&str> = stderr.iter().filter_map(|l| l.strip_prefix("aimadapt: ")).collect();
     let lines: Vec<&str> = if own.is_empty() {
@@ -350,7 +376,20 @@ pub(crate) fn closed_report(success: bool, code: Option<i32>, stderr: &[String])
     } else {
         format!("The trainer closed with an error: {}", lines.join(" "))
     };
-    TrainerClosed { error: Some(error) }
+    TrainerClosed { error: Some(error), open: None }
+}
+
+/// Sorts one line of the trainer's stderr: a request to open a page is kept aside,
+/// anything else joins the last lines kept for an error report.
+fn take_line(line: String, lines: &mut std::collections::VecDeque<String>, open: &mut Option<OpenPage>) {
+    if let Some(page) = aimadapt_engine::Open::parse(&line) {
+        *open = Some(page.into());
+        return;
+    }
+    if lines.len() == 40 {
+        lines.pop_front();
+    }
+    lines.push_back(line);
 }
 
 fn launch(app: AppHandle, state: &AppData, t: &TrainerState, args: &[String]) -> Result<(), String> {
@@ -359,7 +398,7 @@ fn launch(app: AppHandle, state: &AppData, t: &TrainerState, args: &[String]) ->
         return Err("The trainer is already open".into());
     }
     let mut cmd = std::process::Command::new(exe);
-    cmd.args(args).arg("--db").arg(&state.db_path).stderr(std::process::Stdio::piped());
+    cmd.args(args).arg("--db").arg(&state.db_path).arg("--handoff").stderr(std::process::Stdio::piped());
     // Open the trainer over this window, where the player keeps it.
     {
         use tauri::Manager;
@@ -378,13 +417,11 @@ fn launch(app: AppHandle, state: &AppData, t: &TrainerState, args: &[String]) ->
     std::thread::spawn(move || {
         // Keep the last lines the trainer writes; reading also keeps its pipe from filling.
         let mut lines = std::collections::VecDeque::new();
+        let mut open = None;
         if let Some(out) = stderr {
             use std::io::BufRead;
             for line in std::io::BufReader::new(out).lines().map_while(Result::ok) {
-                if lines.len() == 40 {
-                    lines.pop_front();
-                }
-                lines.push_back(line);
+                take_line(line, &mut lines, &mut open);
             }
         }
         let status = child.wait();
@@ -392,8 +429,8 @@ fn launch(app: AppHandle, state: &AppData, t: &TrainerState, args: &[String]) ->
         app.state::<TrainerState>().playing.store(false, Ordering::SeqCst);
         let lines: Vec<String> = lines.into();
         let report = match status {
-            Ok(s) => closed_report(s.success(), s.code(), &lines),
-            Err(e) => TrainerClosed { error: Some(format!("Lost track of the trainer: {e}")) },
+            Ok(s) => closed_report(s.success(), s.code(), &lines, open),
+            Err(e) => TrainerClosed { error: Some(format!("Lost track of the trainer: {e}")), open: None },
         };
         let _ = app.emit("trainer-closed", report);
     });
@@ -638,13 +675,38 @@ mod tests {
     #[test]
     fn a_failed_trainer_says_why() {
         let lines = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        assert_eq!(closed_report(true, Some(0), &[]), TrainerClosed { error: None });
-        let r = closed_report(false, Some(2), &lines(&["some log line", "aimadapt: no built-in scenario nope"]));
+        assert_eq!(closed_report(true, Some(0), &[], None), TrainerClosed { error: None, open: None });
+        let r = closed_report(false, Some(2), &lines(&["some log line", "aimadapt: no built-in scenario nope"]), None);
         assert_eq!(r.error.as_deref(), Some("The trainer closed with an error: no built-in scenario nope"));
-        let r = closed_report(false, Some(101), &lines(&["thread 'main' panicked at src/x.rs:1:1:", "boom"]));
+        let r = closed_report(false, Some(101), &lines(&["thread 'main' panicked at src/x.rs:1:1:", "boom"]), None);
         assert!(r.error.unwrap().contains("boom"));
-        let r = closed_report(false, Some(3), &[]);
+        let r = closed_report(false, Some(3), &[], None);
         assert!(r.error.unwrap().contains("exit code 3"));
+    }
+
+    /// V or I on the results screen make the trainer print one line, and the app passes the page on
+    /// to the UI. The line stays out of the error report, and a failed trainer opens nothing.
+    #[test]
+    fn the_trainer_can_ask_for_a_page() {
+        assert_eq!(serde_json::to_value(OpenPage::Replay(123)).unwrap(), serde_json::json!({"replay": 123}));
+        assert_eq!(
+            serde_json::to_value(OpenPage::Scenario("Timed Flicks".into())).unwrap(),
+            serde_json::json!({"scenario": "Timed Flicks"})
+        );
+        let mut lines = std::collections::VecDeque::new();
+        let mut open = None;
+        for i in 0..50 {
+            take_line(format!("log {i}"), &mut lines, &mut open);
+        }
+        take_line("aimadapt-open: replay 9".into(), &mut lines, &mut open);
+        assert_eq!(open, Some(OpenPage::Replay(9)));
+        assert_eq!(lines.len(), 40, "the buffer is capped");
+        assert!(lines.iter().all(|l| l.starts_with("log ")), "the request is not a log line");
+        take_line("aimadapt-open: scenario Timed Flicks".into(), &mut lines, &mut open);
+        assert_eq!(open, Some(OpenPage::Scenario("Timed Flicks".into())), "the last request wins");
+        let page = Some(OpenPage::Replay(9));
+        assert_eq!(closed_report(true, Some(0), &[], page.clone()).open, page);
+        assert_eq!(closed_report(false, Some(2), &[], page).open, None);
     }
 
     /// The editor folds a section when its fields equal the defaults, read from the payload's `defaults`

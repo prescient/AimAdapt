@@ -28,6 +28,9 @@ use bevy::window::{
 use chrono::{Local, NaiveDateTime};
 
 use crate::record::{self, RunInfo};
+use crate::results::{self, Keys, Open, Outcome, StepDone};
+
+mod results_panel;
 
 /// One run to play.
 #[derive(Clone)]
@@ -56,6 +59,9 @@ pub struct PlayOptions {
     pub smoke: Option<PathBuf>,
     /// The app window's outer position and width (physical pixels), to open over.
     pub anchor: Option<[i32; 3]>,
+    /// The app started the trainer and waits for it: the results screen offers keys
+    /// that close the trainer and open a page in the app.
+    pub handoff: bool,
 }
 
 /// Where the trainer window opens over the app window: centered across it, with
@@ -101,6 +107,7 @@ pub fn run(opts: PlayOptions) -> AppExit {
             program: opts.program,
             settings: opts.settings,
             db_path: opts.db_path,
+            handoff: opts.handoff,
             done: Vec::new(),
         },
         sim: Sim::new(Scenario::default(), opts.seed),
@@ -125,7 +132,18 @@ pub fn run(opts: PlayOptions) -> AppExit {
             Update,
             (
                 (exclusive_video_mode, play_area, rebuild_world),
-                (keys, cursor, look, step, sync_targets, sync_bars, update_hud, update_overlay, smoke_capture),
+                (
+                    keys,
+                    cursor,
+                    look,
+                    step,
+                    sync_targets,
+                    sync_bars,
+                    update_hud,
+                    update_overlay,
+                    results_panel::update,
+                    smoke_capture,
+                ),
             )
                 .chain(),
         )
@@ -146,12 +164,6 @@ impl Look {
     }
 }
 
-/// What a finished step reported, for the workout summary.
-struct Done {
-    name: String,
-    line: String,
-}
-
 /// What this trainer window plays: the steps (one scenario, or a workout's runs),
 /// with the settings and database they use.
 struct Session {
@@ -162,8 +174,10 @@ struct Session {
     program: Option<(String, String)>,
     settings: PlayerSettings,
     db_path: Option<PathBuf>,
-    /// A line for each finished step, for the workout summary.
-    done: Vec<Done>,
+    /// The app is waiting for the trainer (see [`PlayOptions::handoff`]).
+    handoff: bool,
+    /// Each finished step, for the workout summary.
+    done: Vec<StepDone>,
 }
 
 /// Everything about one run that starts over with the next.
@@ -175,8 +189,10 @@ struct Run {
     run_time: f32,
     /// Best earlier score (standard) or level (adaptive) for this scenario.
     best: Option<f64>,
-    /// What happened when the finished run was saved.
-    saved: Option<Result<(), String>>,
+    /// What happened when the finished run was saved: its id, or why not.
+    saved: Option<Result<i64, String>>,
+    /// The chart and note for the results screen, read once after the run is saved.
+    extras: Option<aimadapt_core::results::RunExtras>,
     /// The finished run's result, built once: the results screen reads it every
     /// frame, and building it copies the run's whole telemetry.
     result: Option<RunResult>,
@@ -277,7 +293,14 @@ impl Game {
                 r.stats.accuracy().map_or("-".into(), |a| format!("{:.0}%", a * 100.0))
             ),
         };
-        self.session.done.push(Done { name: self.sim.scenario().name.clone(), line });
+        let outcome = match &r.adaptive {
+            Some(a) => Outcome::Rated {
+                after: fmt_value(a.knob, a.value),
+                before: a.run_value.map(|_| fmt_value(a.knob, a.start_value)),
+            },
+            None => Outcome::Scored(f64::from(r.score)),
+        };
+        self.session.done.push(StepDone { name: self.sim.scenario().name.clone(), line, outcome });
     }
 }
 
@@ -350,6 +373,10 @@ struct Overlay;
 
 #[derive(Component)]
 struct OverlayText;
+
+/// The workout lines and key hints at the bottom of the results.
+#[derive(Component)]
+struct KeysText;
 
 fn color(hex: &str) -> Color {
     let [r, g, b] = parse_color(hex).unwrap_or([1.0, 0.3, 0.3]);
@@ -672,16 +699,31 @@ fn setup_hud(mut commands: Commands, game: Res<Game>) {
             },
             BackgroundColor(Color::srgba(0.02, 0.03, 0.05, 0.72)),
         ))
-        .with_child((
-            Node {
-                padding: UiRect::all(px(32)),
-                min_width: px(460),
-                border_radius: BorderRadius::all(px(14)),
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.09, 0.1, 0.13)),
-            children![(OverlayText, Text::new(""), text(21.0), TextLayout::justify(Justify::Center))],
-        ));
+        .with_children(|overlay| {
+            overlay
+                .spawn((
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Center,
+                        padding: UiRect::all(px(32)),
+                        min_width: px(460),
+                        border_radius: BorderRadius::all(px(14)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.09, 0.1, 0.13)),
+                ))
+                .with_children(|panel| {
+                    panel.spawn((OverlayText, Text::new(""), text(21.0), TextLayout::justify(Justify::Center)));
+                    results_panel::spawn(panel);
+                    panel.spawn((
+                        KeysText,
+                        Text::new(""),
+                        text(21.0),
+                        TextLayout::justify(Justify::Center),
+                        Node { margin: UiRect::top(px(18)), ..default() },
+                    ));
+                });
+        });
 }
 
 fn spawn_crosshair(commands: &mut Commands, settings: &PlayerSettings) {
@@ -732,6 +774,19 @@ fn keys(keys: Res<ButtonInput<KeyCode>>, mut game: ResMut<Game>, mut exit: Messa
             }
         } else {
             game.begin_step(i + 1);
+        }
+    }
+    if finished && game.session.handoff {
+        let open = if keys.just_pressed(KeyCode::KeyV) {
+            game.run.extras.as_ref().filter(|e| e.replay).map(|e| Open::Replay(e.run_id))
+        } else if keys.just_pressed(KeyCode::KeyI) {
+            Some(Open::Scenario(game.sim.scenario().name.clone()))
+        } else {
+            None
+        };
+        if let Some(open) = open {
+            eprintln!("{}", open.line());
+            exit.write(AppExit::Success);
         }
     }
     if keys.just_pressed(KeyCode::F2) {
@@ -911,7 +966,11 @@ fn save_run(game: &mut Game, resolution: String) {
         reps: Some(game.step_info().reps),
         block: Some(game.step_info().block),
     };
-    game.run.saved = Some(record::save(&path, &info));
+    let saved = record::save(&path, &info);
+    if let Ok(id) = &saved {
+        game.run.extras = record::extras(&path, game.sim.scenario(), *id);
+    }
+    game.run.saved = Some(saved);
 }
 
 fn sync_targets(
@@ -1230,7 +1289,8 @@ fn run_verdict(j: RunJudgment) -> String {
 fn update_overlay(
     game: Res<Game>,
     mut overlay: Single<&mut Visibility, With<Overlay>>,
-    mut text: Single<&mut Text, With<OverlayText>>,
+    mut text: Single<&mut Text, (With<OverlayText>, Without<KeysText>)>,
+    mut keys_text: Single<&mut Text, (With<KeysText>, Without<OverlayText>)>,
 ) {
     let finished = game.sim.phase() == Phase::Finished;
     **overlay = if finished { Visibility::Visible } else { Visibility::Hidden };
@@ -1294,32 +1354,43 @@ fn update_overlay(
         }
     };
     let saved = match &game.run.saved {
-        Some(Ok(())) => "Saved to your history".to_string(),
+        Some(Ok(_)) => "Saved to your history".to_string(),
         Some(Err(e)) => format!("Couldn't save: {e}"),
         None => String::new(),
     };
     let note = game.display_note.as_deref().map(|n| format!("\n{n}")).unwrap_or_default();
-    let keys = if game.session.steps.len() == 1 {
-        "Space: play again    R: restart    Esc: quit".to_string()
+    text.0 = format!(
+        "{}\n\n{headline}\n\nAccuracy {acc}   {}   Timeouts {}   Avg TTK {ttk}\n\n{saved}{note}",
+        game.sim.scenario().name,
+        kills_line(&game.sim),
+        st.timeouts,
+    );
+    keys_text.0 = keys_block(&game);
+}
+
+/// The workout lines and the key hints under the results.
+fn keys_block(game: &Game) -> String {
+    let hints = results::keys_text(Keys {
+        steps: game.session.steps.len(),
+        last: game.is_last(),
+        handoff: game.session.handoff,
+        replay: game.run.extras.as_ref().is_some_and(|e| e.replay),
+    });
+    if game.session.steps.len() == 1 {
+        hints
     } else if game.is_last() {
-        let summary: Vec<String> = game.session.done.iter().map(|d| format!("{}: {}", d.name, d.line)).collect();
-        format!("Workout complete\n{}\n\nSpace or Esc: finish    R: replay this one", summary.join("\n"))
+        let summary = results::workout_summary(&game.session.done);
+        format!("Workout complete\n{}\n\n{hints}", summary.join("\n"))
     } else {
         let next = &game.session.steps[game.session.index + 1];
         format!(
-            "Next ({} of {}): {} | {}\n\nSpace: continue    R: replay this one    Esc: end workout",
+            "Next ({} of {}): {} | {}\n\n{hints}",
             game.session.index + 2,
             game.session.steps.len(),
             next.scenario.name,
             mode_name(next.adaptive)
         )
-    };
-    text.0 = format!(
-        "{}\n\n{headline}\n\nAccuracy {acc}   {}   Timeouts {}   Avg TTK {ttk}\n\n{saved}{note}\n\n{keys}",
-        game.sim.scenario().name,
-        kills_line(&game.sim),
-        st.timeouts,
-    );
+    }
 }
 
 /// Smoke test: screenshot mid-run and on the results screen, move to the next
