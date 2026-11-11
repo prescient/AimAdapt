@@ -41,6 +41,53 @@ fn sphere_and_capsule_hits() {
 }
 
 #[test]
+fn box_hits_its_faces() {
+    // A box 0.7 m wide and deep, 1.8 m tall, centred 10 m ahead.
+    let c = Vec3::new(0.0, 0.0, -10.0);
+    let hit = |dir: Vec3| ray_hit(dir, c, 0.35, Shape::Box, 1.8);
+    assert!((hit(Vec3::NEG_Z).unwrap() - 9.65).abs() < 1e-4, "front face");
+    // Side faces: just inside and just outside (the front face edge is at x = 0.35).
+    let at = |x: f32, y: f32| Vec3::new(x, y, -9.65).normalize();
+    assert!(hit(at(0.34, 0.0)).is_some() && hit(at(-0.34, 0.0)).is_some());
+    assert!(hit(at(0.36, 0.0)).is_none() && hit(at(-0.36, 0.0)).is_none());
+    // Top and bottom faces (half height 0.9).
+    assert!(hit(at(0.0, 0.89)).is_some() && hit(at(0.0, -0.89)).is_some());
+    assert!(hit(at(0.0, 0.91)).is_none() && hit(at(0.0, -0.91)).is_none());
+    // A corner: this ray passes the capsule's rounded top but clips the box's edge.
+    let corner = at(0.3, 0.85);
+    assert!(hit(corner).is_some(), "box takes the corner");
+    assert!(ray_hit(corner, c, 0.35, Shape::Capsule, 1.8).is_none(), "capsule of the same size misses it");
+    // Inside the box: 0. Behind the player: none.
+    assert_eq!(ray_hit(Vec3::NEG_Z, Vec3::new(0.0, 0.0, -0.1), 0.35, Shape::Box, 1.8), Some(0.0));
+    assert!(ray_hit(Vec3::Z, c, 0.35, Shape::Box, 1.8).is_none(), "behind the player");
+}
+
+#[test]
+fn box_off_to_one_side_is_entered_through_its_side_face() {
+    // Centre 5 m right and 4 m ahead, half width 1: its left face is the plane x = 4.
+    let c = Vec3::new(5.0, 0.0, -4.0);
+    let dir = Vec3::new(1.0, 0.0, -0.8).normalize();
+    // x = 4 is reached at t = 4 / dir.x; z there is -3.2, inside the depth range -5..-3.
+    let d = ray_hit(dir, c, 1.0, Shape::Box, 4.0).unwrap();
+    assert!((d - 4.0 / dir.x).abs() < 1e-4, "{d}");
+    // Aimed at the same face but too far forward, it passes in front of the box.
+    assert!(ray_hit(Vec3::new(1.0, 0.0, -0.2).normalize(), c, 1.0, Shape::Box, 4.0).is_none());
+}
+
+#[test]
+fn boxes_must_be_tall_enough_and_fit_the_room() {
+    let mut flat = Scenario::default();
+    flat.targets.shape = Shape::Box;
+    flat.targets.radius = 0.5;
+    flat.targets.height = 0.8;
+    assert!(flat.problems().iter().any(|p| p.contains("at least 2")), "{:?}", flat.problems());
+    let mut tall = Scenario::default();
+    tall.targets.shape = Shape::Box;
+    tall.targets.height = tall.arena.size[1] + 1.0;
+    assert!(tall.problems().iter().any(|p| p.contains("fit between floor and ceiling")), "{:?}", tall.problems());
+}
+
+#[test]
 fn countdown_blocks_shots() {
     let mut sim = Sim::new(Scenario::default(), 1);
     let at = sim.targets()[0].pos;
@@ -195,7 +242,9 @@ fn no_target_ever_leaves_the_room() {
                 for t in sim.targets() {
                     let half_h = match s.targets.shape {
                         Shape::Sphere => t.radius,
-                        Shape::Capsule => (t.height * t.radius / t.base_radius.max(1e-6) / 2.0).max(t.radius),
+                        Shape::Capsule | Shape::Box => {
+                            (t.height * t.radius / t.base_radius.max(1e-6) / 2.0).max(t.radius)
+                        }
                     };
                     let p = t.pos;
                     let ok = p.y - half_h >= floor - 1e-3

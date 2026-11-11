@@ -808,18 +808,19 @@ mod tests {
             _ => panic!("expected a refusal with reasons"),
         }
         assert!(matches!(status(&fixture("Still Wall")), Status::Plays(_)));
-        // Features beyond the plan come back with the planned reasons too.
+        // Features beyond the plan come back with the planned reasons too. Old Room's
+        // cuboid bot plays now (K5), so its reasons are all beyond the plan.
         match status(&fixture("Old Room")) {
-            Status::Gaps(gaps) => {
-                assert!(gaps.iter().any(|g| g.beyond_plan), "{gaps:?}");
-                assert!(gaps.iter().any(|g| !g.beyond_plan), "{gaps:?}");
-                let lines = gap_lines(&gaps);
-                assert!(lines.iter().any(|l| l.starts_with("also, in the plan: ")), "{lines:?}");
-                let first_planned = lines.iter().position(|l| l.starts_with("also,")).unwrap();
-                assert!(lines[..first_planned].iter().all(|l| !l.starts_with("also,")));
-            }
+            Status::Gaps(gaps) => assert!(gaps.iter().all(|g| g.beyond_plan), "{gaps:?}"),
             _ => panic!("expected gaps"),
         }
+        let mixed = [
+            aimadapt_sce::Gap::planned("hitbox shape", "a cuboid bot flatter than it is wide"),
+            aimadapt_sce::Gap { feature: "heads", detail: String::new(), beyond_plan: true },
+        ];
+        let lines = gap_lines(&mixed);
+        assert!(lines[0].starts_with("heads"), "{lines:?}");
+        assert!(lines[1].starts_with("also, in the plan: "), "{lines:?}");
     }
 
     /// Each reason is counted once per file, with the files it blocks alone.

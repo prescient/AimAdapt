@@ -190,7 +190,7 @@ fn move_free(t: &mut Target, mv: &Movement, area: &Area, rng: &mut Rng, now: f32
     // and walls: the spawn area can reach further than the room allows.
     let half_h = match area.shape {
         Shape::Sphere => t.radius,
-        Shape::Capsule => (t.height * t.radius / t.base_radius.max(1e-6) / 2.0).max(t.radius),
+        Shape::Capsule | Shape::Box => (t.height * t.radius / t.base_radius.max(1e-6) / 2.0).max(t.radius),
     };
     let (yr, mut pr) = (area.yaw, area.pitch);
     let d = t.distance.max(1e-3);

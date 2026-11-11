@@ -335,6 +335,9 @@ pub enum Shape {
     Sphere,
     /// Upright pill shape, roughly a body.
     Capsule,
+    /// An upright box. `radius` is half its width and half its depth, `height` its full
+    /// height, and its faces lie along the sim's axes (X, Y up, Z).
+    Box,
 }
 
 /// Where targets appear, as angles from straight ahead and distance from the player.
@@ -551,7 +554,10 @@ impl Scenario {
         check(self.weapon.damage_per_s > 0.0, "beam damage must be above 0");
         check(t.count >= 1 && t.count <= 50, "target count must be 1–50");
         check(t.radius >= 0.01 && t.radius <= 10.0, "target radius must be 0.01–10 m");
-        check(t.shape != Shape::Capsule || t.height >= 2.0 * t.radius, "capsule height must be at least 2× radius");
+        check(
+            t.shape == Shape::Sphere || t.height >= 2.0 * t.radius,
+            "capsule and box height must be at least 2× radius",
+        );
         check(t.health > 0.0, "target health must be above 0");
         check(t.regen_per_s.is_finite(), "regen must be a number");
         check(t.respawn_delay_s >= 0.0, "respawn delay can't be negative");
@@ -608,7 +614,7 @@ impl Scenario {
             "curve movement needs a turn rate of 0–720 °/s",
         );
         // Targets must fit between floor and ceiling too.
-        let half_height = if t.shape == Shape::Capsule { t.radius.max(t.height / 2.0) } else { t.radius };
+        let half_height = if t.shape != Shape::Sphere { t.radius.max(t.height / 2.0) } else { t.radius };
         check(
             2.0 * half_height < self.arena.size[1],
             "targets must fit between floor and ceiling (the room is lower than a target is tall)",

@@ -556,6 +556,7 @@ fn rebuild_world(
     let mut body = |shape: Shape, radius: f32, height: f32| match shape {
         Shape::Sphere => meshes.add(Sphere::new(radius).mesh().uv(48, 24)),
         Shape::Capsule => meshes.add(Capsule3d::new(radius, (height - 2.0 * radius).max(0.0))),
+        Shape::Box => meshes.add(Cuboid::new(2.0 * radius, height, 2.0 * radius)),
     };
     let mesh = body(tc.shape, tc.radius, tc.height);
     let kinds = s
@@ -1040,10 +1041,10 @@ fn base_color(assets: &TargetAssets, t: &aimadapt_sim::sim::Target) -> Color {
     }
 }
 
-/// How far above a target's center its bars start: the top of the sphere or capsule.
+/// How far above a target's center its bars start: the top of the sphere, capsule or box.
 fn bar_base(_s: &Scenario, t: &aimadapt_sim::sim::Target) -> f32 {
     match t.shape() {
-        Shape::Capsule => (t.height() / 2.0).max(t.radius),
+        Shape::Capsule | Shape::Box => (t.height() / 2.0).max(t.radius),
         Shape::Sphere => t.radius,
     }
 }
@@ -1647,11 +1648,16 @@ mod tests {
     #[test]
     fn bars_sit_above_the_top_of_the_target() {
         for id in ["builtin:unbroken-strafes", "builtin:stability-switch"] {
-            let s = builtin(id);
+            let mut s = builtin(id);
+            // Also try each of them as a box: the bars start at half its height.
+            if id == "builtin:stability-switch" {
+                s.targets.shape = Shape::Box;
+                s.targets.height = 2.0 * s.targets.radius + 0.4;
+            }
             let sim = Sim::new(s.clone(), 1);
             let t = &sim.targets()[0];
             let top = match s.targets.shape {
-                Shape::Capsule => s.targets.height / 2.0,
+                Shape::Capsule | Shape::Box => s.targets.height / 2.0,
                 Shape::Sphere => s.targets.radius,
             };
             assert!(

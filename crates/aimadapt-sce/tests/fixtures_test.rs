@@ -23,7 +23,7 @@ fn read(name: &str) -> Sce {
 #[test]
 fn finds_every_fixture() {
     let files = find_files(&[fixtures()]);
-    assert_eq!(files.len(), 7);
+    assert_eq!(files.len(), 8);
     assert!(files.iter().all(|f| f.extension().unwrap() == "sce"));
 }
 
@@ -129,6 +129,37 @@ fn still_bots_on_a_json_map_import_with_kovaaks_rules() {
     assert_eq!(w.meshes[0].triangles.len(), 12);
     assert!(i.notes.is_empty(), "{:?}", i.notes);
     assert!(s.problems().is_empty());
+}
+
+/// Still box bots import as boxes (plan K5), start their height above their spawn points,
+/// and a shot that passes a box's upper front corner hits it, where one at the same place on
+/// a capsule of the same size would go by.
+#[test]
+fn box_bots_import_as_boxes_and_take_a_shot_at_their_corner() {
+    let i = import(&path("Box Row")).unwrap();
+    let s = i.scenario;
+    assert_eq!((s.targets.count, s.targets.shape), (3, Shape::Box));
+    assert!((s.targets.radius - 0.35).abs() < 1e-6 && (s.targets.height - 1.5).abs() < 1e-6);
+    assert!(i.notes.is_empty(), "{:?}", i.notes);
+    assert!(s.problems().is_empty());
+    let w = s.world.as_ref().unwrap();
+    // Unreal (800, 0, 0) is 8 m ahead, and a 1.5 m tall box's middle starts 1.5 m up.
+    let spawns: Vec<Vec3> = w.spawns.iter().map(|p| Vec3::from_array(p.pos)).collect();
+    assert!(spawns.iter().any(|p| (*p - Vec3::new(0.0, 1.5, -8.0)).length() < 1e-4), "{spawns:?}");
+
+    // Aim 0.3 m right of a bot's middle and 0.7 m above it, at its front face's depth: inside
+    // the box's top edge (half width 0.35, half height 0.75), outside a capsule's rounded top.
+    let corner_shot = |s: aimadapt_sim::Scenario| {
+        let mut sim = started(s);
+        let p = sim.targets()[0].pos;
+        let aim = (p + Vec3::new(0.3, 0.7, 0.35)).normalize();
+        sim.step(0.01, Input { aim, fire_pressed: true, fire_held: true });
+        sim.stats().kills
+    };
+    assert_eq!(corner_shot(s.clone()), 1, "the box takes the corner shot");
+    let mut capsule = s;
+    capsule.targets.shape = Shape::Capsule;
+    assert_eq!(corner_shot(capsule), 0, "a capsule of the same size misses it");
 }
 
 #[test]
@@ -356,7 +387,7 @@ fn git_keeps_the_fixtures_bytes() {
     for name in ["Drifting Pair", "Old Room"] {
         assert!(crlf(name), "{name} lost its CRLF line ends");
     }
-    for name in ["Dash Lane", "Still Wall", "Floor Keeper", "Ledge Kicker", "Last Lives"] {
+    for name in ["Dash Lane", "Still Wall", "Floor Keeper", "Ledge Kicker", "Last Lives", "Box Row"] {
         assert!(!crlf(name), "{name} was given CRLF line ends");
     }
 }

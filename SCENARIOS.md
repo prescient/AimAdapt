@@ -77,9 +77,9 @@ per_miss = -30.0
 | Field | Default | Meaning |
 |---|---|---|
 | `targets.count` | `1` | Targets alive at once (1–50). |
-| `targets.shape` | `"sphere"` | `sphere`, or `capsule` (an upright pill, roughly a body). |
+| `targets.shape` | `"sphere"` | `sphere`, `capsule` (an upright pill, roughly a body) or `box` (an upright box with square ends, its faces lined up with the room). |
 | `targets.radius` | `0.3` | Radius in meters. |
-| `targets.height` | `1.8` | Capsule height in meters, including the rounded ends. |
+| `targets.height` | `1.8` | Capsule or box height in meters. A capsule's includes its rounded ends. Both need at least twice the radius. |
 | `targets.health` | `100.0` | Damage needed to destroy a target. Equal to `weapon.damage` means one shot. Use a huge value for pure tracking. |
 | `targets.regen_per_s` | `0.0` | Health restored per second: with a beam while the crosshair is off the target, with hitscan once `regen_delay_s` has passed since the last hit. |
 | `targets.regen_delay_s` | `0.0` | Seconds after the last hit before a target starts healing. A short delay forgives a brief slip; regen close to the beam's damage rate means a kill needs an unbroken stretch on target. |

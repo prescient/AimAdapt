@@ -107,6 +107,7 @@ const TRIGGER: &[Choice] = &[
 const SHAPE: &[Choice] = &[
     Choice { value: "sphere", label: "Sphere", help: "A ball." },
     Choice { value: "capsule", label: "Capsule", help: "An upright pill, roughly a body." },
+    Choice { value: "box", label: "Box", help: "An upright box with square ends, lined up with the room." },
 ];
 
 const MOVEMENT: &[Choice] = &[
@@ -197,8 +198,8 @@ pub const FIELDS: &[Field] = &[
     f(
         "targets.height",
         "Targets",
-        "Capsule height",
-        "Capsule only, including the rounded ends.",
+        "Capsule and box height",
+        "Capsule and box only. For a capsule it includes the rounded ends.",
         num(0.1, 10.0, 0.05, "m"),
     ),
     f(

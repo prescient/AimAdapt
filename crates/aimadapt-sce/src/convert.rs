@@ -126,10 +126,9 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
     if targets.len() > 50 {
         reasons.push(Gap::planned("too many bots", format!("{} at once; the trainer allows 50", targets.len())));
     }
-    let shape = kind.map(|k| hitbox(k, &mut reasons, &mut notes));
+    let shape = kind.map(|k| hitbox(k, &mut reasons));
     // The other kinds' hitboxes, checked the same way.
-    let others: Vec<(Shape, f32, f32)> =
-        kinds.iter().skip(1).map(|(ch, _)| hitbox(ch, &mut reasons, &mut notes)).collect();
+    let others: Vec<(Shape, f32, f32)> = kinds.iter().skip(1).map(|(ch, _)| hitbox(ch, &mut reasons)).collect();
     // Several kinds can give the same note; keep each once, in order.
     let mut seen = std::collections::HashSet::new();
     notes.retain(|n| seen.insert(n.clone()));
@@ -152,7 +151,7 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
         map_scale,
         r.player,
         &characters,
-        height,
+        spawn_rise(bot),
         player_team,
         &teams,
         &helpers,
@@ -712,31 +711,63 @@ fn respawn_delay(ch: &Section) -> f32 {
 }
 
 /// The bot's hitbox as the sim's shape, radius and height, in meters.
-fn hitbox(ch: &Section, reasons: &mut Vec<Gap>, notes: &mut Vec<String>) -> (Shape, f32, f32) {
+fn hitbox(ch: &Section, reasons: &mut Vec<Gap>) -> (Shape, f32, f32) {
     let radius = ch.f32_or("MainBBRadius", 0.0) / UU_PER_M;
     let height = ch.f32_or("MainBBHeight", 0.0) / UU_PER_M;
     if !(0.01..=10.0).contains(&radius) {
         reasons.push(Gap::planned("bot size", format!("a radius of {radius:.2} m; the trainer allows 0.01–10 m")));
     }
     match ch.str("MainBBType") {
-        "Spheroid" => {
-            if (height - 2.0 * radius).abs() > 0.05 * radius.max(1e-6) * 2.0 {
-                notes.push("bots are stretched spheres in KovaaK's; here they're round".into());
+        // A ball of radius R whatever the height is.
+        "Spheroid" => (Shape::Sphere, radius, 2.0 * radius),
+        kind @ ("Cylindrical" | "Cuboid") => {
+            if height < 2.0 * radius {
+                reasons.push(flat_hitbox(kind, radius, height));
             }
-            (Shape::Sphere, radius, 2.0 * radius)
-        }
-        "Cylindrical" => {
-            notes.push("cylinder bots are played as capsules (rounded ends)".into());
-            if height >= 2.0 * radius {
-                (Shape::Capsule, radius, height)
-            } else {
-                (Shape::Sphere, radius, 2.0 * radius)
-            }
+            (if kind == "Cuboid" { Shape::Box } else { Shape::Capsule }, radius, height)
         }
         other => {
             reasons.push(Gap::planned("hitbox shape", other));
             (Shape::Sphere, radius, 2.0 * radius)
         }
+    }
+}
+
+/// The reason for a cylinder or cuboid bot flatter than it is wide: how KovaaK's draws and hits one
+/// isn't known (one test showed a shape about as wide as it was tall).
+fn flat_hitbox(kind: &str, radius: f32, height: f32) -> Gap {
+    let name = if kind == "Cuboid" { "cuboid" } else { "cylinder" };
+    Gap::planned(
+        "hitbox shape",
+        format!("a {name} bot flatter than it is wide (height {height:.2} m, radius {radius:.2} m)"),
+    )
+}
+
+/// How far above its spawn point a bot's middle starts, in meters: its height, except a
+/// spheroid, which starts the larger of its height and twice its radius (a flat one rests as a
+/// ball).
+fn spawn_rise(ch: &Section) -> f32 {
+    let height = ch.f32_or("MainBBHeight", 0.0) / UU_PER_M;
+    if ch.str("MainBBType") == "Spheroid" {
+        height.max(2.0 * ch.f32_or("MainBBRadius", 0.0) / UU_PER_M)
+    } else {
+        height
+    }
+}
+
+/// A box bot stays lined up with the map's axes, so it lines up with the sim's only when the
+/// map's turn is a multiple of 90 degrees.
+fn box_alignment(bots: &[&Section], yaw_deg: f32, reasons: &mut Vec<Gap>) {
+    let off = yaw_deg.rem_euclid(90.0);
+    let off = off.min(90.0 - off);
+    if off > 0.5 && bots.iter().any(|b| b.str("MainBBType") == "Cuboid") {
+        reasons.push(Gap::planned(
+            "hitbox shape",
+            format!(
+                "box bots on a map where the player starts turned {:.0}° from the map's axes",
+                yaw_deg.rem_euclid(360.0)
+            ),
+        ));
     }
 }
 
@@ -779,6 +810,7 @@ fn world(
     // the map so the player's starting yaw looks along -Z.
     let yaw_of = |a: [f32; 3]| if reflex { a[0] } else { a[2] };
     let yaw = start.angles.map_or(0.0, yaw_of).to_radians();
+    box_alignment(bots, yaw.to_degrees(), reasons);
     let turn = glam::Quat::from_rotation_y(yaw);
     let place = |p: Vec3| turn * (p - eye);
     for m in &mut meshes {

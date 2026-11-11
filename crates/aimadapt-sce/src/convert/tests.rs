@@ -491,6 +491,95 @@ fn characters_start_their_height_above_where_they_appear() {
     near(standing("StepUpHeight=75.0\n", 0.0).0, 2.3);
 }
 
+/// [`VOLUME_SCE`] with its bot's hitbox changed: type, radius and height in Unreal units.
+fn with_hitbox(kind: &str, radius: f32, height: f32) -> String {
+    VOLUME_SCE
+        .replace("MainBBType=Spheroid", &format!("MainBBType={kind}"))
+        .replace("MainBBRadius=20.0", &format!("MainBBRadius={radius:.1}"))
+        .replace("MainBBHeight=40.0", &format!("MainBBHeight={height:.1}"))
+}
+
+fn import_ok(text: &str) -> crate::convert::Imported {
+    convert(&Sce::parse(text), "x.sce", "0").unwrap_or_else(|e| panic!("{e:?}"))
+}
+
+fn first_spawn_height(text: &str) -> f32 {
+    import_ok(text).scenario.world.unwrap().spawns[0].pos[1]
+}
+
+/// Bug: a tall round bot started too low. Measured in KovaaK's 3.9.13 on 11 November
+/// 2026 (`AimAdapt - Shape Test …` maps): a spheroid's middle starts the larger of its
+/// height and twice its radius above its spawn point, and it is a ball of radius R
+/// whatever its height is. The importer used twice the radius for every spheroid,
+/// and called the tall ones "stretched spheres" in a note.
+#[test]
+fn a_tall_spheroid_starts_its_height_above_its_spawn_point() {
+    let near = |got: f32, want: f32| assert!((got - want).abs() < 0.005, "{got} != {want}");
+    let base = first_spawn_height(VOLUME_SCE); // R 20, H 40
+    let tall = import_ok(&with_hitbox("Spheroid", 20.0, 120.0));
+    let w = tall.scenario.world.clone().unwrap();
+    near(w.spawns[0].pos[1], base + 0.8);
+    assert_eq!((tall.scenario.targets.shape, tall.scenario.targets.radius), (Shape::Sphere, 0.2));
+    assert!(!tall.notes.iter().any(|n| n.contains("stretched")), "{:?}", tall.notes);
+    // A flat one starts twice its radius up, like the round one.
+    let flat = import_ok(&with_hitbox("Spheroid", 20.0, 20.0));
+    near(flat.scenario.world.unwrap().spawns[0].pos[1], base);
+    assert!(!flat.notes.iter().any(|n| n.contains("stretched")), "{:?}", flat.notes);
+}
+
+#[test]
+fn cylinders_play_as_capsules_without_a_note() {
+    let i = import_ok(&with_hitbox("Cylindrical", 20.0, 120.0));
+    let t = &i.scenario.targets;
+    assert_eq!((t.shape, t.radius, t.height), (Shape::Capsule, 0.2, 1.2));
+    assert!(!i.notes.iter().any(|n| n.contains("cylinder")), "{:?}", i.notes);
+}
+
+#[test]
+fn cuboids_play_as_boxes_that_start_their_height_up() {
+    let i = import_ok(&with_hitbox("Cuboid", 20.0, 120.0));
+    let t = &i.scenario.targets;
+    assert_eq!((t.shape, t.radius, t.height), (Shape::Box, 0.2, 1.2));
+    assert!(
+        (i.scenario.world.unwrap().spawns[0].pos[1] - first_spawn_height(&with_hitbox("Spheroid", 20.0, 120.0))).abs()
+            < 1e-4
+    );
+    // R 20 with H exactly 2R is allowed too.
+    assert_eq!(import_ok(&with_hitbox("Cuboid", 20.0, 40.0)).scenario.targets.shape, Shape::Box);
+}
+
+/// A box stays lined up with the map's axes, so the importer can play it only when its
+/// turn of the map (the player's start yaw) is a multiple of 90 degrees.
+#[test]
+fn boxes_need_the_player_to_start_along_an_axis() {
+    let turned = |yaw: &str| {
+        with_hitbox("Cuboid", 20.0, 120.0).replace(
+            r#""rotation": "0, 0, 0", "scale": "1, 1, 1""#,
+            &format!(r#""rotation": "0, 0, {yaw}", "scale": "1, 1, 1""#),
+        )
+    };
+    for ok in ["0", "90", "180", "-90", "270", "90.3"] {
+        assert_eq!(import_ok(&turned(ok)).scenario.targets.shape, Shape::Box, "yaw {ok}");
+    }
+    for bad in ["45", "30", "-45", "91"] {
+        let err = convert(&Sce::parse(&turned(bad)), "x.sce", "0").unwrap_err();
+        assert!(err.iter().any(|r| r.feature == "hitbox shape" && r.detail.contains("box bots")), "yaw {bad}: {err:?}");
+    }
+    // Round bots don't mind the turn.
+    let round = VOLUME_SCE
+        .replace(r#""rotation": "0, 0, 0", "scale": "1, 1, 1""#, r#""rotation": "0, 0, 45", "scale": "1, 1, 1""#);
+    import_ok(&round);
+}
+
+#[test]
+fn cylinders_and_cuboids_flatter_than_they_are_wide_are_refused() {
+    for (kind, word) in [("Cylindrical", "cylinder"), ("Cuboid", "cuboid")] {
+        let err = convert(&Sce::parse(&with_hitbox(kind, 20.0, 30.0)), "x.sce", "0").unwrap_err();
+        let gap = err.iter().find(|r| r.feature == "hitbox shape").unwrap_or_else(|| panic!("{kind}: {err:?}"));
+        assert!(gap.detail.contains(word) && gap.detail.contains("0.30") && gap.detail.contains("0.20"), "{gap:?}");
+    }
+}
+
 /// A made-up brush for [`VOLUME_SCE`]'s map, which has `MapScale=1`: 100 units a meter.
 fn brush_json(mesh: &str, loc: &str, rot: &str, scale: &str) -> String {
     format!(
@@ -688,6 +777,7 @@ fn regen_the_players_spawn_rules_and_walls_come_through() {
 fn early_and_map_reasons_are_reported_together() {
     let text = VOLUME_SCE
         .replace("MainBBType=Spheroid", "MainBBType=Cuboid")
+        .replace("MainBBHeight=40.0", "MainBBHeight=20.0") // flatter than it is wide: still refused
         .replace(r#""TeamMask", "value": 1}"#, r#""TeamMask", "value": 2}"#)
         .replace(r#""TeamMask", "value": 0}"#, r#""TeamMask", "value": 2}"#);
     let err = convert(&Sce::parse(&text), "x.sce", "0").unwrap_err();

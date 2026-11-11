@@ -100,7 +100,7 @@ pub struct TargetPose {
     /// Direction of its center from the player.
     pub yaw_deg: f32,
     pub pitch_deg: f32,
-    /// Angular radius, and for capsules the angular height (0 for spheres).
+    /// Angular radius, and for capsules and boxes the angular height (0 for spheres).
     pub radius_deg: f32,
     pub height_deg: f32,
     /// Health left as a share of full health.

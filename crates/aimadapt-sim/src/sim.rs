@@ -211,7 +211,7 @@ impl Target {
         let distance = self.pos.length().max(0.1);
         let height_deg = match self.shape {
             Shape::Sphere => 0.0,
-            Shape::Capsule => 2.0 * (self.height() / 2.0 / distance).atan().to_degrees(),
+            Shape::Capsule | Shape::Box => 2.0 * (self.height() / 2.0 / distance).atan().to_degrees(),
         };
         TargetPose {
             no: self.track.no,
@@ -761,7 +761,7 @@ fn blocked(walls: &Collider, aim: Vec3, d: f32) -> bool {
 fn half_segment(shape: Shape, radius: f32, height: f32) -> f32 {
     match shape {
         Shape::Sphere => 0.0,
-        Shape::Capsule => (height / 2.0 - radius).max(0.0),
+        Shape::Capsule | Shape::Box => (height / 2.0 - radius).max(0.0),
     }
 }
 
@@ -866,7 +866,28 @@ pub fn ray_hit(dir: Vec3, center: Vec3, radius: f32, shape: Shape, height: f32) 
             let gap = (dir * t_ray - (a + seg * t_seg)).length();
             (t_ray >= 0.0 && gap <= radius).then_some(t_ray)
         }
+        Shape::Box => box_hit(dir, center, Vec3::new(radius, height / 2.0, radius)),
     }
+}
+
+/// Slab test: the distance along the ray from the origin to the box centred on `center`
+/// with half extents `half`. 0 when the origin is inside, `None` when the box is missed or behind.
+fn box_hit(dir: Vec3, center: Vec3, half: Vec3) -> Option<f32> {
+    let (mut near, mut far) = (f32::NEG_INFINITY, f32::INFINITY);
+    for i in 0..3 {
+        let (d, lo, hi) = (dir[i], center[i] - half[i], center[i] + half[i]);
+        if d.abs() < 1e-9 {
+            // Parallel to this pair of faces: the ray stays inside the slab or never enters it.
+            if lo > 0.0 || hi < 0.0 {
+                return None;
+            }
+            continue;
+        }
+        let (t0, t1) = (lo / d, hi / d);
+        near = near.max(t0.min(t1));
+        far = far.min(t0.max(t1));
+    }
+    (near <= far && far >= 0.0).then_some(near.max(0.0))
 }
 
 /// Parameters of the closest points between the ray `t * dir` (t ≥ 0) and the

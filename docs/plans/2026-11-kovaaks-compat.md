@@ -12,7 +12,7 @@ A scenario is refused when it uses something the trainer doesn't model, so every
 | K2 Dashes | fdf08f9 | 103 of 225, 31 of the 34 Novice benchmarks |
 | K3 Helper bots and knockback | 32d5397 | 107 of 225, all 34 Novice benchmarks |
 | K4 Lives, time score and efficiency | 783b0d7 | 111 of 225 |
-| K5 Hitbox shapes | | |
+| K5 Hitbox shapes | | 111 of 225 |
 | K6 Standing and spawning details | | |
 | K15 Ability and helper setups K2 and K3 refuse | | |
 | K7 Armed bots that never fire, invincible characters | | |
@@ -162,11 +162,26 @@ After K4, 111 of the 225 files play. The four new ones are the three local files
 
 ### K5. Hitbox shapes
 
-- True cylinders (flat ends; they are capsules now), stretched spheres (a height other than twice the radius; they are round now), and cuboids.
-- The weapon's hit radius: a shot counts when it passes within that distance of the hitbox.
-- `aimadapt-sim`: new `Shape` variants with their own ray tests, and the hit radius on the weapon. `aimadapt-engine` draws each shape as it is hit.
-- The import notes "cylinder bots are played as capsules", "bots are stretched spheres in KovaaK's" and "the weapon's hit radius is left out" go away.
-- Tests: ray hits and misses at the edges of each shape, with and without a hit radius, and the fingerprints of scenarios that already play.
+The plan first read the three `MainBBType` values by their names: a cylinder with flat ends, a sphere stretched to its height, and a box. Two of the three were wrong, so the shapes were measured before anything was built.
+
+Measured on 11 November 2026 with five test maps in KovaaK's 3.9.13 (`AimAdapt - Shape Test …`). Bots stood around a fixed ray straight ahead, fire was held for 1.5 s, and hits were read from the kill count and from screen captures. Below, R is the character's `MainBBRadius` and H its `MainBBHeight`.
+
+- `Cylindrical` with H of 2R or more is a capsule of radius R and total height H, rounded ends included. It is drawn that way and hit that way. The importer already played it as one, so its note "cylinder bots are played as capsules" described a difference that doesn't exist.
+- `Spheroid` is a ball of radius R whatever H is, tall or flat. It is never stretched. The importer already played it round, so the note "bots are stretched spheres in KovaaK's" was wrong too.
+- `Cuboid` with H of 2R or more is a box 2R wide, 2R deep and H tall. It stays lined up with the map's axes: neither the bot's aim nor its spawn point's yaw turns it.
+- Start height: a character's middle is H above its spawn point for all three shapes when H is 2R or more. A flat `Spheroid` (H under 2R) starts 2R above it. So a spheroid starts the larger of H and 2R above its spawn point. The importer used 2R for every spheroid, which put the tall ones too low. That is a bug, fixed here.
+- Standing, with gravity on a floor: a tall `Spheroid` (R 100 or 50, H 800) falls and rests as a ball of radius R, like a round one. A capsule and a box (R 100, H 800) stand H tall with their bottom on the floor.
+- `Cylindrical` and `Cuboid` with H under 2R: one test (R 200, H 160) was drawn and hit as a shape about 100 units across and tall. The rule behind that isn't known, and no local file has one, so they are refused.
+- No local file's weapon has a `HitscanRadius` above 1 unit. With nothing to check a hit radius against, it isn't built, and its note stays for the day a file has one.
+
+What gets built:
+
+- `aimadapt-sim`: a third `Shape`, `Box` (`"box"` in a scenario file): `radius` is half its width and half its depth, `height` its full height, and its faces lie along the sim's axes. A shot hits when the ray meets the box. For moving, standing on floors, bumping and being pushed, a box uses the same body as a capsule of that radius and height. `aimadapt-engine` draws it as a box, and the scenario editor offers it as a shape.
+- `aimadapt-sce`: a `Cuboid` with H of 2R or more imports as a box when the player starts facing along one of the map's axes (a start yaw that is a multiple of 90 degrees). The importer turns the map by that yaw, so on any other map the box would sit turned against the sim's axes, and such a file is refused. All six local files with cuboids pass. `Cylindrical` and `Cuboid` flatter than 2R are refused. The two wrong notes go.
+- The tall spheroid's start height: the larger of H and 2R. Importer only, and only the first kind of bot (every kind uses the first kind's height until K6). The hit shape and the standing body were already right. The player's own eye height isn't touched: it was measured on other shapes.
+- Tests: ray hits and misses at a box's faces, edges and corners (where a capsule of the same size misses), a regression test for the tall spheroid's start height, the refusals, a made-up fixture with box bots, and the fingerprints of fixtures that already play.
+
+Done. After K5, 111 of the 225 files still play: no file started or stopped playing. Twelve playing files have a tall round bot as their first kind (H from 1.04 to 5.45 times 2R), so their bots now start higher and bests set on them here start again. The stretched-sphere note left 11 playing files and the cylinder note 26, and no file gained a note. One playing file has tall round bots only as later kinds, and it plays as before until K6 gives each kind its own start height. None of the six local files with cuboids plays yet, because each waits on another package too. So the box is checked by the sim's tests and the made-up Box Row fixture, and it hasn't been played or looked at in the engine on a real file.
 
 ### K6. Standing and spawning details
 
@@ -265,6 +280,7 @@ These rows are filled in as packages land. A row leaves the table when a test ma
 | Several helpers with the same name | Each takes the next spawn point its character is allowed on, in file order | No |
 | A pinned helper's spawn delay | None: it hits from the start of the run | No |
 | A chasing helper's position | On the outer face of the clip slab, at the point nearest its target, with no travel time | Partly: one test map, by eye |
+| A moving cuboid bot's box | Stays lined up with the map's axes as the bot moves and turns | No: measured on still bots |
 | `InvincibleBots` on a character | That character's bots can't die, whatever the scenario's own flag says | No |
 | `StandStillUntilHurt` on a bot that is pushed | The pushes move it only once it has been hurt | No |
 | A flier's vertical speed when it is lifted | The push is added to it like any other speed | No |
