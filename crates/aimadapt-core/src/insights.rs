@@ -603,21 +603,21 @@ fn tracking_samples_by_run(
 }
 
 /// What [`breakthroughs`] needs to know about one run.
-struct Held<'a> {
-    knob: Option<&'a str>,
+pub(crate) struct Held<'a> {
+    pub(crate) knob: Option<&'a str>,
     /// The scenario's settings fingerprint: runs of another version are on another scale.
-    hash: Option<&'a str>,
+    pub(crate) hash: Option<&'a str>,
     /// Set when the run was played at one value (not a calibration run).
-    run_value: Option<f64>,
+    pub(crate) run_value: Option<f64>,
     /// The value the goal was held at for the whole run.
-    fastest: Option<f64>,
+    pub(crate) fastest: Option<f64>,
 }
 
 /// Which runs, in time order, were breakthroughs: held the goal at a value harder than
 /// every earlier held run with the same knob and version. The first held run of a version
 /// is never one. This is how `Rating::finish_run` in the sim decides, with the best-before
 /// from `Db::fastest_hit`; breakthroughs are not stored, so they are derived here.
-fn breakthroughs(runs: &[Held]) -> Vec<bool> {
+pub(crate) fn breakthroughs(runs: &[Held]) -> Vec<bool> {
     let mut best: HashMap<(&str, Option<&str>), f64> = HashMap::new();
     runs.iter()
         .map(|r| {

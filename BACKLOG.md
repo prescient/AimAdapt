@@ -164,9 +164,9 @@ Last reviewed: Nov 10, 2026 (after the layout review and the adaptive review; th
 - [x] Help: the user guide (`ui/guide.md`) with contents, search and What's new. Every page's header links to its section. A test keeps it in step with the pages, built-ins, ratings, trainer keys and version.
 - [x] Play always means an adaptive run of one scenario; workouts and program days say Start session, Continue session and Repeat session; a KovaaK's scenario that plays here says Play in AimAdapt (plan L1).
 - [x] A scenario's page has Overview, Insights and Runs tabs under one header, each with its own address, and a KovaaK's scenario's page has Overview and Runs the same way (plan L2).
+- [x] Closing the trainer after a run opens a session summary: each scenario's rating before and after the session with the change and its likely range, breakthroughs, the time played and one note. Today has a Last session card with the same changes (planned as "Since your last session"; plan L3b). Ratings and scoring are unchanged and there is no migration.
 
 ### To do (second step of the simpler layout)
-- [ ] `todo` P1 Today: "Since your last session" (rating changes and breakthroughs since the session before) and each drill's change against the same day last week, with a session summary when the trainer closes (plan L3b).
 - [x] Progress trimmed: Skills leads with the profile and carry-over and has no start buttons, Benchmarks says it comes from KovaaK's, Time folds its extra cards, and notes are ranked once, with Today showing the top one (plan L4).
 - [x] Help has its filter at the top of the contents rail, which lists only the matching sections, marks the current one and scrolls on its own; the sidebar shows icons only at 1180 px and under; editor sections that hold only defaults start folded; every page's Help link lands on a guide section (plan L6b).
 - [ ] `todo` P2 One streak: the program streak and the all-runs streak still differ (Today shows the all-runs one).

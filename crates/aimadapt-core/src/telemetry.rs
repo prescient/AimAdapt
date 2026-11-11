@@ -617,6 +617,11 @@ impl Db {
             |r| r.get(0),
         )?)
     }
+
+    /// How many runs the trainer has saved.
+    pub fn trainer_run_count(&self) -> Result<i64, DbError> {
+        Ok(self.conn().query_row("SELECT COUNT(*) FROM engine_runs", [], |r| r.get(0))?)
+    }
 }
 
 #[cfg(test)]
@@ -789,6 +794,32 @@ mod tests {
         let stored = db.last_rating_for("Timed Flicks", "abc123").unwrap().expect("matches the fingerprint");
         assert_eq!(stored.slope_sd, Some(0.18));
         assert!(db.last_rating_for("Timed Flicks", "other").unwrap().is_none());
+    }
+
+    /// The app counts the trainer's saved runs before and after a visit to know how many
+    /// it played. A run with no `engine_runs` row (a KovaaK's run) is not one of them.
+    #[test]
+    fn trainer_runs_are_counted_without_the_kovaaks_ones() {
+        use crate::parse::RunFile;
+        use chrono::NaiveDate;
+        let mut db = Db::open_in_memory().unwrap();
+        assert_eq!(db.trainer_run_count().unwrap(), 0);
+        save_rated(&mut db, 2, None);
+        assert_eq!(db.trainer_run_count().unwrap(), 1);
+        save_rated(&mut db, 3, None);
+        assert_eq!(db.trainer_run_count().unwrap(), 2);
+        let at = NaiveDate::from_ymd_opt(2026, 11, 4).unwrap().and_hms_opt(7, 0, 0).unwrap();
+        let kovaaks = RunFile {
+            file_name: "kovaaks/1".into(),
+            scenario: "1wall6targets TE".into(),
+            mode: "Score".into(),
+            finished_at: at,
+            fields: std::collections::BTreeMap::new(),
+            kills: vec![],
+            weapons: vec![],
+        };
+        db.insert_runs(&[kovaaks], at).unwrap();
+        assert_eq!(db.trainer_run_count().unwrap(), 2);
     }
 
     #[test]

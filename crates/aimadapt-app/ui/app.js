@@ -33,6 +33,7 @@ const PREVIEW = {
   insights: (d, a) => d.insights?.[a.scenario] ?? null,
   replay: (d, a) => d.replays?.[a.runId] ?? null,
   program: (d) => d.program,
+  last_session: (d) => d.last_session ?? null,
   sce_library: (d) => d.sce_library ?? [],
   sce_info: (d, a) => d.sce_info?.[a.name] ?? { path: null, playable: false, reasons: [], notes: [], runs: 0, best: null, last_played: null },
 };
@@ -226,7 +227,7 @@ function movedTo({ view, arg }) {
 }
 
 // The sidebar entry each page belongs to.
-const NAV_OF = { edit: "scenarios", workout: "scenarios", replay: "scenarios" };
+const NAV_OF = { edit: "scenarios", workout: "scenarios", replay: "scenarios", session: "today" };
 
 function render() {
   const r = route();
@@ -249,7 +250,7 @@ function render() {
     return;
   }
   if (!ui.snap) return;
-  const views = { today, scenarios: scenariosPage, edit, workout, progress: progressPage, settings: settingsPage, help: helpPage, replay: replayPage };
+  const views = { today, scenarios: scenariosPage, edit, workout, progress: progressPage, settings: settingsPage, help: helpPage, replay: replayPage, session: sessionPage };
   const focused = focusedControl(main);
   try {
     main.innerHTML = (views[view] || today)(arg, tab);

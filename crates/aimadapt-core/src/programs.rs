@@ -38,6 +38,8 @@ use crate::db::TIME_FORMAT;
 use crate::knob::Knob;
 use crate::training::TimeSettings;
 
+pub mod recap;
+
 /// A day counts as done at this share of its planned runs.
 pub const DONE_SHARE: f64 = 0.75;
 
@@ -203,6 +205,12 @@ struct Row {
     block: Option<String>,
     /// The rating's standard deviation in the knob's log units, when known.
     sd: Option<f64>,
+    /// Set when the run was played at one value (not a calibration run).
+    run_value: Option<f64>,
+    /// The value the goal was held at for the whole run.
+    fastest: Option<f64>,
+    /// The run's score.
+    score: Option<f64>,
 }
 
 /// A rating's standard deviation: the stored one when it is usable, otherwise half the
@@ -219,7 +227,7 @@ fn load(db: &Db, time: &TimeSettings) -> Result<Vec<Row>, DbError> {
     let mut stmt = db.conn().prepare(
         "SELECT r.id, r.finished_at, COALESCE(r.duration_s, 60), e.base_scenario, e.knob, e.rating, e.adaptive,
                 e.skill, e.program, e.program_day, e.rep, e.block, r.scenario_hash,
-                e.rating_sd, e.rating_low, e.rating_high
+                e.rating_sd, e.rating_low, e.rating_high, e.run_value, e.fastest, r.score
          FROM engine_runs e JOIN runs r ON r.id = e.run_id ORDER BY r.finished_at, r.id",
     )?;
     let rows = stmt.query_map([], |r| {
@@ -244,6 +252,9 @@ fn load(db: &Db, time: &TimeSettings) -> Result<Vec<Row>, DbError> {
                 block: r.get(11)?,
                 hash: r.get(12)?,
                 sd,
+                run_value: r.get(16)?,
+                fastest: r.get(17)?,
+                score: r.get(18)?,
             },
         ))
     })?;

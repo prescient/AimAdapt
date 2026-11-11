@@ -404,6 +404,39 @@ fn the_trainer_can_send_the_app_to_a_page() {
     assert!(loaded.is_some() && opened > loaded, "the page opens after the data is reloaded");
 }
 
+/// Closing the trainer after a run lands on the session summary. The page and Today's
+/// card read the `last_session` command, the summary opens only after it is reloaded,
+/// and a page the player asked for, an error or the editors keep the app where it is.
+#[test]
+fn closing_the_trainer_opens_the_session_summary() {
+    let session = ui("session.js");
+    assert!(session.contains("invoke(\"last_session\""), "the page reads the command");
+    assert!(decl(&ui("today.js"), "today").contains("lastSessionCard()"), "Today shows the card");
+    assert!(decl(&session, "lastSessionCard").contains("#session"), "the card links to the page");
+    // From Today, a Back button would sit beside a Today button that goes to the same place.
+    assert!(decl(&session, "sessionHead").contains("[\"#session\", \"#today\"].includes(from)"), "no Back to Today");
+    // A change column kept on one line pushed the table past its card at the window's
+    // smallest width, so only its numbers are kept from wrapping.
+    assert_eq!(decl(&session, "sessionRow").matches("white-space:nowrap").count(), 1, "only the rating cell");
+    assert!(decl(&session, "sessionChange").contains("noWrap(changeSpan("), "the numbers stay on one line");
+
+    let trainer = ui("trainer.js");
+    let open = decl(&trainer, "openAfterTrainer");
+    for needle in ["#session", "played", "closed?.error", "\"edit\""] {
+        assert!(open.contains(needle), "openAfterTrainer should use {needle}: {open}");
+    }
+    let closed = trainer.split("listen(\"trainer-closed\"").nth(1).expect("trainer-closed listener");
+    let (reloaded, opened) = (closed.find("loadSession(true)"), closed.find("openAfterTrainer("));
+    assert!(reloaded.is_some() && opened > reloaded, "the summary opens after its data is reloaded");
+
+    let app = ui("app.js");
+    assert!(app.contains("session: sessionPage") && app.contains("session: \"today\""), "the page is routed");
+    let index = ui("index.html");
+    let (today, summary, help) =
+        (index.find("src=\"today.js\""), index.find("src=\"session.js\""), index.find("src=\"help.js\""));
+    assert!(today.is_some() && summary > today && help > summary, "session.js loads after today.js, before help.js");
+}
+
 /// The trainer can close with an error (`trainer-closed` carries { error }), and a
 /// settings file can be unusable (`profiles_note`). Both are shown, escaped, as
 /// warnings: the first on the pages that start the trainer until dismissed or the

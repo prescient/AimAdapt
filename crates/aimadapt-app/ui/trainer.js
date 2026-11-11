@@ -429,15 +429,24 @@ document.addEventListener("change", (e) => {
   if (e.target.dataset.witem !== undefined && route().view === "workout") render();
 });
 
-// V or I on the trainer's results screen closes the trainer and asks for a page here.
-function openAfterTrainer(open) {
+// What the app shows once the trainer has closed. V or I on the trainer's results
+// screen asks for a page. Otherwise, when runs were played and the trainer closed
+// cleanly, it is the session summary, except from the editors, where the player is
+// testing what they are building.
+function openAfterTrainer(closed) {
+  const open = closed?.open;
   if (open?.replay != null) location.hash = `#replay/${open.replay}`;
   else if (open?.scenario) location.hash = scenarioHrefByName(open.scenario);
+  else if (!closed?.error && closed?.played > 0 && !["edit", "workout", "session"].includes(route().view)) {
+    ui.session.from = location.hash;
+    location.hash = "#session";
+  }
 }
 
 // The trainer saved its runs and closed: reload what shows them. The event says
-// whether it closed with an error ({ error: string | null }) for the banner, and
-// which page the player asked for ({ replay: id } or { scenario: name }, or null).
+// whether it closed with an error ({ error: string | null }) for the banner, which
+// page the player asked for ({ replay: id } or { scenario: name }, or null), and how
+// many runs it saved (played).
 listen("trainer-closed", async (event) => {
   ui.trainer.closedError = event?.payload?.error ?? null;
   await load();
@@ -445,5 +454,6 @@ listen("trainer-closed", async (event) => {
   if (typeof loadInsightsOverview === "function") loadInsightsOverview(true);
   // Imported runs show on the KovaaK's scenario's page.
   if (typeof ui.sceInfo !== "undefined") ui.sceInfo.clear();
-  openAfterTrainer(event?.payload?.open);
+  if (typeof loadSession === "function") await loadSession(true);
+  openAfterTrainer(event?.payload);
 });

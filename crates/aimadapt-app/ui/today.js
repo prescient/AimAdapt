@@ -1,6 +1,6 @@
 // Today: the home page. Today's program workout with each drill's runs and rating,
-// the week at a glance, your favorites and what you played last (each with its play button),
-// and the top note from your history.
+// the Last session card (lastSessionCard, in session.js), the week at a glance, your favorites and
+// what you played last (each with its play button), and the top note from your history.
 // Loaded after program.js and scenarios.js and draws with their helpers.
 
 function today() {
@@ -19,7 +19,7 @@ function today() {
       <strong>${streak} day${streak === 1 ? "" : "s"}</strong> streak · ${dur(active)} of ${goal} min today</span>`)}
     ${trainerBanners()}
     <div class="row" style="align-items:flex-start">
-      <div style="flex:3 1 520px;min-width:0;display:flex;flex-direction:column;gap:16px">${todayWorkout()}</div>
+      <div style="flex:3 1 520px;min-width:0;display:flex;flex-direction:column;gap:16px">${todayWorkout()}${lastSessionCard()}</div>
       <div style="flex:2 1 300px;min-width:0;display:flex;flex-direction:column;gap:16px">${weekStrip()}${favoritesCard()}${recentlyPlayed()}</div>
     </div>
     ${worthKnowing()}

@@ -20,10 +20,26 @@ Today is the home page: what to play now and how the week is going.
 
 - **Streak and today's time** at the top: the days in a row you've trained, and today's active time against your daily goal, which you set on Settings › Training.
 - **Today's workout:** today's day of the Core Week program, with each drill's block (warm-up, main, secondary, maintenance), its runs and your current 85% rating. The bar shows how many of today's runs you've done. The button says **Start session**, **Continue session** if you've done part of it, or **Repeat session** once it's done. **Something else** opens Scenarios on Browse. A drill's name opens it on Scenarios. On a rest day it tells you what's next. The line under the title names your adaptive mix and links to Settings › Training, where you change it.
+- **Last session:** what your last session in the trainer changed. Each scenario shows its 85% rating before and after the session and the change with its likely range, grey when zero is inside the range. The line under the title has the day, the active time, the runs and any breakthroughs. **Summary** opens the [session summary](#help/session). The card appears once you have played a run in the trainer.
 - **This week:** each day's minutes in the program, coloured done, partial or missed. **Whole week** opens the Program tab on Scenarios, with every day's drills.
 - **Favorites:** the scenarios and workouts you've starred (up to six), with **Play** on scenarios and **Start session** on workouts.
 - **Recently played:** your last five scenarios or workouts, with your current figure and **Play** on scenarios or **Start session** on workouts. Play starts an adaptive run. KovaaK's scenarios have no button here unless AimAdapt can play them (then it says **Play in AimAdapt**); the rest you play in KovaaK's.
 - **Worth knowing:** the top note: the most important one from your skill profile and history (see Worth knowing under [Progress](#help/progress)). When your least improved skill is the top note, it links to that skill's scenarios on Browse. **All notes** opens the full list on Progress › Skills. With no notes, the card isn't shown.
+
+## Session summary {#session}
+
+When you close the trainer after playing at least one run, the app opens the session summary: what the session you just played changed. It is also behind **Summary** on Today's Last session card. A session is the same as on Progress › Time: a new one starts after a 15-minute break, and KovaaK's runs in the same sitting count toward its length.
+
+- **Active time, runs and breakthroughs** are at the top. Active time is the time inside runs. Runs counts the trainer's runs and says how many more you played in KovaaK's.
+- **Scenarios** has one row for each scenario you played, in the order you first played them.
+  - **85% rating** is your rating before the session and after it. Before means the last rating you had on the same version of the scenario, and the line under the change says which day that was. A scenario rated for the first time shows the new rating alone.
+  - **Change** is how much better or worse the rating is, with its likely range. A grey change has zero inside its range, so it may be noise. One session moves a rating a little. The trend is on the scenario's page.
+  - A program drill also shows its change since the same day of the program the time before, usually a week ago, when that is a different day from the one above.
+  - **Breakthroughs** counts the runs that held a harder level than any run before (see [Adaptive mode](#help/adaptive)).
+  - A scenario you played only in standard mode shows the best score of the session.
+- **Worth knowing** is one note from the scenario you played most, the one most worth acting on next. Its link opens that scenario's insights, where every note is.
+
+**Back** returns to the page you were on. When that page was Today, the **Today** button is the way back. If you pressed **V** or **I** on the trainer's results screen, the app opens that replay or scenario's page and the summary stays on Today's card. After a test run from the scenario or workout editor the app stays on the editor. If the trainer closed with an error, the app stays where it was and shows the error.
 
 ## Scenarios {#scenarios}
 
@@ -86,7 +102,7 @@ The trainer is a separate game window. It opens over the app window: centered ac
 
 **After a run** the results show your rating and its likely range, your success rate, accuracy, kills, timeouts and average time to kill. Once a scenario has a rating, a line also says how the run went. A run at your level is judged against the 85% goal: you held it, you reached it in a run too short to count, or you came in below. A stretch or easy run is judged against its own plan: "As planned", "Above plan" or "Below plan", with what the plan expected. "As planned" allows for the luck of a run that length and never less than five points either way, so a short run has more room than a long one. A stretch run that holds 85% says so. The line only describes the run: every run counts toward your rating in the same way. A breakthrough gets a banner (see [Adaptive mode](#help/adaptive)).
 
-Under the figures is a small chart of your last ten ratings on the scenario (scores for a standard run), oldest on the left, with this run marked in green. Up is always better, so on a scenario rated in seconds the shortest time is at the top. Runs of an older version of the scenario are left out, and the chart appears from the second run. Below it is one note from your recent runs, the one most worth acting on next. Every note is on the scenario's page. **V** closes the trainer and opens this run's replay, and **I** opens the scenario's page. In a workout both end the workout where it is. On a small window the chart and the note are left out when they don't fit, so the keys always stay on the screen.
+Under the figures is a small chart of your last ten ratings on the scenario (scores for a standard run), oldest on the left, with this run marked in green. Up is always better, so on a scenario rated in seconds the shortest time is at the top. Runs of an older version of the scenario are left out, and the chart appears from the second run. Below it is one note from your recent runs, the one most worth acting on next. Every note is on the scenario's page. **V** closes the trainer and opens this run's replay, and **I** opens the scenario's page. In a workout both end the workout where it is. When you close the trainer, the app opens the [session summary](#help/session). On a small window the chart and the note are left out when they don't fit, so the keys always stay on the screen.
 
 The last run of a workout also lists the workout: one line for each scenario. A scenario you played once shows that run. One you played several times shows how many runs, with the rating you ended on and the rating you had before the workout, or your best score for standard runs.
 
@@ -342,6 +358,7 @@ Nothing is sent anywhere. Deleting one of your scenarios or workouts removes the
 ## What's new {#whats-new}
 
 **November 2026**
+- Closing the trainer opens a **session summary**: each scenario's rating before and after the session with the change and its likely range, breakthroughs, the time played and one note. Today has a **Last session** card with the same changes. Ratings and scoring are unchanged.
 - The trainer's results screen shows a chart of your last ten ratings on the scenario with the run marked, and one note from your recent runs. **V** opens the run's replay and **I** the scenario's page, both in the app. The list at the end of a workout has one line for each scenario, where it had one for each run. Ratings and scoring are unchanged.
 - Settings has a **Training** tab in place of Goals and time. The adaptive mix moved there and is now one setting for every profile (the active profile's mix carries over). The daily goal can be changed. Today's workout and a scenario's page show the mix in use and link to the tab. The advice on how long to train no longer treats half an hour as a limit.
 - Progress › Skills shows a likely range on every change (the skill profile, reps and carry-over, the week's comparison and the biggest gain) and greys a change that is inside its own noise. Carry-over has a **By drill** summary that appears after three sessions of a drill. The note about the skill furthest behind now names your least improved skill, once two skills have three sessions each. Saturday's weak-spots day picks the skills you've trained least first and ranks a skill by its change only after three sessions, so its drills may differ from before. Ratings and scoring are unchanged.

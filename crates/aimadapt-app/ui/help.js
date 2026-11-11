@@ -133,7 +133,7 @@ function scrollToHelp() {
 }
 
 // The guide section for the page at this address. Every id is a section of guide.md.
-const HELP_FOR = { today: "today", progress: "progress", settings: "settings", edit: "edit", workout: "workout", replay: "replay" };
+const HELP_FOR = { today: "today", progress: "progress", settings: "settings", edit: "edit", workout: "workout", replay: "replay", session: "session" };
 function helpSection({ view, arg }) {
   if (view === "scenarios") {
     if (arg === "program") return "program";

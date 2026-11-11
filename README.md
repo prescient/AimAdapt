@@ -92,7 +92,7 @@ Today shows today's day. Scenarios › Program shows the whole week, with every 
 
 Four pages, in the sidebar:
 
-- **Today:** today's program workout with each drill's runs and 85% rating, and Start session, Continue session or Repeat session. Also the week at a glance (**Whole week** opens the Program tab), your favorites and what you played last (each with Play, or Start session for a workout), and the top note from your history.
+- **Today:** today's program workout with each drill's runs and 85% rating, and Start session, Continue session or Repeat session. Also what your last session changed (each scenario's rating before and after, with the change and its likely range), the week at a glance (**Whole week** opens the Program tab), your favorites and what you played last (each with Play, or Start session for a workout), and the top note from your history.
 - **Scenarios:** everything you can play or have played (the trainer's scenarios, your workouts and your KovaaK's scenarios) in three tabs across the page: Browse (every scenario, the trainer's and your KovaaK's files, with tag chips; it opens on what you played last once you've played something), Workouts and Program (the week's plan: a card for each day with its drills, your progress and a Start session button). Browse and Workouts are tables you can sort by any column, with a search over names, skills, tags and descriptions and filters for skill, type, played or not, your own scenarios and favorites. One column shows your 85% rating on an AimAdapt scenario or your best score where there is no rating. Star favorites and hide what you don't want listed. Each scenario and workout has its own page: Play (adaptive) and Standard run at the top with your latest rating, then three tabs: Overview (key figures, rating chart, latest runs and a few notes), Insights (what to work on and the charts below) and Runs (every run, with replays). A KovaaK's scenario's page has Overview (score history) and Runs.
 - **Progress:** three tabs.
   - **Skills:** the skill profile (the change in each of the nine sub-skills, each group and overall, measured from the end of your first day on each drill) beside the notes (every note, most important first), reps and carry-over (a By drill carry-over summary after three sessions of a drill, then rep 1 against the last rep of each drill and how much of the previous session's rating carried over), and the week's results (each day done, partial or missed, its minutes and its main drills against the same day last week). Every change shows its likely range and is greyed when zero is inside it, because a change that small may be noise.
@@ -103,6 +103,8 @@ Four pages, in the sidebar:
   - **Training:** the adaptive mix, your daily goal, advice on how long to train and how time is counted.
   - **KovaaK's:** the stats folder, import status and sensitivity history.
   - **Your data:** where your files are.
+
+Closing the trainer opens a session summary: each scenario's rating before and after the session, the change with its likely range, breakthroughs, the time played and one note.
 
 Help is at the bottom of the sidebar, and every page links to its section of the user guide.
 

@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use aimadapt_core::insights;
+use aimadapt_core::programs::recap;
 use aimadapt_sim::adaptive::Mix;
 use aimadapt_sim::prefs::TrainingPrefs;
 use aimadapt_sim::profiles::{self, Profile, Profiles};
@@ -286,6 +287,13 @@ pub fn insights(state: State<'_, AppData>, scenario: String) -> Result<Option<in
     insights::scenario(&db, &scenario).map_err(err)
 }
 
+/// What the last session changed, for the session summary and Today.
+#[tauri::command(async)]
+pub fn last_session(state: State<'_, AppData>) -> Result<Option<recap::SessionRecap>, String> {
+    let db = state.db.lock().map_err(err)?;
+    recap::last_session(&db, &state.time()).map_err(err)
+}
+
 /// A trainer run's replay, or `None` for a run without one.
 #[tauri::command(async)]
 pub fn replay(state: State<'_, AppData>, run_id: i64) -> Result<Option<aimadapt_core::replay::Replay>, String> {
@@ -347,6 +355,22 @@ pub struct TrainerClosed {
     pub error: Option<String>,
     /// The page to open, when the player asked for one with a key on the results screen.
     pub open: Option<OpenPage>,
+    /// Runs the trainer saved while it was open.
+    pub played: u32,
+}
+
+/// How many runs the trainer has saved, or `None` when the database can't say.
+fn trainer_runs(state: &AppData) -> Option<i64> {
+    state.db.lock().ok()?.trainer_run_count().ok()
+}
+
+/// Runs saved while the trainer was open, from the counts before and after. A count
+/// that went down (a run was deleted meanwhile) is none.
+pub(crate) fn played(before: Option<i64>, after: Option<i64>) -> u32 {
+    match (before, after) {
+        (Some(b), Some(a)) => u32::try_from(a - b).unwrap_or(0),
+        _ => 0,
+    }
 }
 
 /// The trainer reports problems on stderr (`aimadapt: <message>`, or a panic) and
@@ -357,9 +381,10 @@ pub(crate) fn closed_report(
     code: Option<i32>,
     stderr: &[String],
     open: Option<OpenPage>,
+    played: u32,
 ) -> TrainerClosed {
     if success {
-        return TrainerClosed { error: None, open };
+        return TrainerClosed { error: None, open, played };
     }
     let own: Vec<&str> = stderr.iter().filter_map(|l| l.strip_prefix("aimadapt: ")).collect();
     let lines: Vec<&str> = if own.is_empty() {
@@ -376,7 +401,7 @@ pub(crate) fn closed_report(
     } else {
         format!("The trainer closed with an error: {}", lines.join(" "))
     };
-    TrainerClosed { error: Some(error), open: None }
+    TrainerClosed { error: Some(error), open: None, played }
 }
 
 /// Sorts one line of the trainer's stderr: a request to open a page is kept aside,
@@ -394,6 +419,7 @@ fn take_line(line: String, lines: &mut std::collections::VecDeque<String>, open:
 
 fn launch(app: AppHandle, state: &AppData, t: &TrainerState, args: &[String]) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(err)?;
+    let before = trainer_runs(state);
     if t.playing.swap(true, Ordering::SeqCst) {
         return Err("The trainer is already open".into());
     }
@@ -427,10 +453,11 @@ fn launch(app: AppHandle, state: &AppData, t: &TrainerState, args: &[String]) ->
         let status = child.wait();
         use tauri::Manager;
         app.state::<TrainerState>().playing.store(false, Ordering::SeqCst);
+        let played = played(before, trainer_runs(&app.state::<AppData>()));
         let lines: Vec<String> = lines.into();
         let report = match status {
-            Ok(s) => closed_report(s.success(), s.code(), &lines, open),
-            Err(e) => TrainerClosed { error: Some(format!("Lost track of the trainer: {e}")), open: None },
+            Ok(s) => closed_report(s.success(), s.code(), &lines, open, played),
+            Err(e) => TrainerClosed { error: Some(format!("Lost track of the trainer: {e}")), open: None, played },
         };
         let _ = app.emit("trainer-closed", report);
     });
@@ -675,13 +702,28 @@ mod tests {
     #[test]
     fn a_failed_trainer_says_why() {
         let lines = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        assert_eq!(closed_report(true, Some(0), &[], None), TrainerClosed { error: None, open: None });
-        let r = closed_report(false, Some(2), &lines(&["some log line", "aimadapt: no built-in scenario nope"]), None);
+        assert_eq!(closed_report(true, Some(0), &[], None, 0), TrainerClosed { error: None, open: None, played: 0 });
+        let r =
+            closed_report(false, Some(2), &lines(&["some log line", "aimadapt: no built-in scenario nope"]), None, 0);
         assert_eq!(r.error.as_deref(), Some("The trainer closed with an error: no built-in scenario nope"));
-        let r = closed_report(false, Some(101), &lines(&["thread 'main' panicked at src/x.rs:1:1:", "boom"]), None);
+        let r = closed_report(false, Some(101), &lines(&["thread 'main' panicked at src/x.rs:1:1:", "boom"]), None, 0);
         assert!(r.error.unwrap().contains("boom"));
-        let r = closed_report(false, Some(3), &[], None);
+        let r = closed_report(false, Some(3), &[], None, 0);
         assert!(r.error.unwrap().contains("exit code 3"));
+    }
+
+    /// The app counts the runs the trainer saved between launch and exit and tells the UI, so it
+    /// can open the session summary. A crash after some runs still saved them.
+    #[test]
+    fn the_app_counts_the_runs_a_trainer_visit_saved() {
+        assert_eq!(played(Some(3), Some(5)), 2);
+        assert_eq!(played(Some(4), Some(4)), 0);
+        assert_eq!(played(Some(5), Some(3)), 0, "a run was deleted meanwhile");
+        assert_eq!(played(None, Some(3)), 0);
+        assert_eq!(played(Some(3), None), 0);
+        assert_eq!(closed_report(true, Some(0), &[], None, 2).played, 2);
+        assert_eq!(closed_report(false, Some(1), &[], None, 3).played, 3);
+        assert_eq!(serde_json::to_value(closed_report(true, Some(0), &[], None, 1)).unwrap()["played"], 1);
     }
 
     /// V or I on the results screen make the trainer print one line, and the app passes the page on
@@ -705,8 +747,8 @@ mod tests {
         take_line("aimadapt-open: scenario Timed Flicks".into(), &mut lines, &mut open);
         assert_eq!(open, Some(OpenPage::Scenario("Timed Flicks".into())), "the last request wins");
         let page = Some(OpenPage::Replay(9));
-        assert_eq!(closed_report(true, Some(0), &[], page.clone()).open, page);
-        assert_eq!(closed_report(false, Some(2), &[], page).open, None);
+        assert_eq!(closed_report(true, Some(0), &[], page.clone(), 0).open, page);
+        assert_eq!(closed_report(false, Some(2), &[], page, 0).open, None);
     }
 
     /// The editor folds a section when its fields equal the defaults, read from the payload's `defaults`
