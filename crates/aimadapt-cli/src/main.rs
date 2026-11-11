@@ -178,18 +178,53 @@ enum Status {
     Plays(Box<aimadapt_sce::Imported>),
     /// Covered by the plan, but the importer refuses it, for these reasons.
     Refused(Vec<aimadapt_sce::Gap>),
-    /// It uses features outside the plan.
+    /// It uses features outside the plan. Holds every reason, planned ones too.
     Gaps(Vec<aimadapt_sce::Gap>),
 }
 
 fn status(path: &Path) -> Status {
     match aimadapt_sce::import(path) {
         Ok(i) => Status::Plays(Box::new(i)),
-        Err(reasons) if reasons.iter().any(|g| g.beyond_plan) => {
-            Status::Gaps(reasons.into_iter().filter(|g| g.beyond_plan).collect())
-        }
+        Err(reasons) if reasons.iter().any(|g| g.beyond_plan) => Status::Gaps(reasons),
         Err(reasons) => Status::Refused(reasons),
     }
+}
+
+/// The lines under a `--` file: the reasons outside the plan, then the planned ones.
+fn gap_lines(gaps: &[aimadapt_sce::Gap]) -> Vec<String> {
+    let beyond = gaps.iter().filter(|g| g.beyond_plan).map(|g| format!("{}: {}", g.feature, g.detail));
+    let planned = gaps.iter().filter(|g| !g.beyond_plan).map(|g| format!("also, in the plan: {g}"));
+    beyond.chain(planned).collect()
+}
+
+/// How many files a reason holds back.
+#[derive(Debug, PartialEq, Eq)]
+struct ReasonCount<'a> {
+    feature: &'a str,
+    /// Files with this reason.
+    files: usize,
+    /// Files where it is the only distinct reason.
+    alone: usize,
+    /// Outside the plan.
+    beyond_plan: bool,
+}
+
+/// Counts each reason once per file, and the files it blocks alone. Most files first.
+fn reason_counts<'a>(files: &[(&str, &'a [aimadapt_sce::Gap])]) -> Vec<ReasonCount<'a>> {
+    let mut by_feature: std::collections::BTreeMap<&str, ReasonCount> = std::collections::BTreeMap::new();
+    for (_, reasons) in files {
+        let distinct: std::collections::BTreeSet<&str> = reasons.iter().map(|g| g.feature).collect();
+        for f in &distinct {
+            let beyond_plan = reasons.iter().any(|g| g.feature == *f && g.beyond_plan);
+            let c = by_feature.entry(f).or_insert(ReasonCount { feature: f, files: 0, alone: 0, beyond_plan });
+            c.files += 1;
+            c.alone += usize::from(distinct.len() == 1);
+            c.beyond_plan |= beyond_plan;
+        }
+    }
+    let mut counts: Vec<_> = by_feature.into_values().collect();
+    counts.sort_by(|a, b| b.files.cmp(&a.files).then(a.feature.cmp(b.feature)));
+    counts
 }
 
 fn print_sce(filter: Option<&str>, from: &[PathBuf], summary_only: bool) -> Result<()> {
@@ -242,8 +277,8 @@ fn print_sce(filter: Option<&str>, from: &[PathBuf], summary_only: bool) -> Resu
                 }
                 Status::Gaps(gaps) => {
                     println!("  --  {name}");
-                    for g in gaps {
-                        println!("        {}: {}", g.feature, g.detail);
+                    for line in gap_lines(gaps) {
+                        println!("        {line}");
                     }
                 }
             }
@@ -257,19 +292,20 @@ fn print_sce(filter: Option<&str>, from: &[PathBuf], summary_only: bool) -> Resu
         "{} scenarios: {playable} play in the trainer now (>>), {refused} are covered by the plan but don't play yet (!!), {gapped} use features it won't have yet (--)",
         rows.len(),
     );
-    // Each reason once per scenario; refusals (!!) and gaps (--) alike.
-    let mut by_feature: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
-    for (_, s) in &rows {
-        let (Status::Gaps(reasons) | Status::Refused(reasons)) = s else { continue };
-        let seen: std::collections::BTreeSet<&str> = reasons.iter().map(|g| g.feature).collect();
-        for f in seen {
-            *by_feature.entry(f).or_default() += 1;
-        }
+    let refused_files: Vec<(&str, &[aimadapt_sce::Gap])> = rows
+        .iter()
+        .filter_map(|(n, s)| match s {
+            Status::Gaps(reasons) | Status::Refused(reasons) => Some((n.as_str(), reasons.as_slice())),
+            Status::Plays(_) => None,
+        })
+        .collect();
+    let counts = reason_counts(&refused_files);
+    if !counts.is_empty() {
+        println!("  files  alone  reason (* = in the plan; alone = files it blocks by itself)");
     }
-    let mut by_feature: Vec<_> = by_feature.into_iter().collect();
-    by_feature.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
-    for (f, n) in by_feature {
-        println!("  {n:>4}  {f}");
+    for c in counts {
+        let mark = if c.beyond_plan { ' ' } else { '*' };
+        println!("  {:>5}  {:>5}  {}{}", c.files, c.alone, mark, c.feature);
     }
     for u in &unreadable {
         println!("  ! {u}");
@@ -758,11 +794,61 @@ mod tests {
             _ => panic!("expected a refusal with reasons"),
         }
         assert!(matches!(status(&fixture("Still Wall")), Status::Plays(_)));
-        // Features beyond the plan come back as gaps, without the planned reasons.
+        // Features beyond the plan come back with the planned reasons too.
         match status(&fixture("Old Room")) {
-            Status::Gaps(gaps) => assert!(gaps.iter().all(|g| g.beyond_plan), "{gaps:?}"),
+            Status::Gaps(gaps) => {
+                assert!(gaps.iter().any(|g| g.beyond_plan), "{gaps:?}");
+                assert!(gaps.iter().any(|g| !g.beyond_plan), "{gaps:?}");
+                let lines = gap_lines(&gaps);
+                assert!(lines.iter().any(|l| l.starts_with("also, in the plan: ")), "{lines:?}");
+                let first_planned = lines.iter().position(|l| l.starts_with("also,")).unwrap();
+                assert!(lines[..first_planned].iter().all(|l| !l.starts_with("also,")));
+            }
             _ => panic!("expected gaps"),
         }
+    }
+
+    /// Each reason is counted once per file, with the files it blocks alone.
+    #[test]
+    fn reasons_are_counted_with_the_files_they_block_alone() {
+        let names = ["Drifting Pair", "Old Room", "Still Wall"];
+        let results: Vec<_> = names
+            .iter()
+            .map(|n| match status(&fixture(n)) {
+                Status::Plays(_) => Vec::new(),
+                Status::Refused(r) | Status::Gaps(r) => r,
+            })
+            .collect();
+        let files: Vec<(&str, &[aimadapt_sce::Gap])> =
+            names.iter().copied().zip(results.iter().map(Vec::as_slice)).collect();
+        let counts = reason_counts(&files);
+        let abilities = counts.iter().find(|c| c.feature == "bots that use abilities").unwrap();
+        assert_eq!((abilities.files, abilities.alone, abilities.beyond_plan), (1, 1, false));
+        // Old Room has several reasons, so none of them is alone there.
+        let old = status(&fixture("Old Room"));
+        let Status::Gaps(old) = old else { panic!("expected gaps") };
+        for g in &old {
+            let c = counts.iter().find(|c| c.feature == g.feature).unwrap();
+            assert_eq!((c.files, c.alone), (1, 0), "{}", g.feature);
+        }
+        assert!(counts.iter().all(|c| c.files >= 1));
+
+        // A made-up set: "a" is in every file and alone in one; "b" is alone nowhere.
+        let gap =
+            |f: &'static str, beyond| aimadapt_sce::Gap { feature: f, detail: String::new(), beyond_plan: beyond };
+        let (x, y, z) = (
+            vec![gap("a", false)],
+            vec![gap("a", false), gap("b", true), gap("b", true)],
+            vec![gap("a", false), gap("b", true)],
+        );
+        let counts = reason_counts(&[("x", &x), ("y", &y), ("z", &z)]);
+        assert_eq!(
+            counts,
+            vec![
+                ReasonCount { feature: "a", files: 3, alone: 1, beyond_plan: false },
+                ReasonCount { feature: "b", files: 2, alone: 0, beyond_plan: true },
+            ]
+        );
     }
 
     fn kind(

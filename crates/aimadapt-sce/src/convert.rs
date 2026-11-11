@@ -126,9 +126,7 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
         reasons.push(Gap::planned("a map scale of 0 or below", ""));
     }
 
-    let (Some(map), Some(bot), Some(weapon), Some((shape, radius, height)), true) =
-        (map, kind, r.weapon, shape, reasons.is_empty())
-    else {
+    let (Some(map), Some(bot), Some(weapon), Some((shape, radius, height))) = (map, kind, r.weapon, shape) else {
         if reasons.is_empty() {
             reasons.push(Gap::planned("no player, weapon or bot to play with", ""));
         }
@@ -150,6 +148,7 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
         &mut reasons,
         &mut notes,
     );
+    // The map's reasons come with the earlier ones; the steps below need a clean file.
     if !reasons.is_empty() {
         return Err(reasons);
     }

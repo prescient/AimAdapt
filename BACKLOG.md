@@ -217,7 +217,7 @@ Play your own `.sce` files in AimAdapt, faithfully enough that scores compare wi
 
 What a `.sce` holds (surveyed from 225 local and workshop files, Nov 2026): an INI-like settings part with repeated sections (`[Bot Profile]`, `[Character Profile]`, `[Dodge Profile]`, `[Weapon Profile]`, `[Bot Rotation Profile]`, ability profiles), then `[Map Data]`, which is either an older Reflex brush map (text) or a newer JSON map (boxes, procedural meshes, spawn points, waypoints). The 34 Voltaic S5 Novice files are hitscan only, with sphere or cylinder bots and JSON maps.
 
-The plan for closing the gaps is [docs/plans/2026-11-kovaaks-compat.md](docs/plans/2026-11-kovaaks-compat.md): packages K1 to K14, one commit each, with the count of files that play before and after. On 11 November 2026, 98 of the 225 files played.
+The plan for closing the gaps is [docs/plans/2026-11-kovaaks-compat.md](docs/plans/2026-11-kovaaks-compat.md): packages K1 to K14, one commit each, with the count of files that play before and after. On 11 November 2026, 98 of the 225 files played. K1 is done: `aimadapt-cli sce` lists every reason on a file, and `--summary` counts the files each reason is in and the files it blocks by itself.
 
 ### To do
 - [x] Phase 1, reader and inventory (`crates/aimadapt-sce`): settings, both map formats, and each scenario's player, weapon and bots resolved through `.bot`, `.rot` and ability references. `aimadapt-cli sce [name]` lists each file as covered by phases 2–3 or with the features it uses beyond them. On this machine: 118 of 225 files covered, including all 34 Voltaic S5 Novice benchmarks.

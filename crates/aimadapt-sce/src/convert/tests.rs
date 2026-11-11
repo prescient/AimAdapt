@@ -586,3 +586,31 @@ fn regen_the_players_spawn_rules_and_walls_come_through() {
         assert!(p.z >= -10.5 + 0.2 - 1e-4, "{p}");
     }
 }
+
+/// Bug: the map step ran only when nothing else was wrong, so a file with an early
+/// reason (a hitbox shape) and a map reason (no spawn point for the player) listed
+/// only the first, and fixing it revealed the second.
+#[test]
+fn early_and_map_reasons_are_reported_together() {
+    let text = VOLUME_SCE
+        .replace("MainBBType=Spheroid", "MainBBType=Cuboid")
+        .replace(r#""TeamMask", "value": 1}"#, r#""TeamMask", "value": 2}"#)
+        .replace(r#""TeamMask", "value": 0}"#, r#""TeamMask", "value": 2}"#);
+    let err = convert(&Sce::parse(&text), "x.sce", "0").unwrap_err();
+    let has = |f: &str| err.iter().filter(|r| r.feature == f).count();
+    assert_eq!(has("hitbox shape"), 1, "{err:?}");
+    assert_eq!(has("the map has no spawn point for the player"), 1, "{err:?}");
+}
+
+/// A bot radius already refused as out of range still goes through the map step
+/// without a panic, and the map's reason is added.
+#[test]
+fn a_bad_radius_and_a_map_reason_do_not_panic() {
+    let text = VOLUME_SCE
+        .replace("MainBBRadius=20.0", "MainBBRadius=0.0")
+        .replace(r#""TeamMask", "value": 1}"#, r#""TeamMask", "value": 2}"#)
+        .replace(r#""TeamMask", "value": 0}"#, r#""TeamMask", "value": 2}"#);
+    let err = convert(&Sce::parse(&text), "x.sce", "0").unwrap_err();
+    assert!(err.iter().any(|r| r.feature == "bot size"), "{err:?}");
+    assert!(err.iter().any(|r| r.feature == "the map has no spawn point for the player"), "{err:?}");
+}

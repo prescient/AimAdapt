@@ -8,7 +8,7 @@ A scenario is refused when it uses something the trainer doesn't model, so every
 
 | Package | Commit |
 |---|---|
-| K1 Every reason on a file | |
+| K1 Every reason on a file | done 11 November 2026 |
 | K2 Dashes | |
 | K3 Helper bots and knockback | |
 | K4 Lives, time score and efficiency | |
@@ -72,7 +72,11 @@ Expected count of playable files after each step, if the packages land in order:
 
 ## Measuring progress
 
-`aimadapt-cli sce --summary` counts the files that play. After K1 it also counts files per reason and how many files each reason blocks alone. Each package's commit message gives the count before and after.
+`aimadapt-cli sce --summary` counts the files that play. Since K1 it also counts files per reason and how many files each reason blocks alone. Each package's commit message gives the count before and after.
+
+The listing includes the scenario files AimAdapt wrote itself (the `AimAdapt -` prefix, 32 on the development machine, all playable). The counts in this plan leave them out: 130 of 257 in the listing is 98 of 225 here.
+
+After K1, 50 of the 127 refused files had a single reason: armed bots 11, abilities 9, the player moving 5, heads 5, invincibility set on a character 5, solid props 5, waypoint paths 3, several pellets 3, and one each for map objects, aim assist, aim down sights and the damage efficiency score. The other 77 need two or more packages.
 
 Playing a file isn't the same as matching KovaaK's. KovaaK's records no target positions, so the checks are: side by side by eye, a test map where one number can be read off the screen, and scores from real play. The last one needs a person at the mouse (BACKLOG section 9, phase 4).
 
