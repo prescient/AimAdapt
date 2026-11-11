@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::Duration;
 
+use aimadapt_core::plan_check::PlanCheck;
 use aimadapt_core::progress::{self, Progress, ProgressSettings};
 use aimadapt_core::training::{self, TimeSettings, TrainingReport};
 use aimadapt_core::{Db, ImportReport, discover, import, summary};
@@ -65,6 +66,11 @@ enum Command {
         /// How many scenarios to list
         #[arg(long, default_value_t = 20)]
         top: usize,
+    },
+    /// Planned against actual success by kind of run, for all scenarios or one
+    PlanCheck {
+        /// Scenario name, or part of it. Omit for all scenarios.
+        scenario: Option<String>,
     },
     /// Sensitivity and FOV changes over time
     Sens,
@@ -132,6 +138,13 @@ fn main() -> Result<()> {
                 Some(query) => print_scenario(&p, &find_scenario(&p, &query)?, &settings),
                 None => print_progress_list(&p, &settings, sort, top),
             }
+        }
+        Command::PlanCheck { scenario } => {
+            let scenario = match scenario {
+                Some(query) => Some(find_scenario(&progress::load(&db, &TimeSettings::default())?, &query)?),
+                None => None,
+            };
+            print!("{}", plan_check_text(&aimadapt_core::plan_check::by_kind(&db, scenario.as_deref())?));
         }
         Command::Sens => print_sens(&progress::load(&db, &TimeSettings::default())?),
         // Handled before the database is opened.
@@ -425,6 +438,50 @@ fn find_scenario(p: &Progress, query: &str) -> Result<String> {
     }
 }
 
+/// The plan check as a table: Kind, Runs, Planned, Actual, Gap.
+fn plan_check_text(plan: &PlanCheck) -> String {
+    use std::fmt::Write;
+    let mut out = String::from("Planned against actual success, by kind of run\n\n");
+    if plan.kinds.iter().all(|k| k.runs == 0) {
+        out.push_str(
+            "No planned runs yet. A calibration run has no plan, so this starts with the next run after it.\n",
+        );
+    } else {
+        let _ = writeln!(out, "{:<14} {:>5} {:>8} {:>7}  Gap", "Kind", "Runs", "Planned", "Actual");
+        for k in &plan.kinds {
+            let label = match k.kind.as_str() {
+                "near" => "At your level",
+                "stretch" => "Stretch",
+                _ => "Easy",
+            };
+            let pct = |v: Option<f64>| v.map_or("-".to_string(), |v| format!("{:.0}%", v * 100.0));
+            let gap = match (k.gap, k.verdict.as_deref()) {
+                (Some(g), verdict) => {
+                    let points = (g * 100.0).round();
+                    let text = format!("{}{points:.0} pts", if points > 0.0 { "+" } else { "" });
+                    match verdict {
+                        Some("above") => format!("{text} above plan"),
+                        Some("below") => format!("{text} below plan"),
+                        _ => text,
+                    }
+                }
+                _ => "-".to_string(),
+            };
+            let _ = writeln!(out, "{label:<14} {:>5} {:>8} {:>7}  {gap}", k.runs, pct(k.planned), pct(k.actual));
+        }
+        out.push_str(
+            "\nA gap is marked when it is bigger than luck explains for that many targets, and never under five points.\n",
+        );
+    }
+    if plan.uncounted > 0 {
+        let n = plan.uncounted;
+        let (count, verb) =
+            if n == 1 { ("1 earlier run".to_string(), "is") } else { (format!("{n} earlier runs"), "are") };
+        let _ = writeln!(out, "{count} {verb} left out because their length was not recorded.");
+    }
+    out
+}
+
 fn opt_num(v: Option<f64>) -> String {
     v.map(num).unwrap_or_else(|| "-".into())
 }
@@ -685,6 +742,54 @@ mod tests {
             Status::Gaps(gaps) => assert!(gaps.iter().all(|g| g.beyond_plan), "{gaps:?}"),
             _ => panic!("expected gaps"),
         }
+    }
+
+    fn kind(
+        kind: &str,
+        runs: usize,
+        planned: Option<f64>,
+        actual: Option<f64>,
+        verdict: Option<&str>,
+    ) -> aimadapt_core::plan_check::KindStat {
+        aimadapt_core::plan_check::KindStat {
+            kind: kind.into(),
+            runs,
+            evidence: runs as f64 * 40.0,
+            planned,
+            actual,
+            gap: planned.zip(actual).map(|(p, a)| a - p),
+            verdict: verdict.map(String::from),
+        }
+    }
+
+    /// Plan A6: the plan-check table lists the three kinds in order, marks a gap that
+    /// luck does not explain, and says how many runs were left out.
+    #[test]
+    fn the_plan_check_prints_a_row_per_kind_and_marks_big_gaps() {
+        let plan = PlanCheck {
+            kinds: vec![
+                kind("near", 4, Some(0.85), Some(0.88), Some("as_planned")),
+                kind("stretch", 3, Some(0.55), Some(0.43), Some("below")),
+                kind("easy", 0, None, None, None),
+            ],
+            uncounted: 2,
+        };
+        let text = plan_check_text(&plan);
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines[0], "Planned against actual success, by kind of run");
+        assert!(lines[2].starts_with("Kind") && lines[2].ends_with("Gap"), "{text}");
+        assert!(lines[3].starts_with("At your level") && lines[3].ends_with("+3 pts"), "{text}");
+        assert!(lines[4].starts_with("Stretch") && lines[4].ends_with("-12 pts below plan"), "{text}");
+        assert!(lines[5].starts_with("Easy") && lines[5].contains(" 0 ") && lines[5].ends_with('-'), "{text}");
+        assert!(text.contains("2 earlier runs are left out because their length was not recorded."), "{text}");
+        let one = plan_check_text(&PlanCheck { uncounted: 1, ..plan });
+        assert!(one.contains("1 earlier run is left out"), "{one}");
+    }
+
+    #[test]
+    fn the_plan_check_with_no_planned_runs_says_so() {
+        let plan = PlanCheck { kinds: vec![kind("near", 0, None, None, None)], uncounted: 0 };
+        assert!(plan_check_text(&plan).contains("No planned runs yet."));
     }
 
     /// Bug: `--from` a folder that doesn't exist found nothing and still succeeded.

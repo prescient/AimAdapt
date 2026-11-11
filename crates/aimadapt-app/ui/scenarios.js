@@ -612,7 +612,7 @@ function trainerDetail(e, askedTab) {
   const { current, row } = itemTabs(e.id, ["overview", "insights", "runs"], askedTab);
   let body;
   if (current === "runs") {
-    body = `<section class="card">${insightRunsTable(d)}</section>`;
+    body = `${planCheckCard(d.plan)}<section class="card">${insightRunsTable(d)}</section>`;
   } else if (current === "insights") {
     const sections = [
       d.curve ? curveCard(d.curve) : "",

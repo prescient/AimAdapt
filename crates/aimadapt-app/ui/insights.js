@@ -68,15 +68,51 @@ function insightKpis(d, withRating = true) {
 // Rows the Runs table shows until Show all.
 const RUNS_SHOWN = 30;
 
+// What a run's kind is called. Standard runs have no plan; an adaptive run saved before
+// kinds were planned has no pick and reads as plain Adaptive.
+const KIND_LABELS = { calibrate: "Calibration", near: "At your level", stretch: "Stretch", easy: "Easy" };
+const runKind = (r) => (!r.adaptive ? "Standard" : KIND_LABELS[r.pick] ?? "Adaptive");
+
+// "Planned against actual": how often you succeeded on each kind of run beside what the
+// trainer planned. `plan` is a PlanCheck; a missing one reads as no runs.
+const PLAN_KINDS = ["near", "stretch", "easy"];
+function gapCell(k) {
+  if (k.gap === null || k.gap === undefined) return "–";
+  const points = Math.round(k.gap * 100);
+  const text = `${points > 0 ? "+" : ""}${points} pts`;
+  if (k.verdict === "above") return `<strong class="pos">${text} above plan</strong>`;
+  if (k.verdict === "below") return `<strong class="neg">${text} below plan</strong>`;
+  return `<span class="muted">${text}</span>`;
+}
+function planCheckCard(plan) {
+  const kinds = PLAN_KINDS.map((id) => (plan?.kinds ?? []).find((k) => k.kind === id)
+    ?? { kind: id, runs: 0, planned: null, actual: null, gap: null, verdict: null });
+  const uncounted = plan?.uncounted ?? 0;
+  const lead = `<div class="note-body">How often you succeeded on each kind of run, beside what the trainer planned.</div>`;
+  const head = `<h2>Planned against actual</h2>`;
+  if (!kinds.some((k) => k.runs > 0)) {
+    return `<section class="card">${head}${lead}
+      <div class="note-body">No planned runs yet. A calibration run has no plan, so this starts with the next run after it.</div>
+      ${uncounted ? uncountedNote(uncounted) : ""}</section>`;
+  }
+  return `<section class="card">${head}${lead}
+    <div class="table-wrap"><table><thead><tr><th>Kind</th><th class="r">Runs</th><th class="r">Planned</th><th class="r">Actual</th><th class="r">Gap</th></tr></thead><tbody>
+      ${kinds.map((k) => `<tr><td>${KIND_LABELS[k.kind]}</td><td class="r mono">${k.runs}</td><td class="r mono">${share(k.planned)}</td><td class="r mono">${share(k.actual)}</td><td class="r mono" style="white-space:nowrap">${gapCell(k)}</td></tr>`).join("")}
+    </tbody></table></div>
+    <div class="small muted" style="margin-top:8px">A gap is marked when it is bigger than luck explains for that many targets, and never under five points.</div>
+    ${uncounted ? uncountedNote(uncounted) : ""}</section>`;
+}
+const uncountedNote = (n) => `<div class="small muted">${n === 1 ? "1 earlier run is" : `${n} earlier runs are`} left out because their length was not recorded.</div>`;
+
 // The latest runs (all of them after Show all), each with a Replay link when it
 // still has one: the latest 50 and the best keep theirs.
 function insightRunsTable(d) {
   const rows = [...d.runs].reverse();
   const shown = ui.allRuns ? rows : rows.slice(0, RUNS_SHOWN);
   return `<div class="card-head"><h2>Runs</h2><span class="small muted">${d.runs.length} in all · newest first</span></div>
-    <div class="table-wrap"><table><thead><tr><th>When</th><th>Mode</th><th class="r">85% rating</th><th class="r">Hit</th><th class="r">Score</th><th class="r">Flick speed</th><th class="r">Reaction</th><th class="r">On target</th><th>Played in</th><th></th></tr></thead><tbody>
-      ${shown.map((r) => `<tr><td style="white-space:nowrap">${esc(fmtShort(dt(r.finished_at)))}, ${esc(fmtTime(dt(r.finished_at)))}</td><td>${r.adaptive ? "Adaptive" : "Standard"}</td>
-        <td class="r num">${ratingCell(r)}</td><td class="r mono">${share(r.success_rate ?? r.accuracy)}</td><td class="r mono">${r.adaptive ? "–" : num(r.score)}</td>
+    <div class="table-wrap"><table><thead><tr><th>When</th><th>Kind</th><th class="r">85% rating</th><th class="r">Hit</th><th class="r">Score</th><th class="r">Flick speed</th><th class="r">Reaction</th><th class="r">On target</th><th>Played in</th><th></th></tr></thead><tbody>
+      ${shown.map((r) => `<tr><td style="white-space:nowrap">${esc(fmtShort(dt(r.finished_at)))}, ${esc(fmtTime(dt(r.finished_at)))}</td><td style="white-space:nowrap">${runKind(r)}</td>
+        <td class="r num" style="white-space:nowrap">${r.breakthrough ? `<span class="tag gold" title="Held a harder level than any earlier run of this version">Breakthrough</span> ` : ""}${ratingCell(r)}</td><td class="r mono">${share(r.success_rate ?? r.accuracy)}</td><td class="r mono">${r.adaptive ? "–" : num(r.score)}</td>
         <td class="r mono">${r.throughput ? `${r.throughput.toFixed(1)}` : "–"}</td><td class="r mono">${ms(r.reaction_ms)}</td><td class="r mono">${share(r.on_target)}</td><td class="muted">${esc(r.workout ?? "")}</td>
         <td>${r.replay ? `<a href="#replay/${r.run_id}" title="Watch this run again">Replay</a>` : ""}</td></tr>`).join("")}
     </tbody></table></div>
@@ -111,8 +147,8 @@ function workOnCard(d, limit = Infinity, moreHref = "") {
 function latestRunsCard(d, runsHref) {
   const rows = [...d.runs].reverse().slice(0, 5);
   return `<section class="card"><div class="card-head"><h2>Latest runs</h2><a class="small" href="${runsHref}">All ${d.runs.length} runs</a></div>
-    <div class="table-wrap"><table><thead><tr><th>When</th><th>Mode</th><th class="r">85% rating</th><th class="r">Hit</th><th></th></tr></thead><tbody>
-      ${rows.map((r) => `<tr><td>${esc(fmtShort(dt(r.finished_at)))}, ${esc(fmtTime(dt(r.finished_at)))}</td><td>${r.adaptive ? "Adaptive" : "Standard"}</td>
+    <div class="table-wrap"><table><thead><tr><th>When</th><th>Kind</th><th class="r">85% rating</th><th class="r">Hit</th><th></th></tr></thead><tbody>
+      ${rows.map((r) => `<tr><td>${esc(fmtShort(dt(r.finished_at)))}, ${esc(fmtTime(dt(r.finished_at)))}</td><td>${runKind(r)}</td>
         <td class="r num">${ratingCell(r)}</td><td class="r mono">${share(r.success_rate ?? r.accuracy)}</td>
         <td>${r.replay ? `<a href="#replay/${r.run_id}" title="Watch this run again">Replay</a>` : ""}</td></tr>`).join("")}
     </tbody></table></div></section>`;

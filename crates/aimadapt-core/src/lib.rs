@@ -7,6 +7,7 @@ pub mod import;
 pub mod insights;
 pub mod knob;
 pub mod parse;
+pub mod plan_check;
 pub mod programs;
 pub mod progress;
 pub mod replay;

@@ -410,3 +410,74 @@ fn insights_load_time() {
     println!("insights for {} runs: {ms:.0} ms", i.runs.len());
     assert!(ms < 1000.0, "{ms:.0} ms");
 }
+
+fn held<'a>(knob: &'a str, hash: &'a str, run_value: Option<f64>, fastest: Option<f64>) -> Held<'a> {
+    Held { knob: Some(knob), hash: Some(hash), run_value, fastest }
+}
+
+/// Plan A6: breakthroughs are not stored, so the run list derives them. The first held
+/// run of a version is never one, a harder one later is, an easier or equal one is not.
+#[test]
+fn a_run_is_a_breakthrough_only_when_harder_than_every_earlier_held_run() {
+    let runs = [
+        held("lifetime", "a", Some(0.6), Some(0.60)),
+        held("lifetime", "a", Some(0.6), Some(0.55)),
+        held("lifetime", "a", Some(0.6), Some(0.58)),
+        held("lifetime", "a", Some(0.6), Some(0.55)),
+        held("lifetime", "a", Some(0.5), Some(0.50)),
+    ];
+    assert_eq!(breakthroughs(&runs), [false, true, false, false, true]);
+}
+
+#[test]
+fn another_versions_best_and_calibration_runs_do_not_count_toward_a_breakthrough() {
+    let runs = [
+        held("lifetime", "a", Some(0.6), Some(0.30)),
+        // The first held run of version b is not a breakthrough, though 0.5 is easier than a's best.
+        held("lifetime", "b", Some(0.6), Some(0.50)),
+        // A calibration run has a fastest but no run value: it neither sets a best nor is one.
+        held("lifetime", "b", None, Some(0.20)),
+        held("lifetime", "b", Some(0.6), Some(0.45)),
+    ];
+    assert_eq!(breakthroughs(&runs), [false, false, false, true]);
+}
+
+#[test]
+fn for_tracking_a_higher_speed_is_the_harder_one() {
+    let runs = [
+        held("target_speed", "a", Some(40.0), Some(40.0)),
+        held("target_speed", "a", Some(40.0), Some(35.0)),
+        held("target_speed", "a", Some(45.0), Some(45.0)),
+        held("target_speed", "a", Some(45.0), Some(45.0)),
+    ];
+    assert_eq!(breakthroughs(&runs), [false, false, true, false]);
+}
+
+/// The run list names each run's kind and flags its breakthrough, and carries the plan check.
+#[test]
+fn the_run_list_carries_kind_breakthrough_and_plan() {
+    let mut db = Db::open_in_memory().unwrap();
+    let run = |pick: &str, fastest: Option<f64>, run_value: Option<f64>| EngineRun {
+        base_scenario: "Timed Flicks".into(),
+        category: "clicking".into(),
+        adaptive: true,
+        knob: Some("lifetime".into()),
+        rating: Some(0.6),
+        run_pick: Some(pick.into()),
+        planned_chance: Some(0.85),
+        success_rate: Some(0.8),
+        evidence: Some(40.0),
+        fastest,
+        run_value,
+        ..Default::default()
+    };
+    save_versioned(&mut db, 1, &run("calibrate", Some(0.7), None), Some("h"));
+    save_versioned(&mut db, 2, &run("near", Some(0.6), Some(0.6)), Some("h"));
+    save_versioned(&mut db, 3, &run("stretch", Some(0.5), Some(0.5)), Some("h"));
+    let i = scenario(&db, "Timed Flicks").unwrap().unwrap();
+    let picks: Vec<_> = i.runs.iter().map(|r| r.pick.as_deref()).collect();
+    assert_eq!(picks, [Some("calibrate"), Some("near"), Some("stretch")]);
+    let broke: Vec<_> = i.runs.iter().map(|r| r.breakthrough).collect();
+    assert_eq!(broke, [false, false, true]);
+    assert_eq!(i.plan.kinds.iter().map(|k| k.runs).collect::<Vec<_>>(), [1, 1, 0]);
+}

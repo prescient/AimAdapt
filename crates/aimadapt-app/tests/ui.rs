@@ -1275,3 +1275,36 @@ fn the_score_history_card_says_1_run_not_1_runs() {
     let notes = decl(&app, "scenarioNotesCard");
     assert!(!notes.contains("${s.runs_since_pb} runs"), "the same count in the notes: {notes}");
 }
+
+/// Plan A6: the runs table names each run's kind (not just Adaptive or Standard) and
+/// tags a breakthrough beside its rating.
+#[test]
+fn the_runs_table_has_a_kind_column_and_a_breakthrough_tag() {
+    let insights = ui("insights.js");
+    let table = decl(&insights, "insightRunsTable");
+    assert!(table.contains("<th>Kind</th>") && !table.contains("<th>Mode</th>"), "{table}");
+    assert!(table.contains("runKind(r)"), "{table}");
+    assert!(table.contains("r.breakthrough") && table.contains("Breakthrough"), "{table}");
+    let labels = insights.split("const KIND_LABELS = ").nth(1).and_then(|s| s.split("};").next()).expect("KIND_LABELS");
+    for text in ["Calibration", "At your level", "Stretch", "Easy"] {
+        assert!(labels.contains(text), "{text}: {labels}");
+    }
+    let latest = decl(&insights, "latestRunsCard");
+    assert!(latest.contains("<th>Kind</th>") && latest.contains("runKind(r)"), "the Overview card too: {latest}");
+    let kind = decl(&insights, "runKind");
+    assert!(kind.contains("\"Standard\"") && kind.contains("\"Adaptive\""), "old runs read as Adaptive: {kind}");
+}
+
+/// Plan A6: "Planned against actual" is one card, drawn on a scenario's Runs tab and on
+/// Progress > Skills, and a missing plan (an older snapshot) reads as no runs.
+#[test]
+fn the_plan_check_card_is_shared_and_survives_a_missing_plan() {
+    let insights = ui("insights.js");
+    let card = decl(&insights, "planCheckCard");
+    assert!(card.contains("Planned against actual") && card.contains("plan?.kinds"), "{card}");
+    assert!(card.contains("No planned runs yet."), "{card}");
+    let scenarios = ui("scenarios.js");
+    assert!(decl(&scenarios, "trainerDetail").contains("planCheckCard(d.plan)"));
+    let program = ui("program.js");
+    assert!(decl(&program, "skillsTab").contains("planCheckCard(d.plan)"));
+}

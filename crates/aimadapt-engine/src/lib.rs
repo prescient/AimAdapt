@@ -323,6 +323,18 @@ mod core_copies {
         assert!((aimadapt_core::insights::SAMPLE_S - sample_s).abs() < 1e-9);
     }
 
+    /// The plan check marks a gap with core's copy of the sim's tolerance.
+    #[test]
+    fn core_plan_tolerance_is_the_sims() {
+        for planned in [0.05f32, 0.3, 0.55, 0.72, 0.85, 0.93, 0.97] {
+            for evidence in [0.0f32, 1.0, 12.0, 40.0, 150.0, 900.0, 20_000.0] {
+                let sim = f64::from(aimadapt_sim::adaptive::plan_tolerance(planned, evidence));
+                let core = aimadapt_core::plan_check::tolerance(f64::from(planned), f64::from(evidence));
+                assert!((sim - core).abs() < 1e-5, "{planned} {evidence}: {sim} vs {core}");
+            }
+        }
+    }
+
     /// Core reads stored ratings with its own `Knob`: same ids, same direction,
     /// same units as the sim's.
     #[test]

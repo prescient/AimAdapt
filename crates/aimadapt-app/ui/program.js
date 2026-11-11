@@ -165,7 +165,8 @@ function skillsTab() {
       ${notesCard()}
     </div>
     ${sessionsCard(p.sessions)}
-    ${weekCard(d)}`;
+    ${weekCard(d)}
+    ${planCheckCard(d.plan)}`;
 }
 
 function weekCard(d) {

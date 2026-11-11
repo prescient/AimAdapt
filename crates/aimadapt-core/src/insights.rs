@@ -23,6 +23,7 @@ use rusqlite::OptionalExtension;
 use std::collections::HashMap;
 
 use crate::db::{Db, DbError};
+use crate::plan_check::{self, PlanCheck};
 use crate::telemetry::parse_timeline;
 
 pub const RECENT_RUNS: usize = 10;
@@ -62,6 +63,12 @@ pub struct RunPoint {
     pub reaction_ms: Option<f64>,
     pub on_target: Option<f64>,
     pub workout: Option<String>,
+    /// The kind of an adaptive run, as stored: `calibrate`, `near`, `stretch` or `easy`.
+    /// `None` for standard runs and for runs saved before kinds were planned.
+    pub pick: Option<String>,
+    /// The run held the goal at a harder value than any earlier run of the same
+    /// version of the scenario. Worked out from the history, see [`breakthroughs`].
+    pub breakthrough: bool,
     /// The run recorded replay frames (runs from before replays didn't).
     pub replay: bool,
     /// The run is of the scenario's current version (same settings fingerprint as its
@@ -272,6 +279,8 @@ pub struct Insights {
     pub switching: Option<Switching>,
     pub segments: Vec<Segment>,
     pub notes: Vec<Note>,
+    /// Planned against actual success by kind of run, for this scenario.
+    pub plan: PlanCheck,
 }
 
 /// Chance of success at each value of the knob, from the latest rating, plus
@@ -396,12 +405,13 @@ pub fn scenario(db: &Db, base_scenario: &str) -> Result<Option<Insights>, DbErro
     let mut stmt = conn.prepare(
         "SELECT r.id, r.finished_at, e.adaptive, e.rating, e.success_rate, r.score, r.accuracy, e.workout,
                 e.category, e.level_timeline, e.knob, e.rating_low, e.rating_high,
-                CASE WHEN e.run_value IS NOT NULL THEN e.fastest END, e.theta, e.slope, e.frames IS NOT NULL, r.scenario_hash
+                CASE WHEN e.run_value IS NOT NULL THEN e.fastest END, e.theta, e.slope, e.frames IS NOT NULL, r.scenario_hash,
+                e.run_pick, e.run_value
          FROM engine_runs e JOIN runs r ON r.id = e.run_id
          WHERE e.base_scenario = ?1 ORDER BY r.finished_at, r.id",
     )?;
     #[allow(clippy::type_complexity)]
-    let rows: Vec<(RunPoint, String, Option<String>, Option<(f64, f64)>, Option<String>)> = stmt
+    let rows: Vec<(RunPoint, String, Option<String>, Option<(f64, f64)>, Option<String>, Option<f64>)> = stmt
         .query_map([base_scenario], |r| {
             Ok((
                 RunPoint {
@@ -420,6 +430,8 @@ pub fn scenario(db: &Db, base_scenario: &str) -> Result<Option<Insights>, DbErro
                     reaction_ms: None,
                     on_target: None,
                     workout: r.get(7)?,
+                    pick: r.get(18)?,
+                    breakthrough: false,
                     replay: r.get(16)?,
                     current: false,
                 },
@@ -430,6 +442,7 @@ pub fn scenario(db: &Db, base_scenario: &str) -> Result<Option<Insights>, DbErro
                     _ => None,
                 },
                 r.get(17)?,
+                r.get(19)?,
             ))
         })?
         .collect::<Result<_, _>>()?;
@@ -443,8 +456,16 @@ pub fn scenario(db: &Db, base_scenario: &str) -> Result<Option<Insights>, DbErro
     let model = latest.and_then(|r| r.3).zip(knob.clone());
     // The current version is the latest rated run's; a run with no fingerprint is a version too.
     let current = latest.map(|r| r.4.clone());
-    let mut runs: Vec<RunPoint> =
-        rows.into_iter().map(|r| RunPoint { current: current.as_ref().is_none_or(|c| *c == r.4), ..r.0 }).collect();
+    let held: Vec<Held> = rows
+        .iter()
+        .map(|r| Held { knob: r.0.knob.as_deref(), hash: r.4.as_deref(), run_value: r.5, fastest: r.0.fastest })
+        .collect();
+    let broke = breakthroughs(&held);
+    let mut runs: Vec<RunPoint> = rows
+        .into_iter()
+        .zip(broke)
+        .map(|(r, breakthrough)| RunPoint { current: current.as_ref().is_none_or(|c| *c == r.4), breakthrough, ..r.0 })
+        .collect();
 
     // Targets for every run, grouped by run.
     let mut by_run: HashMap<i64, Vec<T>> = HashMap::new();
@@ -477,20 +498,7 @@ pub fn scenario(db: &Db, base_scenario: &str) -> Result<Option<Insights>, DbErro
         by_run.entry(t.run_id).or_default().push(t);
     }
 
-    // Tracking samples per run (on-target share, plus everything for recent runs).
-    let mut on_by_run: HashMap<i64, (usize, usize)> = HashMap::new();
-    {
-        let mut stmt = conn.prepare(
-            "SELECT s.run_id, COUNT(*), SUM(s.on_target) FROM engine_samples s
-             JOIN engine_runs e ON e.run_id = s.run_id WHERE e.base_scenario = ?1 GROUP BY s.run_id",
-        )?;
-        for row in stmt.query_map([base_scenario], |r| {
-            Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)? as usize, r.get::<_, i64>(2)? as usize))
-        })? {
-            let (id, n, on) = row?;
-            on_by_run.insert(id, (n, on));
-        }
-    }
+    let on_by_run = tracking_samples_by_run(conn, base_scenario)?;
 
     // Per-run figures.
     for run in &mut runs {
@@ -552,9 +560,69 @@ pub fn scenario(db: &Db, base_scenario: &str) -> Result<Option<Insights>, DbErro
         switching,
         segments,
         notes: Vec::new(),
+        plan: plan_check::by_kind(db, Some(base_scenario))?,
     };
     ins.notes = notes(&ins);
     Ok(Some(ins))
+}
+
+/// Tracking samples per run: (samples, samples on target).
+fn tracking_samples_by_run(
+    conn: &rusqlite::Connection,
+    base_scenario: &str,
+) -> Result<HashMap<i64, (usize, usize)>, DbError> {
+    let mut on_by_run = HashMap::new();
+    let mut stmt = conn.prepare(
+        "SELECT s.run_id, COUNT(*), SUM(s.on_target) FROM engine_samples s
+         JOIN engine_runs e ON e.run_id = s.run_id WHERE e.base_scenario = ?1 GROUP BY s.run_id",
+    )?;
+    for row in stmt.query_map([base_scenario], |r| {
+        Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)? as usize, r.get::<_, i64>(2)? as usize))
+    })? {
+        let (id, n, on) = row?;
+        on_by_run.insert(id, (n, on));
+    }
+    Ok(on_by_run)
+}
+
+/// What [`breakthroughs`] needs to know about one run.
+struct Held<'a> {
+    knob: Option<&'a str>,
+    /// The scenario's settings fingerprint: runs of another version are on another scale.
+    hash: Option<&'a str>,
+    /// Set when the run was played at one value (not a calibration run).
+    run_value: Option<f64>,
+    /// The value the goal was held at for the whole run.
+    fastest: Option<f64>,
+}
+
+/// Which runs, in time order, were breakthroughs: held the goal at a value harder than
+/// every earlier held run with the same knob and version. The first held run of a version
+/// is never one. This is how `Rating::finish_run` in the sim decides, with the best-before
+/// from `Db::fastest_hit`; breakthroughs are not stored, so they are derived here.
+fn breakthroughs(runs: &[Held]) -> Vec<bool> {
+    let mut best: HashMap<(&str, Option<&str>), f64> = HashMap::new();
+    runs.iter()
+        .map(|r| {
+            let (Some(knob), Some(_), Some(fastest)) = (r.knob, r.run_value, r.fastest) else {
+                return false;
+            };
+            let h = Knob::from_id(knob).h(fastest);
+            match best.entry((knob, r.hash)) {
+                std::collections::hash_map::Entry::Vacant(e) => {
+                    e.insert(h);
+                    false
+                }
+                std::collections::hash_map::Entry::Occupied(mut e) => {
+                    let harder = h > *e.get() + 1e-6;
+                    if harder {
+                        e.insert(h);
+                    }
+                    harder
+                }
+            }
+        })
+        .collect()
 }
 
 /// Must match `aimadapt_sim::adaptive` (lapse rate and the log-scale knob); a test

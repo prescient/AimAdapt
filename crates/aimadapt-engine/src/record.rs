@@ -179,6 +179,7 @@ pub fn to_engine_run(info: &RunInfo) -> EngineRun {
         slope: a.map(|a| f(a.slope)),
         slope_sd: a.map(|a| f(a.slope_sd)),
         rating_sd: a.map(|a| f(a.sd)),
+        evidence: a.map(|a| f(a.evidence)),
         fastest: a.and_then(|a| a.fastest).map(f),
         run_value: a.and_then(|a| a.run_value).map(f),
         run_pick: a.map(|a| a.pick.as_str().into()),
@@ -508,6 +509,7 @@ mod tests {
         assert!(slope_sd > 0.0 && (slope_sd - saved.slope_sd).abs() < 1e-4, "{slope_sd} vs {}", saved.slope_sd);
         let second = play(&scenario, true, Some(p));
         let a2 = second.adaptive.as_ref().unwrap();
+        assert!(a2.evidence > 0.0, "the run has a length to record");
         let start = a2.start_value;
         assert!((f64::from(start) / rating.rating - 1.0).abs() < 0.05, "{start} vs {}", rating.rating);
         assert!(a2.run_value.is_some(), "later runs play at one value");
@@ -523,6 +525,12 @@ mod tests {
             .unwrap();
         assert_eq!(run_value.map(|v| v as f32), a2.run_value);
         assert_eq!(run_pick.as_deref(), Some(a2.pick.as_str()));
+        // Plan A6: the run's length is saved, so plan checks can weigh runs by it.
+        let evidence: Option<f64> = db
+            .conn()
+            .query_row("SELECT evidence FROM engine_runs ORDER BY run_id DESC LIMIT 1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(evidence.map(|v| v as f32), Some(a2.evidence));
         let standard = play(&scenario, false, None);
         save(&path, &info(&scenario, &standard, &settings, 3)).unwrap();
 

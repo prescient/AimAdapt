@@ -116,6 +116,7 @@ CREATE INDEX runs_source ON runs (source, scenario);
     crate::telemetry::MIGRATION_RUN_LEVEL,
     crate::telemetry::MIGRATION_REPLAY,
     crate::telemetry::MIGRATION_SLOPE_SD,
+    crate::telemetry::MIGRATION_EVIDENCE,
 ];
 
 /// Value of the `Source` field (and `runs.source`) for runs played in AimAdapt's
@@ -487,6 +488,38 @@ mod tests {
         let stored = db.last_rating("Timed Flicks").unwrap().expect("the old run is still there");
         assert_eq!((stored.rating, stored.theta, stored.slope, stored.sd), (0.6, 0.7, 0.12, 0.05));
         assert_eq!(stored.slope_sd, None, "an old run has no slope uncertainty");
+    }
+
+    /// The ninth migration (plan A6) adds each run's length to engine runs. A database
+    /// saved by the version before it must open, keep its runs, and read an old run's
+    /// length back as none.
+    #[test]
+    fn a_version_8_database_upgrades_and_keeps_its_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.db");
+        let conn = Connection::open(&path).unwrap();
+        for sql in &MIGRATIONS[..8] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 8).unwrap();
+        conn.execute_batch(
+            "INSERT INTO runs (id, file_name, scenario, mode, finished_at, imported_at)
+             VALUES (1, 'aimadapt/test/1', 'Timed Flicks', 'AimAdapt',
+                     '2026-11-01T07:00:00.000', '2026-11-01T07:00:00.000');
+             INSERT INTO engine_runs (run_id, base_scenario, category, adaptive, knob, rating, theta, slope, rating_sd,
+                                      run_pick, planned_chance, success_rate)
+             VALUES (1, 'Timed Flicks', 'clicking', 1, 'lifetime', 0.6, 0.7, 0.12, 0.05, 'near', 0.85, 0.8);",
+        )
+        .unwrap();
+        drop(conn);
+
+        let db = Db::open(&path).unwrap();
+        assert!(db.schema_version().unwrap() >= 9);
+        let stored = db.last_rating("Timed Flicks").unwrap().expect("the old run is still there");
+        assert_eq!(stored.rating, 0.6);
+        let evidence: Option<f64> =
+            db.conn().query_row("SELECT evidence FROM engine_runs WHERE run_id = 1", [], |r| r.get(0)).unwrap();
+        assert_eq!(evidence, None, "an old run has no recorded length");
     }
 
     fn put(p: &std::path::Path, text: &str) {

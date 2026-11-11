@@ -528,6 +528,8 @@ pub struct ProgramPage {
     today: &'static str,
     days: Vec<ProgramDay>,
     progress: aimadapt_core::programs::ProgramProgress,
+    /// Planned against actual success by kind of run, over every scenario (the Skills tab).
+    plan: aimadapt_core::plan_check::PlanCheck,
     playing: bool,
 }
 
@@ -574,6 +576,7 @@ pub fn build_program(state: &AppData, t: &TrainerState) -> Result<ProgramPage, S
     let plan: Vec<(String, u32)> = days.iter().map(|d| (d.day.to_string(), d.runs)).collect();
     let now = chrono::Local::now().naive_local();
     let progress = aimadapt_core::programs::progress(&db, &prog.name, now, &plan, &state.time).map_err(err)?;
+    let plan_check = aimadapt_core::plan_check::by_kind(&db, None).map_err(err)?;
     Ok(ProgramPage {
         id: id.into(),
         name: prog.name.clone(),
@@ -581,6 +584,7 @@ pub fn build_program(state: &AppData, t: &TrainerState) -> Result<ProgramPage, S
         today: aimadapt_engine::today().id(),
         days,
         progress,
+        plan: plan_check,
         playing: t.playing.load(Ordering::SeqCst),
     })
 }

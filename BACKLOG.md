@@ -78,6 +78,7 @@ Last reviewed: Nov 10, 2026 (after the layout review and the adaptive review; th
   - Guard rails: no stretch run after a stretch run, or after a run more than 10 points below the goal.
   - Inside a block (a scenario played two or more times in a row in a workout or program day) the kind of each run is planned from the mix: the first at your level, stretch runs in the middle with none side by side, easy runs last. A run on its own still draws its kind (plan A5).
   - The trainer names the kind of run with what to expect before it starts ("Stretch run: 0.52 s" with "About 6 in 10 expected" under it), and the results judge a stretch or easy run against its plan (as planned, above or below), with room for the luck of a short run and at least five points. During a stretch or easy run the live success rate is shown beside the plan instead of the goal (plan A2).
+  - Planned against actual (plan A6): each adaptive run's length is saved (schema v9, `engine_runs.evidence`). A card on a scenario's Runs tab and on Progress › Skills, and `aimadapt-cli plan-check [scenario]`, set the chance planned for runs at your level, stretch runs and easy runs beside how often you succeeded, weighted by run length, and mark a gap bigger than luck explains. Runs saved before v9 are left out and counted. The Runs table names each run's kind and tags breakthroughs, which are derived from the history the way the sim decides them.
   - A breakthrough is holding the goal for a whole run at a value past your best, announced at the end of the run. A run under 30 targets (a tracking segment counts as three) has to beat the goal by one binomial standard deviation to hold it, and the results screen says when a run was at the goal but too short to count (plan A8).
 - [x] Clicking success needs a kill before the timeout with at most one miss on it. Tracking is scored per 2-second segment by the share of time on target.
 - [x] Switching is rated on what it trains (from [playtesting](PLAYTEST.md): both ratings were mostly target acquisition time).
@@ -95,7 +96,6 @@ Last reviewed: Nov 10, 2026 (after the layout review and the adaptive review; th
 ### To do
 - [ ] `spike` P1 Tune against real play. The default easy/hard ranges, first guesses and the "consistent vs. fades gradually" cut-off are educated guesses that have only been checked with the bot.
 - [ ] `todo` P3 The Insights charts cover the last ten runs whatever their version, so for a few runs after an edit they mix old and new settings. Keep them to the current version, as the ratings are.
-- [ ] `todo` P2 Planned against actual success by kind of run, with each run's kind and breakthroughs in the Runs table (plan A6).
 - [ ] `todo` P2 Ranges on gains, carry-over and the skill profile; changes inside the noise greyed; weak spots named only after three sessions (plan A7).
 
 ## 4. Programs and workouts

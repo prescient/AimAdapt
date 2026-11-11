@@ -28,6 +28,9 @@ pub struct EngineRun {
     /// known. `None` for runs saved before it was recorded.
     pub slope_sd: Option<f64>,
     pub rating_sd: Option<f64>,
+    /// How long the run was, in target-equivalents (1 per target, 3 per tracking
+    /// segment). `None` for runs saved before it was recorded and for standard runs.
+    pub evidence: Option<f64>,
     /// This run's value if it held the goal rate for the whole run.
     pub fastest: Option<f64>,
     /// The value the whole run was played at, `None` for a calibration run.
@@ -354,6 +357,11 @@ CREATE TABLE engine_samples (
 CREATE INDEX engine_samples_run ON engine_samples (run_id);
 "#;
 
+/// Schema v9: how long each run was, in target-equivalents.
+pub(crate) const MIGRATION_EVIDENCE: &str = r#"
+ALTER TABLE engine_runs ADD COLUMN evidence REAL;
+"#;
+
 /// Schema v8: how well the slope is known after a run, in log units.
 pub(crate) const MIGRATION_SLOPE_SD: &str = r#"
 ALTER TABLE engine_runs ADD COLUMN slope_sd REAL;
@@ -440,9 +448,9 @@ pub(crate) fn insert_engine_run(tx: &rusqlite::Transaction, file_name: &str, e: 
             "INSERT OR IGNORE INTO engine_runs (run_id, base_scenario, category, adaptive, goal, success_rate,
                 level_timeline, workout, trace, knob, rating, rating_low, rating_high, start_rating, theta, slope,
                 rating_sd, fastest, mix, skill, program, program_day, rep, reps, block, run_value, run_pick,
-                planned_chance, frames, slope_sd)
+                planned_chance, frames, slope_sd, evidence)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
-                     ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30)",
+                     ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31)",
             params![
                 run_id,
                 e.base_scenario,
@@ -474,6 +482,7 @@ pub(crate) fn insert_engine_run(tx: &rusqlite::Transaction, file_name: &str, e: 
                 e.planned_chance,
                 (!e.frames.is_empty()).then(|| encode_frames(&e.frames)),
                 e.slope_sd,
+                e.evidence,
             ],
         )?;
         if changed == 0 {
