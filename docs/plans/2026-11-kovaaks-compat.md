@@ -11,7 +11,7 @@ A scenario is refused when it uses something the trainer doesn't model, so every
 | K1 Every reason on a file | dc4732c | 98 of 225 |
 | K2 Dashes | fdf08f9 | 103 of 225, 31 of the 34 Novice benchmarks |
 | K3 Helper bots and knockback | 32d5397 | 107 of 225, all 34 Novice benchmarks |
-| K4 Lives, time score and efficiency | | 111 of 225 |
+| K4 Lives, time score and efficiency | 783b0d7 | 111 of 225 |
 | K5 Hitbox shapes | | |
 | K6 Standing and spawning details | | |
 | K15 Ability and helper setups K2 and K3 refuse | | |

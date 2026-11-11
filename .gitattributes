@@ -1,3 +1,7 @@
 # Shell scripts must keep LF endings or sh fails on Windows checkouts.
 *.sh text eol=lf
 .githooks/* text eol=lf
+
+# A scenario's fingerprint includes a hash of its file's bytes, so these are kept
+# byte for byte. Without this, a Windows checkout rewrites their line ends.
+crates/aimadapt-sce/tests/fixtures/*.sce -text

@@ -332,11 +332,33 @@ fn every_local_scenario_file_reads() {
 
 /// A scenario's fingerprint is what its saved ratings and best scores hang on, so a
 /// new world field that isn't left out of the file at its default would restart them
-/// all. These were taken before helper bots (plan K3) were added.
+/// all. These were taken before helper bots (plan K3) were added. A fingerprint also
+/// covers a hash of the file's bytes, which is why git must not touch the fixtures
+/// (see `git_keeps_the_fixtures_bytes`).
 #[test]
 fn imported_fixtures_keep_their_fingerprints() {
     assert_eq!(import(&path("Dash Lane")).unwrap().scenario.fingerprint(), "b4157023853bb7c5");
     assert_eq!(import(&path("Still Wall")).unwrap().scenario.fingerprint(), "dae40cef9b1e60b7");
+}
+
+/// Regression test: CI failed on every push from plan K3 on. Git on Windows checked the
+/// fixtures out with CRLF line ends, so their bytes, and with them the fingerprints
+/// pinned above, differed from the copies the fingerprints were taken from.
+/// `.gitattributes` now keeps the fixtures byte for byte, and each has the line ends it
+/// was written with: the two oldest CRLF, as KovaaK's writes them, the rest LF.
+#[test]
+fn git_keeps_the_fixtures_bytes() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
+    let attributes = std::fs::read_to_string(root.join(".gitattributes")).unwrap();
+    let rule = "crates/aimadapt-sce/tests/fixtures/*.sce -text";
+    assert!(attributes.lines().any(|l| l.trim() == rule), ".gitattributes needs the line: {rule}");
+    let crlf = |name: &str| std::fs::read(path(name)).unwrap().windows(2).any(|w| w == b"\r\n");
+    for name in ["Drifting Pair", "Old Room"] {
+        assert!(crlf(name), "{name} lost its CRLF line ends");
+    }
+    for name in ["Dash Lane", "Still Wall", "Floor Keeper", "Ledge Kicker", "Last Lives"] {
+        assert!(!crlf(name), "{name} was given CRLF line ends");
+    }
 }
 
 /// One slot that plays three balls in turn, `BotMaxLives=3` and `ScorePerTime=1` with no
