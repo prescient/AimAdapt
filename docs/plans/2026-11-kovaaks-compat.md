@@ -1,0 +1,197 @@
+# Plan: closing the gaps in KovaaK's scenario import
+
+AimAdapt plays KovaaK's `.sce` files in its own trainer (BACKLOG section 9). On 11 November 2026 it played 98 of the 225 scenario files on the development machine, and 30 of the 34 Voltaic S5 Novice benchmarks. This plan lists what stops the other 127 and turns each cause into a work package.
+
+A scenario is refused when it uses something the trainer doesn't model, so every package here removes one or more reasons for refusal. Refusing is deliberate. A scenario that plays differently from KovaaK's gives scores that mean nothing next to the player's KovaaK's history.
+
+## Status
+
+| Package | Commit |
+|---|---|
+| K1 Every reason on a file | |
+| K2 Dashes | |
+| K3 Helper bots and knockback | |
+| K4 Lives, time score and efficiency | |
+| K5 Hitbox shapes | |
+| K6 Standing and spawning details | |
+| K7 Armed bots that never fire, invincible characters | |
+| K8 Bots that destroy themselves | |
+| K9 Heads | |
+| K10 Waypoint paths | |
+| K11 Several pellets per shot | |
+| K12 Teleporters, hurt volumes and jump pads | |
+| K13 Solid props | |
+| K14 Player movement | |
+
+## Where the files stand
+
+Counted with a scratch survey over the same 225 files. A file can have several reasons, and it plays only when all of them are gone.
+
+| Reason for refusal | Files | Covered by |
+|---|---|---|
+| Bots that use abilities (dashes, knockback) | 47 | K2, K3 |
+| Waypoint paths | 28 | K10 |
+| The player can move | 25 | K14 |
+| Heads, headshots only | 21, 3 | K9 |
+| Bots' weapon abilities | 19 | K8 |
+| Map objects (teleporter, hurt volume, jump pad) | 17 | K12 |
+| Armed bots while the player can be hurt | 16 | K7, K8 |
+| Solid props | 15 | K13 |
+| Aim assist | 11 | Later |
+| Invincibility set on a character | 11 | K7 |
+| Aim down sights | 9 | Later |
+| Bot size (zero-size helper bots) | 9 | K3 |
+| Player abilities | 8 | K14 |
+| Several pellets per shot | 8 | K11 |
+| Hitbox shape | 6 | K5 |
+| Score multiplied by damage or kill efficiency | 5, 1 | K4 |
+| Recoil | 5 | Later |
+| KovaaK's own dynamic difficulty | 4 | Later |
+| Bot lives, a score for time | 3, 3 | K4 |
+| Distance scoring, MBS scoring | 3, 1 | Later |
+| Projectile and explosive weapons | 3, 1 | Later |
+| Third-person camera | 1 | Later |
+
+Expected count of playable files after each step, if the packages land in order: K2 to K5 reach 118 and all 34 Voltaic S5 Novice benchmarks. K7 reaches 133, K8 143, K9 152, K10 159, K11 166, K12 175, K13 184 and K14 about 200. The rest need the "Later" list.
+
+## What is out of scope
+
+- The adaptive knob for imported scenarios (BACKLOG section 9, phase 5) and the app work around them (phase 6).
+- Copying anything from KovaaK's or from scenario authors: no assets, no prop meshes, no scenario files in this repo.
+- Editing a player's own KovaaK's files. Test maps made for measuring are new files with the `AimAdapt -` prefix.
+
+## How the work is run
+
+- Each package is built by a smaller model from the package text below and a short brief. The result is reviewed before it is committed: the diff is read, the tests are run, the survey is run again over the real files, and the pre-commit hook runs on the whole tree.
+- One commit per package, through the pre-commit hook. Nothing is pushed.
+- Packages run one at a time, because nearly all of them change the same three crates (`aimadapt-sce`, `aimadapt-sim`, `aimadapt-engine`).
+- Tests use made-up scenarios only. Fixture files are hand-written `AimAdapt Test - <name>.sce` files in `crates/aimadapt-sce/tests/fixtures/`, with invented names and numbers that reproduce the mechanic. A builder works from the brief and the fixtures, and doesn't open other people's scenario files.
+- Every package follows [AGENTS.md](../../AGENTS.md): the README, the user guide (with a What's new line), BACKLOG, TESTING and SCENARIOS kept in step, and a failing-first test for every bug.
+- New fields on `World`, `WorldKind` and `Motion` are optional and left out of saved scenarios when unused, so scenarios that already play keep their fingerprint and their bests.
+- A setting whose meaning is a guess gets a note on the import ("how closely this matches KovaaK's is still to be checked") and a row in the table at the end of this plan.
+
+## Measuring progress
+
+`aimadapt-cli sce --summary` counts the files that play. After K1 it also counts files per reason and how many files each reason blocks alone. Each package's commit message gives the count before and after.
+
+Playing a file isn't the same as matching KovaaK's. KovaaK's records no target positions, so the checks are: side by side by eye, a test map where one number can be read off the screen, and scores from real play. The last one needs a person at the mouse (BACKLOG section 9, phase 4).
+
+## Wave 1: already in the backlog's plan
+
+### K1. Every reason on a file
+
+The listing shows only the beyond-plan reasons on a file that has both kinds, so it understates what a package unlocks.
+
+- `aimadapt-sce`: one call that returns every reason for a file, in-plan and beyond, without stopping at the first kind.
+- `aimadapt-cli sce`: a refused file lists all of its reasons. `--summary` adds a count per reason and a count of files that reason blocks alone.
+- The app's Browse page shows the same full list for a file it can't play.
+- Tests: a made-up file with one reason of each kind reports both.
+
+### K2. Dashes
+
+Bots with a movement ability dash: a burst of speed along the way they are moving, on a charge that refills. One Voltaic benchmark (Ground) needs it.
+
+- `aimadapt-sim::motion`: a bot can carry dashes. A dash has charges (the most it holds, how many it spawns with, seconds to regain one), a delay after use, a duration, a speed, an upward speed, the share of speed kept when it ends, whether the direction is locked, whether gravity is off for the duration, and whether the bot's own movement is blocked meanwhile.
+- When a bot uses one: how often it considers it, the chance each time, a block after spawning, a cooldown shared by all its abilities, and the ability's own rules (distance to the player, the player within a view angle, on the ground or in the air, own health).
+- `aimadapt-sce::convert`: `[Movement Ability Profile]` sections on a bot's character become dashes. A movement ability with a setting outside this list is still refused, and names the setting.
+- Tests: charge and reuse timing, the speed during and after a dash, the rules that stop a use, a fixed-seed run that stays the same, and a fixture file.
+
+### K3. Helper bots and knockback
+
+Three Voltaic benchmarks (Pasu, Controlsphere, Raw Control) and most of the 47 ability files move their targets with helper bots. A helper is on the player's team or can't be targeted, is too small to see, and hits enemy bots near it with a melee ability that does no damage and pushes them. Some helpers sit still. Others chase the target along the far side of an invisible wall, so the target is pushed back whenever it comes close to that wall.
+
+- Before building: measure knockback in KovaaK's with `AimAdapt - Knock Test` maps. Several still targets stand in a row, each with its own helper at a different strength, and the screen shows which ones lift off the floor. That gives the hit rate and the size of one push. The same maps settle which timers set the rate, which way a horizontal push points, and whether the push fades toward the edge of its range.
+- `aimadapt-sce::convert`: a bot on the player's team, or one that can't be targeted, is a helper. It isn't a target, isn't drawn, doesn't count toward the score or the number of bots on screen, and isn't held to the size limits. A helper with a melee ability becomes a pusher in the world. A helper without one is dropped with a note.
+- `aimadapt-sim`: `World` carries pushers (where each starts, whether it chases, its range, its hit rate, its horizontal and vertical push at the middle and at the edge). Each step, a chasing pusher moves toward the nearest target as far as the bot walls let it, and every pusher adds its push to the bots in range.
+- Invincible bots by character: a bot is invincible when the scenario says so or its own character does. `WorldKind` gets the flag, so a mixed scenario can have both.
+- Tests: a target held off a wall by a chasing pusher, a still pusher's range and falloff, a helper left out of the score and the bot count, the per-character flag, and fixture files for a chasing helper and a still one.
+
+### K4. Lives, time score and efficiency
+
+- Bots with a set number of lives: the run ends when the lives are used up.
+- A score for time, paid when the run ends that way.
+- A score multiplied by damage efficiency or kill efficiency.
+- Before building: check each formula against real KovaaK's result files (kills, shots, damage done and possible, and the score are all in them). The formulas go in SCENARIOS.md.
+- `aimadapt-sim`: the world gets the lives, the time score and the two multipliers; `run_step` ends the run, `score()` applies them.
+- Tests: one per rule on a made-up scenario, and that old scenarios score as before.
+
+### K5. Hitbox shapes
+
+- True cylinders (flat ends; they are capsules now), stretched spheres (a height other than twice the radius; they are round now), and cuboids.
+- The weapon's hit radius: a shot counts when it passes within that distance of the hitbox.
+- `aimadapt-sim`: new `Shape` variants with their own ray tests, and the hit radius on the weapon. `aimadapt-engine` draws each shape as it is hit.
+- The import notes "cylinder bots are played as capsules", "bots are stretched spheres in KovaaK's" and "the weapon's hit radius is left out" go away.
+- Tests: ray hits and misses at the edges of each shape, with and without a hit radius, and the fingerprints of scenarios that already play.
+
+### K6. Standing and spawning details
+
+Small differences on files that already play.
+
+- Each kind of bot starts at its own height and spawn offset (all kinds use the first kind's now).
+- A bot's own `BlockSpawnFOV`.
+- Bots stand on a floor within their step-up height, as the player does.
+- Crouching bots (dodge profiles that crouch on the ground).
+- The head's offset on the player's eye height.
+- How long a jetpack bot holds its thrust, which is a guess today.
+
+Each item is its own small change with a test. The ones that need a number from KovaaK's get a test map first.
+
+## Wave 2: beyond the backlog's plan
+
+Ordered by files unlocked for the work involved. Each starts by reading how the local files use the feature, so the package builds what scenarios need and leaves out what none of them use.
+
+### K7. Armed bots that never fire, invincible characters
+
+- 12 of the 16 "armed bots" files give their bots a weapon and also tell them not to aim. They are target switching scenarios, and nothing in them hurts the player. Check in KovaaK's that such a bot never fires, then stop refusing them.
+- Invincibility set on a character: the player is invincible when the scenario or their own character says so. Bots are covered in K3.
+
+### K8. Bots that destroy themselves
+
+"Pressure" scenarios give each bot a weapon ability or a weapon that damages the bot itself after a delay, so a target that isn't shot in time goes away and counts against the player.
+
+- Read the 19 files: the delay, what starts it (a timer from spawn, or the first hit), and what the score does when a bot dies that way.
+- `aimadapt-sim`: a kind can have a fuse. The engine shows it only if KovaaK's does.
+- The four armed-bot files left over from K7 belong here.
+
+### K9. Heads
+
+- A bot can have a head: a sphere on top of the body, with its own radius and offset. A hit on the head does the weapon's headshot damage.
+- Headshots only: body hits do nothing.
+- The engine draws the head in the head colour.
+
+### K10. Waypoint paths
+
+- 28 files move bots along waypoints placed in the map. The only logic in use is `FollowAimAtWaypoint`.
+- The map reader keeps the waypoints and each spawn's path. Bot movement gets a mode that walks them.
+- Measure in KovaaK's first: what happens at the last waypoint, and whether the dodge profile still applies on the way.
+
+### K11. Several pellets per shot
+
+- A shot fires several pellets with a spread. Read the spread settings in the 8 files, then model the pattern (fixed or random) and how hits and damage count per pellet.
+
+### K12. Teleporters, hurt volumes and jump pads
+
+- The map reader keeps only the names of these objects. Keep their properties too.
+- Hurt volumes damage bots inside them (often a kill floor). Teleporters move a bot that touches them. One file has a jump pad.
+
+### K13. Solid props
+
+- 15 files have props that block shots or movement, among them three Voltaic 1w2ts benchmarks with a window frame.
+- The trainer has no copies of KovaaK's prop meshes and won't get them. Measure each prop's solid box on a test map, and play it as a plain box of that size, drawn in a flat colour. A prop that hasn't been measured still refuses.
+
+### K14. Player movement
+
+- 25 files let the player walk, strafe or jump, and 8 give the player abilities.
+- This is the largest package: the sim puts the eye at the origin, and bots measure their distance from it. It starts with a short design note: how the engine moves the eye, how the sim learns where it is, and how the bot replay stays the same from run to run.
+
+## Later
+
+Aim assist (11 files), aim down sights (9), recoil (5), KovaaK's own dynamic difficulty (4), distance and MBS scoring (4), projectile and explosive weapons (4), third-person camera (1). Each gets its own package when the files above play.
+
+## Settings read by inference
+
+These rows are filled in as packages land. A row leaves the table when a test map or a side by side confirms it.
+
+| Setting | Read as | Checked |
+|---|---|---|
+| | | |
