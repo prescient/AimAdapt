@@ -1557,3 +1557,231 @@ fn tracking_samples_show_lead_and_lag() {
     assert!(lead < -0.8, "behind the target reads as negative lead: {lead}");
     assert!(samples[3].target_speed_dps > 10.0);
 }
+
+// Helper bots (plan K3): pushes that move the targets around.
+
+use crate::world::Pusher;
+
+/// One ball of radius 0.5 at `at` in an empty world, with a bot's physics (a gravity
+/// of `gravity` m/s², no friction in the air) so that kicks stay in its velocity.
+fn pushed(at: [f32; 3], gravity: f32, meshes: Vec<crate::world::WorldMesh>, pushers: Vec<Pusher>) -> Sim {
+    let mut s = no_countdown(builtin("builtin:static-grid"));
+    s.targets.count = 1;
+    s.targets.radius = 0.5;
+    s.targets.height = 1.0;
+    s.world = Some(crate::world::World {
+        spawns: vec![crate::world::WorldSpawn { pos: at, ..Default::default() }],
+        meshes,
+        motion: Some(crate::motion::Motion { gravity, ..Default::default() }),
+        pushers,
+        ..Default::default()
+    });
+    Sim::new(s, 1)
+}
+
+/// A pinned pusher 5 m ahead, facing away from the player: its reach is a ball of
+/// radius 1 centred 1 m in front of it, and it kicks every 0.1 s.
+fn pinned() -> Pusher {
+    Pusher { pos: [0.0, 0.0, -5.0], radius: 1.0, every_s: 0.1, push: 2.0, ..Default::default() }
+}
+
+/// A chasing pusher on a plane just under a floor at y = 0, facing up.
+fn under_the_floor() -> Pusher {
+    Pusher {
+        pos: [0.0, -0.1, -10.0],
+        facing: [0.0, 1.0, 0.0],
+        chases: true,
+        radius: 0.6,
+        every_s: 0.02,
+        push: 3.0,
+        lift: 0.5,
+        ..Default::default()
+    }
+}
+
+fn vel(sim: &Sim) -> Vec3 {
+    sim.targets()[0].bot.as_ref().unwrap().vel
+}
+
+/// Steps for `secs` seconds at 240 Hz.
+fn run_for(sim: &mut Sim, secs: f32) {
+    for _ in 0..(secs * 240.0).round() as usize {
+        sim.step(FRAME, idle());
+    }
+}
+
+/// A target whose body overlaps the reach is kicked, one whose body doesn't is left
+/// alone, and so is one behind the pusher. The reach is a ball of the pusher's
+/// radius whose centre is that far ahead, so along its facing it ends at twice the
+/// radius, plus the target's own.
+#[test]
+fn a_pinned_pushers_reach_is_a_ball_ahead_of_it() {
+    // (where the target is, whether it is kicked)
+    for (at, kicked) in [
+        ([0.0, 0.0, -7.45], true),  // just inside 2 * 1 + 0.5 from the pusher
+        ([0.0, 0.0, -7.55], false), // just outside
+        ([0.0, 0.0, -4.0], false),  // behind it
+        ([0.0, 0.0, -5.5], true),   // beside it, inside the ball
+        ([0.0, 1.45, -6.0], true),  // above the ball's middle
+        ([0.0, 1.55, -6.0], false),
+    ] {
+        let mut sim = pushed(at, 0.0, Vec::new(), vec![pinned()]);
+        run_for(&mut sim, 0.125);
+        assert_eq!(vel(&sim) != Vec3::ZERO, kicked, "target at {at:?}: {}", vel(&sim));
+    }
+}
+
+/// A kick adds to the target's speed, level and away from the pusher, with the height
+/// difference dropped, and the lift is added to its upward speed. Speeds add up
+/// (they aren't set), and the push doesn't fade with distance.
+#[test]
+fn a_kick_adds_a_level_push_and_a_lift() {
+    let p = Pusher { lift: 0.5, ..pinned() };
+    // Right of and above the pusher: the push is along (1, 0, -1), not up toward it.
+    let mut sim = pushed([1.0, 0.3, -6.0], 0.0, Vec::new(), vec![p]);
+    run_for(&mut sim, 0.125);
+    let side = 2.0 / 2f32.sqrt();
+    assert!((vel(&sim) - Vec3::new(side, 0.5, -side)).length() < 1e-4, "{}", vel(&sim));
+    // The next kick adds the same again; nothing slows it in the air. (It is out of
+    // the reach by then, so the pusher is made to reach everywhere.)
+    let wide = Pusher { radius: 50.0, lift: 0.5, ..pinned() };
+    let mut sim = pushed([1.0, 0.3, -6.0], 0.0, Vec::new(), vec![wide]);
+    run_for(&mut sim, 0.225);
+    assert!((vel(&sim) - Vec3::new(2.0 * side, 1.0, -2.0 * side)).length() < 1e-3, "{}", vel(&sim));
+    // The push is as hard from far away.
+    let mut sim = pushed([0.0, 0.0, -30.0], 0.0, Vec::new(), vec![Pusher { radius: 50.0, ..pinned() }]);
+    run_for(&mut sim, 0.125);
+    assert!((vel(&sim) - Vec3::new(0.0, 0.0, -2.0)).length() < 1e-4, "{}", vel(&sim));
+}
+
+/// A pusher under a target has no level direction to push in: it lifts it and
+/// doesn't throw it sideways (a divide by a distance of nothing would give NaN).
+#[test]
+fn a_kick_from_straight_below_has_no_sideways_push() {
+    for x in [0.0, 5e-5, 0.3] {
+        let mut sim = pushed([x, 1.0, -10.0], 0.0, Vec::new(), vec![under_the_floor()]);
+        run_for(&mut sim, 0.025);
+        assert!((vel(&sim) - Vec3::new(0.0, 0.5, 0.0)).length() < 1e-4, "x {x}: {}", vel(&sim));
+    }
+    // Chasing along a wall (a plane facing -z at z = -5) pushes straight away from
+    // it, wherever the target is on it.
+    let wall = Pusher { pos: [0.0, 0.0, -5.0], facing: [0.0, 0.0, -1.0], push: 2.0, radius: 3.0, ..under_the_floor() };
+    let mut sim = pushed([1.0, 0.3, -8.0], 0.0, Vec::new(), vec![wall]);
+    run_for(&mut sim, 0.025);
+    assert!((vel(&sim) - Vec3::new(0.0, 0.5, -2.0)).length() < 1e-4, "{}", vel(&sim));
+}
+
+/// A chasing pusher only reaches targets in front of its plane.
+#[test]
+fn a_chasing_pusher_ignores_targets_behind_its_plane() {
+    let mut sim = pushed([0.0, -0.5, -10.0], 0.0, Vec::new(), vec![under_the_floor()]);
+    run_for(&mut sim, 0.125);
+    assert_eq!(vel(&sim), Vec3::ZERO);
+}
+
+/// The number of kicks is the number of times the run passes a multiple of the
+/// period, whatever the step: a period that isn't a multiple of the frame time
+/// neither loses a kick nor doubles one, even with uneven frames.
+#[test]
+fn kicks_come_on_the_period_whatever_the_step() {
+    let p = Pusher { radius: 100.0, every_s: 0.07, push: 1.0, ..pinned() };
+    let kicks = |frame: &dyn Fn(usize) -> f32, secs: f32| {
+        let mut sim = pushed([0.0, 0.0, -8.0], 0.0, Vec::new(), vec![p.clone()]);
+        let (mut t, mut i) = (0.0, 0);
+        while t < secs {
+            let dt = frame(i);
+            sim.step(dt, idle());
+            t += dt;
+            i += 1;
+        }
+        vel(&sim).length()
+    };
+    // 1.0 s holds 14 periods of 0.07 s (0.98 s), 2.0 s holds 28 (1.96 s).
+    assert!((kicks(&|_| FRAME, 1.0) - 14.0).abs() < 1e-3);
+    assert!((kicks(&|_| FRAME, 2.0) - 28.0).abs() < 1e-3);
+    // Uneven frames, some slower than the period: 1.1 s holds 15 (1.05 s).
+    assert!((kicks(&|i| if i % 2 == 0 { 0.1 } else { 0.01 }, 1.095) - 15.0).abs() < 1e-3);
+    // The kicks start with the run: none before one whole period has passed.
+    assert_eq!(kicks(&|_| FRAME, 0.06), 0.0);
+}
+
+/// A pusher that has to see its target is stopped by a solid wall between them, but
+/// not by an invisible clip wall; one that doesn't need sight ignores both.
+#[test]
+fn sight_is_blocked_by_solid_walls_but_not_clip_walls() {
+    let wall = |clip: bool| crate::world::WorldMesh {
+        positions: vec![[-5.0, -5.0, -6.0], [5.0, -5.0, -6.0], [5.0, 5.0, -6.0], [-5.0, 5.0, -6.0]],
+        triangles: vec![[0, 1, 2], [0, 2, 3]],
+        clip,
+        ..Default::default()
+    };
+    // The pusher is at z = -5, the wall at -6, the target at -6.8 (inside the reach).
+    for (clip, needs_sight, kicked) in [(false, true, false), (true, true, true), (false, false, true)] {
+        let p = Pusher { needs_sight, ..pinned() };
+        let mut sim = pushed([0.0, 0.0, -6.8], 0.0, vec![wall(clip)], vec![p]);
+        run_for(&mut sim, 0.125);
+        assert_eq!(vel(&sim) != Vec3::ZERO, kicked, "clip {clip}, needs sight {needs_sight}");
+    }
+}
+
+/// A target that falls onto an invisible floor lands on it; with a chasing pusher
+/// under the floor that lifts what comes near, it slows, turns back and never
+/// touches it.
+#[test]
+fn a_chasing_pusher_under_a_clip_floor_holds_a_bot_up() {
+    let floor = crate::world::WorldMesh {
+        positions: vec![[-30.0, 0.0, -30.0], [30.0, 0.0, -30.0], [30.0, 0.0, 5.0], [-30.0, 0.0, 5.0]],
+        triangles: vec![[0, 1, 2], [0, 2, 3]],
+        clip: true,
+        ..Default::default()
+    };
+    // The reach tops out 1.6 m above the plane for a ball of this size, and each kick
+    // adds 0.5 m/s against a pull of 0.16 m/s per kick.
+    let lowest = |pushers: Vec<Pusher>| {
+        let mut sim = pushed([0.0, 3.0, -10.0], 8.0, vec![floor.clone()], pushers);
+        let mut lowest = f32::MAX;
+        let mut touched = false;
+        for _ in 0..720 {
+            sim.step(FRAME, idle());
+            lowest = lowest.min(sim.targets()[0].pos.y);
+            touched |= sim.targets()[0].bot.as_ref().unwrap().grounded;
+        }
+        (lowest, touched)
+    };
+    let (low, touched) = lowest(Vec::new());
+    assert!(touched && (low - 0.5).abs() < 0.05, "it lands on the floor: {low}");
+    let (low, touched) = lowest(vec![Pusher { push: 0.0, ..under_the_floor() }]);
+    assert!(!touched && low > 0.75, "it stays up: {low}");
+}
+
+/// A bot with its own `invincible` flag takes hits and never dies while another kind
+/// in the same world does (a character with `InvincibleBots`).
+#[test]
+fn a_kind_can_be_invincible_on_its_own() {
+    use crate::world::{WorldKind, WorldSpawn};
+    let mut s = on_a_floor(Vec::new(), None);
+    s.weapon.damage = 4.0;
+    s.targets.count = 2;
+    let w = s.world.as_mut().unwrap();
+    w.spawns = vec![
+        WorldSpawn { pos: [-3.0, -1.0, -10.0], ..Default::default() },
+        WorldSpawn { pos: [3.0, -1.0, -10.0], ..Default::default() },
+    ];
+    w.kinds = vec![
+        WorldKind { health: 1.0, invincible: true, spawns: vec![0], ..Default::default() },
+        WorldKind { health: 1.0, spawns: vec![1], ..Default::default() },
+    ];
+    w.slots = vec![vec![(0, 1.0)], vec![(1, 1.0)]];
+    let mut sim = Sim::new(s, 3);
+    let at = |sim: &Sim, kind: u32| sim.targets().iter().find(|t| t.kind() == Some(kind)).unwrap().pos.normalize();
+    for kind in [0, 1] {
+        let aim = at(&sim, kind);
+        sim.step(FRAME, Input { aim, fire_pressed: true, fire_held: false });
+        for _ in 0..240 {
+            sim.step(FRAME, idle());
+        }
+    }
+    assert_eq!(sim.stats().hits, 2);
+    assert_eq!(sim.stats().kills, 1, "only the kind that isn't invincible dies");
+    assert!(sim.targets().iter().any(|t| t.kind() == Some(0) && t.health == 1.0));
+}

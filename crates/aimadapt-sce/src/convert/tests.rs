@@ -287,11 +287,12 @@ fn inverted_bot_spawn_radius_makes_clusters() {
 }
 
 #[test]
-fn bots_with_knockbacks_cant_play_yet() {
+fn a_targets_melee_ability_cant_play() {
     let text = VOLUME_SCE
         .replace("MainBBType=Spheroid", "MainBBType=Spheroid\nAbilityProfileNames=Shove.abilmelee;;")
         .replace("[Map Data]", "[Melee Ability Profile]\nName=Shove\nHurtboxRadius=80.0\n[Map Data]");
-    assert_eq!(reasons(&text), vec!["bots that use abilities (knockbacks)".to_string()]);
+    // Only helper bots, on the player's team, push; a target's melee ability isn't played.
+    assert_eq!(reasons(&text), vec!["bots that use abilities (a target's melee ability: Shove)".to_string()]);
 }
 
 /// Made up for these tests: the bots' character has one movement ability, and the
@@ -386,7 +387,7 @@ fn weapon_abilities_are_refused_once_and_a_melee_one_beside_a_dash_still_is() {
     let both = dasher("MainVelocity=1800.0")
         .replace("AbilityProfileNames=Zip.abilmov;;", "AbilityProfileNames=Zip.abilmov;Shove.abilmelee;")
         .replace("[Map Data]", "[Melee Ability Profile]\nName=Shove\n[Map Data]");
-    assert_eq!(reasons(&both), vec!["bots that use abilities (knockbacks)".to_string()]);
+    assert_eq!(reasons(&both), vec!["bots that use abilities (a target's melee ability: Shove)".to_string()]);
 }
 
 /// Bug: Pasu's player is on team 2, so the player and the bots swapped spawn

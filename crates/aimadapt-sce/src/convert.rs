@@ -22,10 +22,11 @@ use aimadapt_sim::world::{AccuracyMult, PlayerBlock, World, WorldBox, WorldKind,
 use aimadapt_sim::{Scenario, Vec3};
 
 mod abilities;
+mod helpers;
 
 use crate::inventory::Gap;
 use crate::map::{Map, MapFormat, Placement, Solid, Teams};
-use crate::scenario::{BotChoice, Sce};
+use crate::scenario::{BotChoice, BotSlot, Sce};
 use crate::settings::Section;
 
 /// Unreal units in a meter.
@@ -105,20 +106,23 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
 
     let map = sce.map.as_ref().ok(); // a bad map is already a gap
     // Most scenarios put the player on team 1, but not all (Pasu's is team 2).
-    let player_team = top.f32_or("PlayerTeam", 1.0).max(1.0) as u32;
+    let player_team = crate::scenario::player_team(top);
     let other_team = if player_team == 1 { 2 } else { 1 };
 
     rule_reasons(top, &mut reasons);
 
-    let Bots { kinds, slots, rotations, teams } = bots(&r, other_team, &mut reasons);
+    // Bots on the player's team push the targets around; they aren't targets.
+    let helpers = helpers::plan(&r, player_team, &mut reasons, &mut notes);
+    let targets: Vec<&BotSlot> = r.bots.iter().filter(|s| !s.is_helper(player_team)).collect();
+    let pushed = !helpers.helpers.is_empty();
+    let Bots { kinds, slots, rotations, teams, moving } = bots(&targets, other_team, pushed, &mut reasons);
     let kind = kinds.first().map(|(ch, _)| *ch);
     let motion = kinds.first().and_then(|(_, m)| m.clone());
-    let moving = kinds.iter().any(|(_, m)| m.is_some());
-    if r.bots.is_empty() {
+    if targets.is_empty() {
         reasons.push(Gap::planned("no bots", ""));
     }
-    if r.bots.len() > 50 {
-        reasons.push(Gap::planned("too many bots", format!("{} at once; the trainer allows 50", r.bots.len())));
+    if targets.len() > 50 {
+        reasons.push(Gap::planned("too many bots", format!("{} at once; the trainer allows 50", targets.len())));
     }
     let shape = kind.map(|k| hitbox(k, &mut reasons, &mut notes));
     // The other kinds' hitboxes, checked the same way.
@@ -149,6 +153,7 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
         height,
         player_team,
         &teams,
+        &helpers,
         &mut spawn_characters,
         &mut reasons,
         &mut notes,
@@ -171,7 +176,7 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
         if characters.iter().any(|ch| ch.is("HasJetpack")) {
             notes.push("bots' jetpacks thrust whenever they'd jump; how long they hold it is a guess".into());
         }
-        if characters.iter().any(|ch| ch.is("CanCrouch")) && crouches(&r) {
+        if characters.iter().any(|ch| ch.is("CanCrouch")) && crouches(&targets) {
             notes.push("bots don't crouch yet".into());
         }
     } else if all_hidden(&world, radius) {
@@ -192,10 +197,19 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
         world.motion = motion;
     }
     world_rules(&mut world, top, source, source_hash);
+    if kinds.len() == 1 {
+        world.invincible |= characters[0].is("InvincibleBots");
+    }
+    if !world.pushers.is_empty() {
+        notes.push(format!(
+            "helper bots push the targets around ({} of them); they aren't drawn or scored",
+            world.pushers.len()
+        ));
+    }
 
     let mut scenario = Scenario { world: Some(world), ..base_scenario(sce, top, weapon) };
     let t = &mut scenario.targets;
-    t.count = r.bots.len() as u32;
+    t.count = targets.len() as u32;
     t.shape = shape;
     t.radius = radius;
     t.height = height;
@@ -248,25 +262,37 @@ struct Bots<'a> {
     slots: Vec<Vec<(u32, f32)>>,
     rotations: Vec<Option<u32>>,
     teams: Vec<u32>,
+    /// Some bot moves by itself (not only falls and is pushed).
+    moving: bool,
 }
 
-fn bots<'a>(r: &crate::scenario::Resolved<'a>, other_team: u32, reasons: &mut Vec<Gap>) -> Bots<'a> {
+/// The target slots' bots. With `pushed` (the file has helper bots) every bot gets a
+/// motion, since a bot has to have one to fall or be pushed.
+fn bots<'a>(target_slots: &[&BotSlot<'a>], other_team: u32, pushed: bool, reasons: &mut Vec<Gap>) -> Bots<'a> {
     let mut kinds: Vec<(&Section, Option<Motion>)> = Vec::new();
     let mut slots: Vec<Vec<(u32, f32)>> = Vec::new();
     let mut rotations: Vec<Option<u32>> = Vec::new();
     let mut rotation_names: Vec<String> = Vec::new();
     let mut teams = Vec::new();
-    for slot in &r.bots {
+    let mut moving = false;
+    for slot in target_slots {
         // Team 0 (some Pasu files) plays as the player's opponents.
         let team = slot.team.and_then(|t| t.trim().parse::<u32>().ok()).filter(|t| *t > 0);
         teams.push(team.unwrap_or(other_team));
         let mut choices = Vec::new();
         for c in &slot.choices {
             let Some(ch) = c.character else { continue };
-            // Movement abilities play; the knockbacks helper bots use to push targets
-            // around (Raw Control, Controlsphere) don't yet.
+            // Movement abilities play. A target's melee ability doesn't: the knockbacks
+            // that matter are the helper bots'.
             abilities::reasons(c, reasons);
-            let m = moves(c, ch).then(|| bot_motion(c, ch));
+            let moves = moves(c, ch);
+            moving |= moves;
+            if pushed && !moves && ch.is("IsFlyer") {
+                // Not measured in KovaaK's: whether such a bot hovers or falls when it is pushed.
+                let detail = format!("a flying target that doesn't move by itself: {}", ch.name());
+                push_once(reasons, Gap { feature: "helper bots", detail, beyond_plan: true });
+            }
+            let m = if moves { Some(bot_motion(c, ch)) } else { pushed.then(|| still_motion(c, ch)) };
             let k = match kinds.iter().position(|(k, km)| same_kind(k, ch) && *km == m) {
                 Some(k) => k,
                 None => {
@@ -289,7 +315,7 @@ fn bots<'a>(r: &crate::scenario::Resolved<'a>, other_team: u32, reasons: &mut Ve
             slots.push(choices);
         }
     }
-    Bots { kinds, slots, rotations, teams }
+    Bots { kinds, slots, rotations, teams, moving }
 }
 
 /// The kinds of bot, each on the spawn points its character may use (all of them
@@ -320,6 +346,7 @@ fn add_kinds(
             regen_per_s: ch.f32_or("HealthRegenPerSec", 0.0),
             regen_delay_s: ch.f32_or("HealthRegenDelay", 0.0).clamp(0.0, 10.0),
             respawn_delay_s: respawn_delay(ch),
+            invincible: ch.is("InvincibleBots"),
             motion: m.clone(),
             spawns: if all { Vec::new() } else { spawns },
         });
@@ -517,8 +544,8 @@ fn moves(c: &BotChoice, ch: &Section) -> bool {
 }
 
 /// Whether any bot's dodge profile crouches.
-fn crouches(r: &crate::scenario::Resolved) -> bool {
-    r.bots
+fn crouches(slots: &[&BotSlot]) -> bool {
+    slots
         .iter()
         .flat_map(|s| &s.choices)
         .flat_map(|c| &c.dodges)
@@ -572,6 +599,22 @@ fn bot_motion(c: &BotChoice, ch: &Section) -> Motion {
         ],
         random_dodges: c.bot.bool("RandomizeDodgeProfiles").unwrap_or(true),
         abilities: abilities::abilities(c, ch),
+    }
+}
+
+/// The physics of a bot that does nothing by itself and is only pushed: it falls and
+/// slides to a stop. It has no dodge profile, ability, jetpack or flight, and nothing
+/// that makes it jump or wait until it is hurt. A bot gets this in a scenario with
+/// helper bots when it wouldn't move on its own (a flier that wouldn't is refused).
+fn still_motion(c: &BotChoice, ch: &Section) -> Motion {
+    Motion {
+        max_speed: 0.0,
+        dodges: Vec::new(),
+        abilities: None,
+        jetpack: None,
+        flight: None,
+        still_until_hurt: false,
+        ..bot_motion(c, ch)
     }
 }
 
@@ -638,9 +681,16 @@ fn same_hitbox(a: &Section, b: &Section) -> bool {
 fn same_kind(a: &Section, b: &Section) -> bool {
     a.name() == b.name()
         || same_hitbox(a, b)
-            && ["EnemyBodyColor", "HealthRegenPerSec", "HealthRegenDelay", "MinRespawnDelay", "MaxRespawnDelay"]
-                .iter()
-                .all(|k| a.str(k) == b.str(k))
+            && [
+                "EnemyBodyColor",
+                "HealthRegenPerSec",
+                "HealthRegenDelay",
+                "MinRespawnDelay",
+                "MaxRespawnDelay",
+                "InvincibleBots",
+            ]
+            .iter()
+            .all(|k| a.str(k) == b.str(k))
 }
 
 /// A character's body color, unless it's unset (black).
@@ -693,13 +743,19 @@ fn world(
     bot_height: f32,
     player_team: u32,
     teams: &[u32],
+    helpers: &helpers::Plan,
     spawn_characters: &mut Vec<Vec<String>>,
     reasons: &mut Vec<Gap>,
     notes: &mut Vec<String>,
 ) -> Option<World> {
     let reflex = map.format == MapFormat::Reflex;
-    // The player's own start comes first if the map says which one it is.
-    let mut starts: Vec<_> = map.spawns.iter().filter(|s| team_can_use(s.teams, player_team)).collect();
+    // The player's own start comes first if the map says which one it is. A helper
+    // bot's spawn point isn't a start.
+    let mut starts: Vec<_> = map
+        .spawns
+        .iter()
+        .filter(|s| team_can_use(s.teams, player_team) && !helpers::is_reserved(s, helpers, player))
+        .collect();
     starts.sort_by_key(|s| !s.initial);
     let Some(start) = starts.first().copied() else {
         reasons.push(Gap::planned("the map has no spawn point for the player", ""));
@@ -729,23 +785,32 @@ fn world(
 
     let bot_teams: Vec<u32> =
         if teams.is_empty() { vec![if player_team == 1 { 2 } else { 1 }] } else { teams.to_vec() };
-    let mut spawns = Vec::new();
-    let bot = bots[0];
-    for s in &map.spawns {
-        let usable = bot_teams.iter().any(|t| team_can_use(s.teams, *t))
-            && (s.characters.is_empty()
-                || s.characters.iter().any(|c| bots.iter().any(|b| c.eq_ignore_ascii_case(b.name()))));
-        if !usable || s.weight <= 0.0 {
-            continue;
-        }
-        // The offset runs along the spawn point's own axes: Unreal right, up and back.
-        // A Reflex yaw turns the same way as an Unreal one, so both use its rotation.
+    // Where a spawn point is and which way it faces: its own right, up and back axes.
+    // The offset runs along them. A Reflex yaw turns the same way as an Unreal one, so
+    // both use its rotation.
+    let frame = |s: &crate::map::Spawn| {
         let q = ue_rotation(match s.angles {
             Some(a) if reflex => [0.0, 0.0, a[0]],
             a => a.unwrap_or_default(),
         });
-        let axis = |v: [f32; 3]| (turn * axes((q * glam::Vec3::from_array(v)).to_array())).to_array();
-        let at = place(point(s.position));
+        let axis = |v: [f32; 3]| turn * axes((q * glam::Vec3::from_array(v)).to_array());
+        helpers::Frame {
+            at: place(point(s.position)),
+            axes: [axis([0.0, 1.0, 0.0]), axis([0.0, 0.0, 1.0]), axis([-1.0, 0.0, 0.0])],
+        }
+    };
+    let taken = helpers::assign(map, helpers, |s| team_can_use(s.teams, player_team), reasons)?;
+    let mut spawns = Vec::new();
+    let bot = bots[0];
+    for (i, s) in map.spawns.iter().enumerate() {
+        let usable = bot_teams.iter().any(|t| team_can_use(s.teams, *t))
+            && (s.characters.is_empty()
+                || s.characters.iter().any(|c| bots.iter().any(|b| c.eq_ignore_ascii_case(b.name()))));
+        // A helper's spawn point isn't a target's.
+        if !usable || s.weight <= 0.0 || taken.contains(&i) {
+            continue;
+        }
+        let helpers::Frame { at, axes: [right, up, back] } = frame(s);
         let pos = at + rise(bot_height);
         // A volume is a box placed like a `Cube`: from its lowest corner, 100 units
         // per scale step, turned by its rotation. Bots rise from wherever in it they appear.
@@ -758,7 +823,7 @@ fn world(
         spawns.push(WorldSpawn {
             pos: pos.to_array(),
             weight: s.weight,
-            axes: [axis([0.0, 1.0, 0.0]), axis([0.0, 0.0, 1.0]), axis([-1.0, 0.0, 0.0])],
+            axes: [right, up, back].map(|a| a.to_array()),
             edges,
         });
     }
@@ -782,8 +847,11 @@ fn world(
             guessed.into_iter().collect::<Vec<_>>().join(", ")
         ));
     }
+    let frames: Vec<helpers::Frame> = taken.iter().map(|i| frame(&map.spawns[*i])).collect();
+    let pushers = helpers::pushers(helpers, &frames, &meshes, &spawns, reasons);
     Some(World {
         spawns,
+        pushers,
         offset_min: a.to_array(),
         offset_max: b.to_array(),
         blocked_radius: bot.f32_or("BlockedSpawnRadius", 0.0).max(0.0) / UU_PER_M,

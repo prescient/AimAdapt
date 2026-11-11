@@ -23,7 +23,7 @@ fn read(name: &str) -> Sce {
 #[test]
 fn finds_every_fixture() {
     let files = find_files(&[fixtures()]);
-    assert_eq!(files.len(), 4);
+    assert_eq!(files.len(), 6);
     assert!(files.iter().all(|f| f.extension().unwrap() == "sce"));
 }
 
@@ -188,15 +188,125 @@ fn a_bot_with_a_dash_imports_and_dashes_in_play() {
 #[test]
 fn scenarios_the_trainer_cant_play_yet_say_why() {
     // The drifting pair move and dash, which plays, but one of them also pushes with
-    // a melee ability (a knockback), which doesn't yet.
+    // a melee ability (a knockback). Only helper bots on the player's team push.
     let moving = import(&path("Drifting Pair")).unwrap_err();
     let text: Vec<String> = moving.iter().map(ToString::to_string).collect();
-    assert_eq!(text, vec!["bots that use abilities (knockbacks)".to_string()]);
+    assert_eq!(text, vec!["bots that use abilities (a target's melee ability: Nudge)".to_string()]);
     assert!(!moving[0].beyond_plan, "abilities are in the plan");
     // Reflex maps play; this one's projectile weapon doesn't, and isn't planned.
     let old = import(&path("Old Room")).unwrap_err();
     assert!(!old.iter().any(|r| r.to_string().contains("Reflex")), "{old:?}");
     assert!(old.iter().any(|r| r.feature == "projectile weapon" && r.beyond_plan), "{old:?}");
+}
+
+fn idle() -> Input {
+    Input { aim: Vec3::Y, fire_pressed: false, fire_held: false }
+}
+
+/// A sim started on the run (past the countdown).
+fn started(s: aimadapt_sim::Scenario) -> Sim {
+    let mut sim = Sim::new(s, 7);
+    while sim.phase() == Phase::Countdown {
+        sim.step(0.05, idle());
+    }
+    sim
+}
+
+fn near(a: Vec3, b: [f32; 3]) -> bool {
+    (a - Vec3::from_array(b)).length() < 1e-3
+}
+
+/// A chasing helper sits under an invisible floor, facing up, and lifts a ball that
+/// falls toward the floor: the ball never reaches it. Without the helper it lands.
+/// The ball's character is invincible, which the scenario doesn't say.
+#[test]
+fn a_chasing_helper_under_a_clip_floor_keeps_a_ball_up() {
+    let i = import(&path("Floor Keeper")).unwrap();
+    assert!(i.notes.iter().any(|n| n.contains("helper bots push the targets around (1 of them)")), "{:?}", i.notes);
+    let s = i.scenario;
+    let w = s.world.as_ref().unwrap();
+    // The helper is not a target, and its spawn point is not the ball's.
+    assert_eq!(s.targets.count, 1);
+    assert_eq!((w.spawns.len(), w.kinds.len(), w.slots.len()), (1, 0, 0));
+    assert_eq!(w.pushers.len(), 1);
+    let p = &w.pushers[0];
+    assert!(p.chases && p.needs_sight);
+    // 5 m ahead, on the underside of a 0.5 m slab below the player's feet (its height
+    // above that is its own: 2 units).
+    assert!(near(Vec3::from_array(p.pos), [0.0, -0.48, -5.0]), "{:?}", p.pos);
+    assert!(near(Vec3::from_array(p.facing), [0.0, 1.0, 0.0]), "{:?}", p.facing);
+    assert_eq!((p.radius, p.every_s, p.push, p.lift), (0.6, 0.02, 3.0, 0.6));
+    assert!(w.invincible, "the ball's character is invincible");
+    let motion = w.motion.as_ref().expect("a ball needs a motion to be lifted");
+    assert!(motion.dodges.is_empty() && motion.abilities.is_none() && motion.max_speed == 0.0);
+
+    let play = |s: aimadapt_sim::Scenario| {
+        let mut sim = started(s);
+        let mut lowest = f32::MAX;
+        for _ in 0..(10.0 * 120.0) as usize {
+            sim.step(1.0 / 120.0, idle());
+            lowest = lowest.min(sim.targets()[0].pos.y);
+        }
+        lowest
+    };
+    // The ball's middle is 0.3 m above the floor when it rests on it.
+    let lowest = play(s.clone());
+    assert!(lowest > 0.5, "the helper holds it up: lowest {lowest}");
+    let mut without = s.clone();
+    without.world.as_mut().unwrap().pushers.clear();
+    let lowest = play(without);
+    assert!((lowest - 0.3).abs() < 0.02, "without it the ball lands: lowest {lowest}");
+    // It takes hits and never dies, though one shot would kill it.
+    let mut strong = s;
+    strong.weapon.damage = 100.0;
+    let mut sim = started(strong);
+    for _ in 0..40 {
+        let aim = sim.targets()[0].pos.normalize();
+        sim.step(0.05, Input { aim, fire_pressed: true, fire_held: true });
+    }
+    assert!(sim.stats().hits > 0 && sim.stats().kills == 0, "{:?}", sim.stats());
+}
+
+/// A pinned helper beside two balls kicks the one it can see, sideways and away from
+/// itself, and leaves the one behind a solid ledge alone. Without needing sight it
+/// kicks both.
+#[test]
+fn a_pinned_helper_that_needs_sight_leaves_a_ball_behind_a_ledge_alone() {
+    let i = import(&path("Ledge Kicker")).unwrap();
+    let s = i.scenario;
+    let w = s.world.as_ref().unwrap();
+    assert_eq!((s.targets.count, w.spawns.len(), w.pushers.len()), (2, 2, 1));
+    let p = &w.pushers[0];
+    assert!(!p.chases && p.needs_sight);
+    // 10 m ahead, facing away from the player; a reach of 1.5 m, 4 m/s every 0.1 s.
+    assert!(near(Vec3::from_array(p.pos), [0.0, 0.02, -10.0]), "{:?}", p.pos);
+    assert!(near(Vec3::from_array(p.facing), [0.0, 0.0, -1.0]), "{:?}", p.facing);
+    assert_eq!((p.radius, p.every_s, p.push, p.lift), (1.5, 0.1, 4.0, 0.0));
+
+    // The ball on the left is in plain view, the one on the right behind the ledge.
+    let moved = |s: aimadapt_sim::Scenario| {
+        let mut sim = started(s);
+        let at = |sim: &Sim| {
+            let mut t: Vec<Vec3> = sim.targets().iter().map(|t| t.pos).collect();
+            t.sort_by(|a, b| a.x.total_cmp(&b.x));
+            t
+        };
+        let start = at(&sim);
+        for _ in 0..(3.0 * 120.0) as usize {
+            sim.step(1.0 / 120.0, idle());
+        }
+        let end = at(&sim);
+        let level = |a: Vec3, b: Vec3| Vec3::new(b.x - a.x, 0.0, b.z - a.z);
+        (level(start[0], end[0]), level(start[1], end[1]))
+    };
+    let (left, right) = moved(s.clone());
+    // Away from the helper: left and farther.
+    assert!(left.x < -0.3 && left.z < -0.3, "kicked sideways and away: {left}");
+    assert!(right.length() < 1e-3, "behind the ledge: {right}");
+    let mut sees = s;
+    sees.world.as_mut().unwrap().pushers[0].needs_sight = false;
+    let (left, right) = moved(sees);
+    assert!(left.x < -0.3 && right.x > 0.3 && right.z < -0.3, "{left} {right}");
 }
 
 /// Reads every `.sce` file in your KovaaK's folders. Run by hand with
@@ -218,4 +328,13 @@ fn every_local_scenario_file_reads() {
     }
     println!("{} files read", files.len());
     assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+/// A scenario's fingerprint is what its saved ratings and best scores hang on, so a
+/// new world field that isn't left out of the file at its default would restart them
+/// all. These were taken before helper bots (plan K3) were added.
+#[test]
+fn imported_fixtures_keep_their_fingerprints() {
+    assert_eq!(import(&path("Dash Lane")).unwrap().scenario.fingerprint(), "b4157023853bb7c5");
+    assert_eq!(import(&path("Still Wall")).unwrap().scenario.fingerprint(), "dae40cef9b1e60b7");
 }

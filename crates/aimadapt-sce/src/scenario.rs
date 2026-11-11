@@ -42,6 +42,25 @@ pub struct BotSlot<'a> {
     pub in_order: bool,
 }
 
+impl BotSlot<'_> {
+    /// The team the slot's bots are on, if the file gives one above 0 (team 0 and a
+    /// missing team both play as the player's opponents).
+    pub fn team_number(&self) -> Option<u32> {
+        self.team.and_then(|t| t.trim().parse::<u32>().ok()).filter(|t| *t > 0)
+    }
+
+    /// Whether the slot's bot is a helper: on the player's own team. Helpers aren't
+    /// targets; scenarios use them to push the targets around.
+    pub fn is_helper(&self, player_team: u32) -> bool {
+        self.team_number() == Some(player_team)
+    }
+}
+
+/// The player's team: `PlayerTeam`, 1 unless the file says otherwise (Pasu's is 2).
+pub fn player_team(top: &Section) -> u32 {
+    top.f32_or("PlayerTeam", 1.0).max(1.0) as u32
+}
+
 /// Everything the settings point at, and the names that point at nothing.
 #[derive(Debug, Clone, Default)]
 pub struct Resolved<'a> {
@@ -285,6 +304,40 @@ mod tests {
         assert!(!r.missing.iter().any(|m| m.contains("Hop") || m.contains("Zap")), "{:?}", r.missing);
         assert_eq!(strip_ext("Fly Rot.rot"), "Fly Rot");
         assert_eq!(strip_ext("v1.5 Ball"), "v1.5 Ball");
+    }
+
+    /// A bot slot is a helper when its team is the player's: team 0 and no team at all
+    /// are the player's opponents.
+    #[test]
+    fn a_helper_is_a_bot_on_the_players_team() {
+        let sce = Sce::parse(SCENE);
+        let r = sce.resolve();
+        // Mix.rot, Lone.bot and Ghost.bot are all on team 2.
+        assert!(r.bots.iter().all(|s| s.team_number() == Some(2) && !s.is_helper(1) && s.is_helper(2)));
+        let top = |text: &str| Sce::parse(text).settings.top;
+        assert_eq!(
+            player_team(&top("Name=A
+PlayerTeam=2
+")),
+            2
+        );
+        assert_eq!(
+            player_team(&top("Name=A
+")),
+            1
+        );
+        assert_eq!(
+            player_team(&top("Name=A
+PlayerTeam=0
+")),
+            1
+        );
+        let text = SCENE.replace("BotTeams=2;2;2", "BotTeams=1;0;");
+        let sce = Sce::parse(&text);
+        let r = sce.resolve();
+        let helper: Vec<bool> = r.bots.iter().map(|s| s.is_helper(1)).collect();
+        assert_eq!(helper, vec![true, false, false]);
+        assert_eq!(r.bots[1].team_number(), None);
     }
 
     #[test]

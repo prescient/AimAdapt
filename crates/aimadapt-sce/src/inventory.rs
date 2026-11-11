@@ -115,32 +115,28 @@ pub fn gaps(sce: &Sce) -> Vec<Gap> {
         gap("player abilities", counted(r.player_abilities.iter().map(|a| a.kind.as_str())));
     }
 
-    // The bots.
+    // The bots. A helper (on the player's team) can't be shot, so how it can be hit
+    // doesn't matter.
+    let player_team = crate::scenario::player_team(top);
     for slot in &r.bots {
+        let helper = slot.is_helper(player_team);
         for c in &slot.choices {
             if let Some(ch) = c.character {
                 let shape = ch.str("MainBBType");
-                if !SHAPES.contains(&shape) {
+                if !helper && !SHAPES.contains(&shape) {
                     gap("hitbox shape", shape.into());
                 }
-                if ch.is("MainBBHasHead") {
+                if !helper && ch.is("MainBBHasHead") {
                     gap("heads", ch.name().into());
                 }
-                if ch.is("HeadshotOnly") {
+                if !helper && ch.is("HeadshotOnly") {
                     gap("headshots only", ch.name().into());
                 }
                 if !matches!(ch.str("MovementType"), "" | "Base") {
                     gap("movement type", ch.str("MovementType").into());
                 }
             }
-            let shoots = c.bot.is("UseWeapons")
-                && !c
-                    .bot
-                    .list("WeaponsProfileNames")
-                    .iter()
-                    .chain(c.character.map(|ch| ch.list("WeaponProfileNames")).unwrap_or_default().iter())
-                    .all(|w| w.is_empty());
-            if shoots && player_can_die {
+            if shoots(c) && player_can_die {
                 gap("bots shoot back", c.bot.name().into());
             }
             // Melee and movement abilities are how bots push each other apart and
@@ -162,6 +158,18 @@ pub fn gaps(sce: &Sce) -> Vec<Gap> {
         }
     }
     out
+}
+
+/// Whether a bot is armed and uses its weapons (an empty `WeaponsProfileNames=;;;`
+/// list is no weapon).
+pub(crate) fn shoots(c: &crate::scenario::BotChoice) -> bool {
+    c.bot.is("UseWeapons")
+        && !c
+            .bot
+            .list("WeaponsProfileNames")
+            .iter()
+            .chain(c.character.map(|ch| ch.list("WeaponProfileNames")).unwrap_or_default().iter())
+            .all(|w| w.is_empty())
 }
 
 fn weapon_gaps(w: &Section, gap: &mut impl FnMut(&'static str, String)) {
@@ -292,5 +300,48 @@ Name=Zap
             features(&BASE.replace("InvinciblePlayer=true", "InvinciblePlayer=true\nIsTimeDilationActive=true")),
             vec!["KovaaK's dynamic difficulty"]
         );
+    }
+
+    /// A helper bot (on the player's team) can't be shot, so its hitbox shape, head and
+    /// headshot-only setting don't matter; its other settings still do.
+    #[test]
+    fn a_helpers_hitbox_is_not_a_gap() {
+        let odd = BASE
+            .replace(
+                "MainBBType=Spheroid",
+                "MainBBType=Cone
+HeadshotOnly=true",
+            )
+            .replace("MainBBHasHead=false", "MainBBHasHead=true");
+        assert_eq!(features(&odd), vec!["hitbox shape", "heads", "headshots only"]);
+        let helper = odd.replace(
+            "AddedBots=Ball.bot",
+            "AddedBots=Ball.bot
+BotTeams=1",
+        );
+        assert_eq!(features(&helper), Vec::<&str>::new());
+        // The same bot on the opponents' team, and a helper that moves strangely.
+        assert_eq!(
+            features(&odd.replace(
+                "AddedBots=Ball.bot",
+                "AddedBots=Ball.bot
+BotTeams=2"
+            ))
+            .len(),
+            3
+        );
+        let flying = helper.replace(
+            "MainBBType=Cone",
+            "MainBBType=Cone
+MovementType=Fly",
+        );
+        assert_eq!(features(&flying), vec!["movement type"]);
+        // With the player on team 2 the helper is the one on team 2.
+        let other = helper.replace(
+            "BotTeams=1",
+            "BotTeams=2
+PlayerTeam=2",
+        );
+        assert_eq!(features(&other), Vec::<&str>::new());
     }
 }

@@ -66,6 +66,91 @@ pub struct World {
     /// rotation take turns from it together. Empty when every slot picks by weight.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rotations: Vec<Option<u32>>,
+    /// Helper bots that push the targets around (KovaaK's melee abilities that do no
+    /// damage). They aren't drawn, shot or scored.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pushers: Vec<Pusher>,
+}
+
+/// A helper bot: it kicks every target in reach on a fixed schedule from the start
+/// of the run, whether anything is in reach or not. Its reach is a sphere of `radius`
+/// whose centre is `radius` ahead of it along `facing`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Pusher {
+    /// Meters, in the world's frame: where a pinned pusher is, or a point on the
+    /// plane a chasing one slides on.
+    pub pos: [f32; 3],
+    /// A unit vector: the way a pinned pusher faces, or the plane's normal pointing
+    /// toward the targets for a chasing one.
+    pub facing: [f32; 3],
+    /// It flies at the nearest target and is stopped by the plane, so it is always
+    /// at the point of the plane nearest the target.
+    pub chases: bool,
+    /// The reach's radius, in meters.
+    pub radius: f32,
+    /// Seconds between kicks.
+    pub every_s: f32,
+    /// What a kick adds to the target's speed, level and away from the pusher, in m/s.
+    pub push: f32,
+    /// What a kick adds to the target's upward speed in m/s; negative pushes down.
+    pub lift: f32,
+    /// Only kicks targets it has a clear line to past the map's solid walls.
+    pub needs_sight: bool,
+}
+
+impl Default for Pusher {
+    fn default() -> Self {
+        Pusher {
+            pos: [0.0; 3],
+            facing: [0.0, 0.0, -1.0],
+            chases: false,
+            radius: 0.01,
+            every_s: 0.02,
+            push: 0.0,
+            lift: 0.0,
+            needs_sight: false,
+        }
+    }
+}
+
+/// The fastest a kick may add to a target's speed, in m/s.
+const MAX_KICK: f32 = 1000.0;
+/// The shortest time between kicks.
+const MIN_EVERY_S: f32 = 0.005;
+
+impl Pusher {
+    /// Problems with the values, in plain words.
+    fn problems(&self) -> Vec<String> {
+        let mut p = Vec::new();
+        let mut numbers =
+            self.pos.iter().chain(&self.facing).chain([&self.radius, &self.every_s, &self.push, &self.lift]);
+        if numbers.any(|v| !v.is_finite()) {
+            p.push("a helper bot has a value that isn't a number".into());
+            return p;
+        }
+        if self.radius <= 0.0 {
+            p.push("a helper bot's reach needs a radius above 0".into());
+        }
+        if self.every_s < MIN_EVERY_S {
+            p.push(format!("a helper bot can't act more than every {MIN_EVERY_S} s"));
+        }
+        if (Vec3::from_array(self.facing).length() - 1.0).abs() > 1e-3 {
+            p.push("a helper bot's facing must be a unit vector".into());
+        }
+        if self.push.abs() > MAX_KICK || self.lift.abs() > MAX_KICK {
+            p.push(format!("a helper bot's push can't be above {MAX_KICK} m/s"));
+        }
+        p
+    }
+
+    /// Whether a target's body, a vertical segment of half-length `half` around `mid`
+    /// swollen by `radius`, overlaps the reach when the pusher is at `at`.
+    pub fn reaches(&self, at: Vec3, mid: Vec3, radius: f32, half: f32) -> bool {
+        let centre = at + Vec3::from_array(self.facing) * self.radius;
+        let nearest = Vec3::new(mid.x, centre.y.clamp(mid.y - half, mid.y + half), mid.z);
+        nearest.distance(centre) <= self.radius + radius
+    }
 }
 
 /// One kind of bot in a scenario with several: its hitbox, health, look and
@@ -81,6 +166,9 @@ pub struct WorldKind {
     pub regen_per_s: f32,
     pub regen_delay_s: f32,
     pub respawn_delay_s: f32,
+    /// This kind takes hits but never goes down (its character's `InvincibleBots`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub invincible: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub motion: Option<Motion>,
     /// The spawn points it may use, as indices into the world's; empty for any.
@@ -99,6 +187,7 @@ impl Default for WorldKind {
             regen_per_s: 0.0,
             regen_delay_s: 0.0,
             respawn_delay_s: 0.0,
+            invincible: false,
             motion: None,
             spawns: Vec::new(),
         }
@@ -298,7 +387,20 @@ impl World {
                 break;
             }
         }
+        for problem in self.pushers.iter().flat_map(Pusher::problems) {
+            if !p.contains(&problem) {
+                p.push(problem);
+            }
+        }
+        if !self.pushers.is_empty() && !self.bots_move() {
+            p.push("helper bots push nothing unless the bots can move".into());
+        }
         p
+    }
+
+    /// Whether every kind of bot has a motion, so it can be pushed.
+    fn bots_move(&self) -> bool {
+        if self.kinds.is_empty() { self.motion.is_some() } else { self.kinds.iter().all(|k| k.motion.is_some()) }
     }
 
     /// The kind to fill bot slot `slot` with: the next in turn when the slot takes
@@ -621,5 +723,74 @@ mod tests {
         let kind = WorldKind { motion: Some(motion(f32::NAN)), ..Default::default() };
         let w = World { kinds: vec![kind], slots: vec![vec![(0, 1.0)]], ..world() };
         assert!(w.problems().iter().any(|p| p.contains("speed")), "{:?}", w.problems());
+    }
+
+    fn moving() -> Option<crate::motion::Motion> {
+        Some(crate::motion::Motion::default())
+    }
+
+    /// A helper bot's numbers are checked, and a world with helpers needs bots that can
+    /// be pushed.
+    #[test]
+    fn helper_bots_with_bad_values_are_problems() {
+        let good =
+            Pusher { pos: [0.0, 0.0, -5.0], radius: 0.5, every_s: 0.1, push: 3.0, lift: -2.0, ..Pusher::default() };
+        let with = |p: Pusher| World { pushers: vec![p], motion: moving(), ..world() };
+        assert!(with(good.clone()).problems().is_empty(), "{:?}", with(good.clone()).problems());
+        let bad = [
+            ("a number", Pusher { push: f32::NAN, ..good.clone() }),
+            ("a number", Pusher { pos: [f32::INFINITY, 0.0, 0.0], ..good.clone() }),
+            ("radius", Pusher { radius: 0.0, ..good.clone() }),
+            ("radius", Pusher { radius: -1.0, ..good.clone() }),
+            ("every", Pusher { every_s: 0.004, ..good.clone() }),
+            ("unit vector", Pusher { facing: [0.0, 0.0, 2.0], ..good.clone() }),
+            ("unit vector", Pusher { facing: [0.0; 3], ..good.clone() }),
+            ("push", Pusher { push: 1000.5, ..good.clone() }),
+            ("push", Pusher { lift: -1001.0, ..good.clone() }),
+        ];
+        for (word, p) in bad {
+            let problems = with(p.clone()).problems();
+            assert!(problems.iter().any(|m| m.contains(word)), "{p:?}: {problems:?}");
+        }
+        // The edges are fine.
+        let edge = Pusher { every_s: 0.005, push: 1000.0, lift: -1000.0, facing: [0.0, 1.0, 0.0001], ..good.clone() };
+        assert!(with(edge).problems().is_empty());
+        // Nothing to push: no bot can move, or one of several kinds can't.
+        let w = World { pushers: vec![good.clone()], ..world() };
+        assert!(w.problems().iter().any(|m| m.contains("can move")), "{:?}", w.problems());
+        let kinds = |second: Option<crate::motion::Motion>| World {
+            pushers: vec![good.clone()],
+            kinds: vec![
+                WorldKind { motion: moving(), ..Default::default() },
+                WorldKind { motion: second, ..Default::default() },
+            ],
+            slots: vec![vec![(0, 1.0)], vec![(1, 1.0)]],
+            ..world()
+        };
+        assert!(kinds(moving()).problems().is_empty(), "{:?}", kinds(moving()).problems());
+        assert!(kinds(None).problems().iter().any(|m| m.contains("can move")));
+    }
+
+    /// Imported scenarios saved before helper bots have no `pushers` and no
+    /// `invincible` on their kinds, and their fingerprints must stay what they were,
+    /// so these are left out of the file at their defaults.
+    #[test]
+    fn new_world_fields_are_left_out_at_their_defaults() {
+        let w = World { kinds: vec![WorldKind::default()], slots: vec![vec![(0, 1.0)]], ..world() };
+        let text = toml::to_string(&w).unwrap();
+        assert!(!text.contains("pushers") && !text.contains("invincible"), "{text}");
+        let back: World = toml::from_str(&text).unwrap();
+        assert_eq!(back, w);
+        // Set, they are kept.
+        let w = World {
+            pushers: vec![Pusher { push: 1.5, ..Pusher::default() }],
+            kinds: vec![WorldKind { invincible: true, ..Default::default() }],
+            slots: vec![vec![(0, 1.0)]],
+            motion: moving(),
+            ..world()
+        };
+        let back: World = toml::from_str(&toml::to_string(&w).unwrap()).unwrap();
+        assert_eq!(back, w);
+        assert!(toml::from_str::<World>("[[pushers]]\nspeed = 1.0").is_err(), "unknown fields are refused");
     }
 }

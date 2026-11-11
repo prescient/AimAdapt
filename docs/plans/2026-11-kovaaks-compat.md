@@ -10,10 +10,11 @@ A scenario is refused when it uses something the trainer doesn't model, so every
 |---|---|---|
 | K1 Every reason on a file | dc4732c | 98 of 225 |
 | K2 Dashes | fdf08f9 | 103 of 225, 31 of the 34 Novice benchmarks |
-| K3 Helper bots and knockback | | |
+| K3 Helper bots and knockback | | 107 of 225, all 34 Novice benchmarks |
 | K4 Lives, time score and efficiency | | |
 | K5 Hitbox shapes | | |
 | K6 Standing and spawning details | | |
+| K15 Ability and helper setups K2 and K3 refuse | | |
 | K7 Armed bots that never fire, invincible characters | | |
 | K8 Bots that destroy themselves | | |
 | K9 Heads | | |
@@ -54,6 +55,10 @@ Counted with a scratch survey over the same 225 files. A file can have several r
 
 Expected count of playable files after each step, if the packages land in order: K2 to K5 reach 118 and all 34 Voltaic S5 Novice benchmarks. K7 reaches 133, K8 143, K9 152, K10 159, K11 166, K12 175, K13 184 and K14 about 200. The rest need the "Later" list.
 
+Recounted after K3, with 107 playing. That estimate took K2 and K3 to clear every ability file, and they didn't: 19 files still have a movement ability setting K2 refuses (most often a dash that can go up or down) and 6 have a helper setup K3 refuses. Those are now K15, which runs after K6. With it the expected counts are: K4 111, K5 111, K15 118, K7 and K8 144, K9 153, K10 160, K11 167, K12 175, K13 184 and K14 201. The other 24 need the "Later" list, or use the kill efficiency score, which has no result file to check a formula against.
+
+Of the 118 files that don't play after K3, 58 wait on a single package, 30 on two and 30 on three or more. Files each package is needed for, and the files it would unlock by itself: K7 and K8 44 and 22, K14 31 and 5, K10 28 and 3, K15 23 and 7, K9 21 and 5, K12 17 and 1, K13 15 and 5, K4 8 and 4, K11 8 and 3, K5 6 and none, the "Later" list 24 and 3.
+
 ## What is out of scope
 
 - The adaptive knob for imported scenarios (BACKLOG section 9, phase 5) and the app work around them (phase 6).
@@ -74,7 +79,7 @@ Expected count of playable files after each step, if the packages land in order:
 
 `aimadapt-cli sce --summary` counts the files that play. Since K1 it also counts files per reason and how many files each reason blocks alone. Each package's commit message gives the count before and after.
 
-The listing includes the test maps written for measuring in KovaaK's (the `AimAdapt -` prefix: 32 on the development machine at the start, all playable, and 36 after K2, 34 of them playable). The counts in this plan leave them out: 130 of 257 in the listing was 98 of 225 here, and 137 of 261 after K2 is 103 of 225.
+The listing includes the test maps written for measuring in KovaaK's (the `AimAdapt -` prefix: 32 on the development machine at the start, all playable, 36 after K2, 34 of them playable, and 50 after K3, 47 of them playable). The counts in this plan leave them out: 130 of 257 in the listing was 98 of 225 here, 137 of 261 after K2 is 103 of 225, and 154 of 275 after K3 is 107 of 225.
 
 After K1, 50 of the 127 refused files had a single reason: armed bots 11, abilities 9, the player moving 5, heads 5, invincibility set on a character 5, solid props 5, waypoint paths 3, several pellets 3, and one each for map objects, aim assist, aim down sights and the damage efficiency score. The other 77 need two or more packages.
 
@@ -115,13 +120,26 @@ Refused with a reason that names the setting: dashes that can go vertical, abili
 
 ### K3. Helper bots and knockback
 
-Three Voltaic benchmarks (Pasu, Controlsphere, Raw Control) and most of the 47 ability files move their targets with helper bots. A helper is on the player's team or can't be targeted, is too small to see, and hits enemy bots near it with a melee ability that does no damage and pushes them. Some helpers sit still. Others chase the target along the far side of an invisible wall, so the target is pushed back whenever it comes close to that wall.
+Three Voltaic benchmarks (Pasu, Controlsphere, Raw Control) and most of the 47 ability files move their targets with helper bots. A helper is on the player's team, is too small to see, and hits enemy bots near it with a melee ability that does no damage and pushes them. Some helpers sit still. Others chase the target along the far side of an invisible wall, so the target is pushed back whenever it comes close to that wall.
 
-- Before building: measure knockback in KovaaK's with `AimAdapt - Knock Test` maps. Several still targets stand in a row, each with its own helper at a different strength, and the screen shows which ones lift off the floor. That gives the hit rate and the size of one push. The same maps settle which timers set the rate, which way a horizontal push points, and whether the push fades toward the edge of its range.
-- `aimadapt-sce::convert`: a bot on the player's team, or one that can't be targeted, is a helper. It isn't a target, isn't drawn, doesn't count toward the score or the number of bots on screen, and isn't held to the size limits. A helper with a melee ability becomes a pusher in the world. A helper without one is dropped with a note.
-- `aimadapt-sim`: `World` carries pushers (where each starts, whether it chases, its range, its hit rate, its horizontal and vertical push at the middle and at the edge). Each step, a chasing pusher moves toward the nearest target as far as the bot walls let it, and every pusher adds its push to the bots in range.
-- Invincible bots by character: a bot is invincible when the scenario says so or its own character does. `WorldKind` gets the flag, so a mixed scenario can have both.
-- Tests: a target held off a wall by a chasing pusher, a still pusher's range and falloff, a helper left out of the score and the bot count, the per-character flag, and fixture files for a chasing helper and a still one.
+- `aimadapt-sce::convert` (`convert/helpers.rs`): a bot on the player's team is a helper. It isn't a target, isn't drawn, doesn't count toward the score or the number of bots on screen, and isn't held to the size limits. A helper with a melee ability becomes a pusher in the world. A helper without one is dropped with a note.
+- `aimadapt-sim` (`sim/pushing.rs`): `World` carries pushers (where each starts, which way it faces, whether it chases, its reach, its hit period, its level and vertical push, and whether it needs to see its target). Each step, every pusher that is due adds its push to the bots it reaches.
+- Invincible bots by character: a bot is invincible when the scenario says so or its own character does. `WorldKind` carries the flag, so a mixed scenario can have both.
+- Tests: the hit period table, a ball held up by a chasing pusher under an invisible floor, a pinned pusher's reach and sight, a helper left out of the score and the bot count, the per-character flag, each refusal, and two fixture files (a chasing helper and a pinned one).
+
+Done. Knockback was measured in KovaaK's first, on fourteen `AimAdapt - Knock Test` maps filmed off the screen:
+
+- `FlatKnockbackHorizontal` and `FlatKnockbackVertical` are speeds in units per second, added to the speed the target already has. The `Hurtbox…KnockbackFactor` values don't scale them, and the push doesn't fade toward the edge of the hurtbox.
+- The hurtbox is a sphere of radius `HurtboxRadius` whose middle is that far ahead of the helper along its facing. A target is hit when its body overlaps the sphere, so the reach along the facing is twice the radius plus the target's own. `MapScale` doesn't scale it.
+- The level push points from the helper to the target. The vertical push keeps its sign.
+- A helper hits on a fixed period: the smallest whole number of `AbilityUseTimer` presses (one at the least) that is as long as the longest of `AIReuseTimer`, `AbilityDuration + ChargeTimer` and `AbilityDuration + DelayAfterUse`. A press that lands exactly on that time is used. The helper hits on that schedule whether or not anything is in reach.
+- A long swing (`AbilityDuration` of 1 s) hits a target once when it enters the hurtbox, which is a different rule, so swings over 0.05 s are refused.
+- With `SeeThroughWalls=false` a helper hits only the targets it has a clear line to, middle to middle, past visible solid blocks. Clip blocks never stop a push.
+- A chasing helper (a fast flier whose dodge profile always goes forward) presses against the far face of the clip slab between it and its target, at the point nearest the target.
+
+Refused with a reason: pushes that do damage or vary between a smallest and a largest value, swings over 0.05 s, more than one charge, helpers that don't always use the ability or that see a narrower view, helpers that carry weapons, a target's own melee ability, helpers that are neither pinned nor a fast chaser, a hit period under 0.005 s, and a flying target that doesn't move by itself in a scenario with helpers (whether it hovers or falls when pushed wasn't measured).
+
+After K3, 107 of the 225 files play, and all 34 Voltaic S5 Novice benchmarks do. Four local files import with pushers: two kinds of chaser under an invisible floor or behind a wall, and one set of pinned helpers. None of them was played in the engine by hand. Six files still have a helper setup K3 refuses (see K15).
 
 ### K4. Lives, time score and efficiency
 
@@ -129,6 +147,12 @@ Three Voltaic benchmarks (Pasu, Controlsphere, Raw Control) and most of the 47 a
 - A score for time, paid when the run ends that way.
 - A score multiplied by damage efficiency or kill efficiency.
 - Before building: check each formula against real KovaaK's result files (kills, shots, damage done and possible, and the score are all in them). The formulas go in SCENARIOS.md.
+- Checked on 11 November 2026 against result files:
+  - Time score: `ScorePerTime` times the game seconds left (`Timelimit` minus the game seconds played) when the run ends. Four runs on three scenarios, each within 3 ms.
+  - Lives: `BotMaxLives` holds one number per bot slot. The three local files with lives have one slot each, a rotation played in order with as many lives as it has bots. Their result files show exactly that many kills, each of the next bot in the rotation, and the run ends on the last kill. No local file has lives on several slots, so that isn't measured and is refused.
+  - Damage efficiency: the score times damage done over damage possible, where damage possible is shots times the damage of one shot. One run, exact. That file scores by damage only. A file that scores kills too is unverified; the multiplier is taken to apply to the whole score.
+  - Kill efficiency: no result file has a score to check, so it stays refused.
+- The same result files showed that `Timescale` is the rate of KovaaK's whole game clock, and the importer ignored it. A challenge lasts `Timelimit / Timescale` real seconds (185 runs), shots per real second are the weapon's rate times the time scale, and the time score counts game seconds. 27 of the files that played after K3 set a time scale other than 1 and so ran at the wrong speed and length. Fixed in its own commit before K4, with a regression test.
 - `aimadapt-sim`: the world gets the lives, the time score and the two multipliers; `run_step` ends the run, `score()` applies them.
 - Tests: one per rule on a made-up scenario, and that old scenarios score as before.
 
@@ -152,6 +176,17 @@ Small differences on files that already play.
 - How long a jetpack bot holds its thrust, which is a guess today.
 
 Each item is its own small change with a test. The ones that need a number from KovaaK's get a test map first.
+
+### K15. Ability and helper setups K2 and K3 refuse
+
+Added on 11 November 2026, after the recount that followed K3. It runs after K6, because 23 of the files that don't play need it and 7 of them need nothing else.
+
+- A dash that can go up or down (`MainVelocityCanGoVertical` with a main velocity). The most common of the four. K2's test map showed such a bot thrown high into the air and nothing more exact, so measure the launch first.
+- An ability that costs the bot health (a negative `HealthRestore`): bots that hurt themselves or remove themselves on a timer. Check in KovaaK's that the bot dies of it and whether that death counts as a kill.
+- An ability used in reaction to damage (`AIDamageReaction`), with the health limits that go with it (`AIMaxSelfHealth`, `AIMaxTargHealth`), and a movement ability on a bot with `NoDodging`.
+- Helpers that go freely at their target (neither pinned nor a fast chaser behind a wall), a target's own melee ability, and bots of size zero that K3 doesn't count as helpers.
+
+Each one is measured, built and taken off the refusal list by itself, so this package can be split into several commits.
 
 ## Wave 2: beyond the backlog's plan
 
@@ -220,3 +255,11 @@ These rows are filled in as packages land. A row leaves the table when a test ma
 | `AIMinTargDist`, `AIMaxTargDist`, `AIMaxTargFOV`, `AIUseOnGround`, `AIUseInAir` | Rules that stop a use: distance to the player, the player within the view angle, on the ground or in the air | No |
 | A new ability window | Starts when the last one ends, on its own timer | Partly: the windows and the presses ran on separate timers |
 | A dash that comes later than its settings say | Not copied | Open: seen twice in KovaaK's on a 4.2 s dash (once 5.67 s), cause unknown |
+| Which targets a helper's hit reaches | Every target its hurtbox overlaps (and that it can see, when it needs sight) | No: it may hit only the target its AI has picked |
+| Several helpers with the same name | Each takes the next spawn point its character is allowed on, in file order | No |
+| A pinned helper's spawn delay | None: it hits from the start of the run | No |
+| A chasing helper's position | On the outer face of the clip slab, at the point nearest its target, with no travel time | Partly: one test map, by eye |
+| `InvincibleBots` on a character | That character's bots can't die, whatever the scenario's own flag says | No |
+| `StandStillUntilHurt` on a bot that is pushed | The pushes move it only once it has been hurt | No |
+| A flier's vertical speed when it is lifted | The push is added to it like any other speed | No |
+| A target bouncing on a push cushion | Not copied: in KovaaK's it lost about 4% of its height per cycle, cause unknown | Open |

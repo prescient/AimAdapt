@@ -9,7 +9,7 @@ use crate::inventory::Gap;
 use crate::scenario::{ABILITY_KINDS, BotChoice};
 use crate::settings::Section;
 
-fn is_kind(a: &Section, kind: usize) -> bool {
+pub(super) fn is_kind(a: &Section, kind: usize) -> bool {
     a.kind.eq_ignore_ascii_case(ABILITY_KINDS[kind])
 }
 
@@ -38,8 +38,9 @@ const UNPLAYED: &[(&str, Unplayed)] = &[
     ("AIDamageReaction", |a| a.is("AIDamageReaction")),
 ];
 
-/// Reasons a bot's abilities can't be played yet. Melee abilities (knockbacks) are
-/// still to come; weapon abilities are reported with the file's other gaps.
+/// Reasons a target's abilities can't be played yet. A target's melee ability (a
+/// knockback) isn't played: only helper bots push, see [`super::helpers`]. Weapon
+/// abilities are reported with the file's other gaps.
 pub(super) fn reasons(c: &BotChoice, reasons: &mut Vec<Gap>) {
     // Whether a bot that is told not to dodge still dashes wasn't measured in KovaaK's.
     if c.bot.is("NoDodging") {
@@ -50,7 +51,8 @@ pub(super) fn reasons(c: &BotChoice, reasons: &mut Vec<Gap>) {
     }
     for a in &c.abilities {
         if is_kind(a, 1) {
-            push_once(reasons, Gap::planned("bots that use abilities", "knockbacks"));
+            let detail = format!("a target's melee ability: {}", a.name());
+            push_once(reasons, Gap::planned("bots that use abilities", detail));
         } else if is_kind(a, 2) {
             for (key, unplayed) in UNPLAYED {
                 if unplayed(a) {

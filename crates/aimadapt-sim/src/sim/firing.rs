@@ -113,8 +113,13 @@ impl Sim {
 
     pub(super) fn damage(&mut self, i: usize, amount: f32, events: &mut Vec<Event>) {
         let now = self.elapsed();
-        // Invincible bots (KovaaK's `InvincibleBots`) take the hit but lose no health.
-        let invincible = self.current.world.as_ref().is_some_and(|w| w.invincible);
+        // Invincible bots (KovaaK's `InvincibleBots`, on the scenario or on the bot's
+        // character) take the hit but lose no health.
+        let invincible = self
+            .current
+            .world
+            .as_ref()
+            .is_some_and(|w| w.invincible || t_kind(w, self.targets[i].kind).is_some_and(|k| k.invincible));
         let t = &mut self.targets[i];
         let dealt = if invincible { amount } else { amount.min(t.health) };
         if !invincible {
@@ -178,4 +183,9 @@ impl Sim {
             .max_by(|a, b| aim.dot(a.1.pos.normalize()).total_cmp(&aim.dot(b.1.pos.normalize())))
             .map(|(i, _)| i)
     }
+}
+
+/// The kind of bot a target is, if the world has several.
+fn t_kind(w: &World, kind: Option<u32>) -> Option<&crate::world::WorldKind> {
+    w.kinds.get(kind? as usize)
 }

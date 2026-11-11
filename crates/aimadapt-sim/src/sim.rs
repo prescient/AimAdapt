@@ -434,6 +434,8 @@ pub struct Sim {
     bot_walls: Collider,
     /// Seconds since the countdown began.
     clock: f32,
+    /// Seconds into the run up to which helper bots' kicks have been applied.
+    pushed_to: f64,
     phase: Phase,
     targets: Vec<Target>,
     next_id: u64,
@@ -525,6 +527,7 @@ impl Sim {
             walls,
             bot_walls,
             clock: 0.0,
+            pushed_to: 0.0,
             phase: Phase::Countdown,
             targets: Vec::new(),
             next_id: 1,
@@ -689,6 +692,7 @@ impl Sim {
         self.last_aim = aim;
         let now = self.elapsed();
 
+        self.push_targets();
         self.move_targets(dt, &mut events);
         self.pace_tick(now);
         self.spawn_due(now, &mut events);
@@ -856,6 +860,7 @@ fn closest_ray_segment(dir: Vec3, a: Vec3, seg: Vec3) -> (f32, f32) {
 
 mod firing;
 mod movement;
+mod pushing;
 mod rating;
 mod record;
 mod spawning;
