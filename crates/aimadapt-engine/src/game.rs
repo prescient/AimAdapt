@@ -255,7 +255,12 @@ impl Game {
                 let hit = a.success_rate.unwrap_or(0.0) * 100.0;
                 match a.run_value {
                     None => {
-                        format!("Calibration: {:.0}% at {}, hit {hit:.0}%", a.goal * 100.0, fmt_value(a.knob, a.value))
+                        let after = a.break_days.map_or(String::new(), |d| format!(" after {} away", days_text(d)));
+                        format!(
+                            "Calibration{after}: {:.0}% at {}, hit {hit:.0}%",
+                            a.goal * 100.0,
+                            fmt_value(a.knob, a.value)
+                        )
                     }
                     Some(v) => format!(
                         "{} at {}: hit {hit:.0}%, rating {} (was {})",
@@ -1084,7 +1089,10 @@ fn update_hud(
             let goal = sim.scenario().adaptive.goal * 100.0;
             texts.p1().0 = match sim.run_pick() {
                 Some((v, pick)) => format!("This run: {}\n{}", fmt_value(knob, v), pick.run_label()),
-                None => format!("Calibration run\n{goal:.0}%: {}", fmt_value(knob, value)),
+                None => {
+                    let note = sim.break_days().map_or(String::new(), |d| format!("\n{}", break_note(d)));
+                    format!("Calibration run{note}\n{goal:.0}%: {}", fmt_value(knob, value))
+                }
             };
             let rate = rate.map_or("-".into(), |r| format!("{:.0}%", r * 100.0));
             let mut stats =
@@ -1113,6 +1121,31 @@ fn update_hud(
         line = format!("{w} | {} of {} | {line}", game.session.index + 1, game.session.steps.len());
     }
     texts.p5().0 = line;
+}
+
+/// Whole days, rounded to the nearest: "1 day", "9 days".
+fn days_text(days: f32) -> String {
+    let n = days.round().max(1.0) as u32;
+    format!("{n} {}", if n == 1 { "day" } else { "days" })
+}
+
+/// Why a calibration run follows a long break, for the HUD.
+fn break_note(days: f32) -> String {
+    format!("{} since your last run, finding your level again", days_text(days))
+}
+
+/// The first words of a calibration run's results.
+fn calibration_title(break_days: Option<f32>) -> String {
+    break_days.map_or("Calibration run".into(), |d| format!("Calibration run after {} away", days_text(d)))
+}
+
+/// The closing line of a calibration run's results.
+fn calibration_close(break_days: Option<f32>) -> &'static str {
+    if break_days.is_some() {
+        "Runs go back to one difficulty from here."
+    } else {
+        "From here on, each run plays at one difficulty."
+    }
 }
 
 /// The verdict line after a fixed run. `goal` and `rate` are fractions (0.85). A run
@@ -1157,11 +1190,13 @@ fn update_overlay(
             let hit = a.success_rate.unwrap_or(0.0) * 100.0;
             match a.run_value {
                 None => format!(
-                    "Calibration run: {goal:.0}% at {}   (likely {} to {})\n{} {hit:.0}% | {best}\nFrom here on, each run plays at one difficulty.",
+                    "{}: {goal:.0}% at {}   (likely {} to {})\n{} {hit:.0}% | {best}\n{}",
+                    calibration_title(a.break_days),
                     fmt_value(k, a.value),
                     fmt_value(k, lo),
                     fmt_value(k, hi),
                     rate_word(k, game.sim.rated_per_target()),
+                    calibration_close(a.break_days),
                 ),
                 Some(v) => {
                     let verdict = run_verdict(a.goal, a.success_rate, a.fastest.is_some(), a.breakthrough);
@@ -1285,6 +1320,18 @@ mod tests {
         assert_eq!(run_verdict(0.85, Some(0.9), false, false), "At the 85% goal, but too few targets to count as held");
         assert_eq!(run_verdict(0.85, Some(0.7), false, false), "Below the 85% goal this time");
         assert_eq!(run_verdict(0.85, None, false, false), "Below the 85% goal this time");
+    }
+
+    /// The calibration run after a break says why, in whole days.
+    #[test]
+    fn the_break_note_gives_whole_days() {
+        assert_eq!(break_note(9.4), "9 days since your last run, finding your level again");
+        assert_eq!(break_note(9.6), "10 days since your last run, finding your level again");
+        assert!(break_note(3.0).starts_with("3 days since"));
+        assert_eq!(calibration_title(Some(9.0)), "Calibration run after 9 days away");
+        assert_eq!(calibration_title(None), "Calibration run");
+        assert_eq!(calibration_close(Some(9.0)), "Runs go back to one difficulty from here.");
+        assert_eq!(calibration_close(None), "From here on, each run plays at one difficulty.");
     }
 
     fn builtin(id: &str) -> Scenario {

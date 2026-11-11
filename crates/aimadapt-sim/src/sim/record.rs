@@ -36,6 +36,7 @@ impl Sim {
                 pick: a.run.map_or(Pick::Calibrate, |x| x.2),
                 planned_chance: a.run.map(|x| x.1),
                 breakthrough: a.breakthrough,
+                break_days: a.break_days,
             }
         });
         RunResult {

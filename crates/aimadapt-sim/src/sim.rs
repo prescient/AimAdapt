@@ -339,6 +339,8 @@ pub struct AdaptiveSummary {
     /// The chance of success the run was planned at.
     pub planned_chance: Option<f32>,
     pub breakthrough: bool,
+    /// Days since the last run, for a calibration run that follows a long break.
+    pub break_days: Option<f32>,
 }
 
 impl AdaptiveSummary {
@@ -376,6 +378,8 @@ struct AdaptiveRun {
     /// run, where every target or segment gets its own value.
     run: Option<(f32, f32, Pick)>,
     breakthrough: bool,
+    /// Days away, when this calibration run follows a long break.
+    break_days: Option<f32>,
 }
 
 impl AdaptiveRun {
@@ -458,14 +462,19 @@ impl Sim {
 
     /// An adaptive run. With no earlier rating it's a calibration run, which sets
     /// each target's (or segment's) difficulty as it goes to find the player's
-    /// level. Otherwise the whole run plays at one difficulty picked from the mix
-    /// around the rating, and the rating takes in the run as it's played.
+    /// level. After a long break (see [`Prior::needs_calibration`]) it's a
+    /// calibration run too, but it starts from the old rating and keeps the old
+    /// best; [`Sim::break_days`] says how long the break was. Otherwise the whole
+    /// run plays at one difficulty picked from the mix around the rating, and the
+    /// rating takes in the run as it's played.
     pub fn adaptive(scenario: Scenario, seed: u64, prior: Option<Prior>, mix: Mix) -> Sim {
         let cfg = scenario.adaptive.resolve(&scenario);
         let rating = Rating::new(cfg, prior);
-        let run = prior.is_some().then(|| rating.pick_run(&mut Rng::new(seed ^ 0x9e37_79b9), mix));
-        let mut sim =
-            Sim::build(scenario, seed, Some(AdaptiveRun { rating, mix, segment: None, run, breakthrough: false }));
+        let after_break = prior.filter(Prior::needs_calibration).map(|p| p.days);
+        let run =
+            (prior.is_some() && after_break.is_none()).then(|| rating.pick_run(&mut Rng::new(seed ^ 0x9e37_79b9), mix));
+        let state = AdaptiveRun { rating, mix, segment: None, run, breakthrough: false, break_days: after_break };
+        let mut sim = Sim::build(scenario, seed, Some(state));
         if let Some((value, _, _)) = run {
             let t = &mut sim.current.targets;
             match cfg.knob {
@@ -565,6 +574,11 @@ impl Sim {
 
     fn knob(&self) -> Option<Knob> {
         self.adaptive.as_ref().map(|a| a.rating.cfg.knob)
+    }
+
+    /// Days since the last run, if this is a calibration run that follows a long break.
+    pub fn break_days(&self) -> Option<f32> {
+        self.adaptive.as_ref().and_then(|a| a.break_days)
     }
 
     /// Adaptive mode: the value this whole run plays at and what kind of run it is,

@@ -862,6 +862,47 @@ fn later_runs_play_at_one_difficulty() {
     assert_ne!(a.value, start, "and moved");
 }
 
+/// After a long break the old rating is a poor guess, so the next run is a
+/// calibration run again: it starts from the old rating and adapts target by
+/// target, and the result says how long the break was.
+#[test]
+fn a_run_after_a_long_break_is_a_calibration_run() {
+    let mut s = no_countdown(Scenario::default());
+    s.timing.duration_s = 20.0;
+    let old = 0.8;
+    let prior = Prior { days: 10.0, ..prior_at(Knob::Lifetime, old, Some(3.0)) };
+    let mut sim = Sim::adaptive(s.clone(), 4, Some(prior), Mix::Balanced);
+    assert_eq!(sim.run_pick(), None, "each target gets its own value");
+    assert!((sim.break_days().unwrap() - 10.0).abs() < 1e-6);
+    let start = sim.rating().unwrap().1;
+    assert!((start / old - 1.0).abs() < 0.1, "starts from the old rating: {start}");
+    let first = sim.result().telemetry.targets[0].lifetime_s;
+    assert!(first / old > 0.5 && first / old < 2.0, "first target near the old rating: {first}");
+    let mut i = 0;
+    while sim.phase() != Phase::Finished {
+        if let Some(t) = sim.targets().first()
+            && i % 40 == 0
+        {
+            let at = t.pos;
+            sim.step(FRAME, shoot(at));
+        } else {
+            sim.step(FRAME, idle());
+        }
+        i += 1;
+    }
+    let a = sim.result().adaptive.unwrap();
+    assert!(a.calibration());
+    assert_eq!(a.pick, Pick::Calibrate);
+    assert!((a.break_days.unwrap() - 10.0).abs() < 1e-6);
+    assert!(!a.breakthrough);
+
+    // A day away from the same rating still plays at one value, with no break.
+    let sim = Sim::adaptive(s, 4, Some(Prior { days: 1.0, ..prior }), Mix::Balanced);
+    assert!(sim.run_pick().is_some());
+    assert_eq!(sim.break_days(), None);
+    assert_eq!(sim.result().adaptive.unwrap().break_days, None);
+}
+
 #[test]
 fn later_tracking_runs_keep_one_speed() {
     let mut s = no_countdown(Scenario::default());

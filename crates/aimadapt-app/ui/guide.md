@@ -9,7 +9,7 @@ The app has four pages, in the sidebar: **Today** (what to play now), **Scenario
 1. **Set up your aim.** Open Settings. Pick the game you play, type your sensitivity exactly as it is in that game, and set your mouse DPI and field of view. If KovaaK's is installed, **Match my KovaaK's settings** copies your latest KovaaK's run instead.
 2. **Choose a display mode.** Borderless full screen is the default. See [Settings](#help/settings) for exclusive full screen, a window, and a smaller play area on a big monitor.
 3. **Play today's workout.** Today shows today's day of the Core Week program. Press **Start session** and the trainer opens over the app.
-4. **Expect a calibration run.** Your first adaptive run on each scenario finds your level as you play, so it gets harder and easier along the way. After that, every run plays at one difficulty.
+4. **Expect a calibration run.** Your first adaptive run on each scenario finds your level as you play, so it gets harder and easier along the way. After that, every run plays at one difficulty. A scenario you come back to after several days away gets a calibration run again.
 5. **Check your progress.** Progress shows your skill profile and how your week went. Each scenario's page on Scenarios breaks it down: where you miss, how fast you react, how steady your tracking is, with replays of your recent runs.
 
 Train most days, keep sessions to about half an hour, and take Sunday off. Day-to-day changes under about 5% are mostly luck. Look at the trend over a week or two.
@@ -75,7 +75,7 @@ The trainer is a separate game window. It opens over the app window: centered ac
 | F2 | Show or hide the FPS counter. |
 
 **On screen:**
-- **Top left:** "Calibration run" or "This run" with the run's difficulty, and your rating ("85%: 0.62 s").
+- **Top left:** "Calibration run" or "This run" with the run's difficulty, and your rating ("85%: 0.62 s"). A calibration run after a long break also says how many days it has been.
 - **Top center:** the time left.
 - **Top right:** your success rate so far against the goal (named for what's counted: "Hit rate", "On target", "On pace" or "Finished in time"), kills and kills a minute. Kill-pace scenarios also show how long you have for the next kill.
 - **Targets:** timed targets show a bar that empties as their time runs out, and change color by wave so newer ones stand out (three red, then three blue, then red again on Timed Grid). Switching targets show a health bar.
@@ -112,6 +112,8 @@ Target speed is in degrees per second because that's how fast your hand has to t
 | Easy | 93–97% | 15% | 10% | 15% |
 
 The mix (Steady, Balanced or Push) is a setting in your profile. A stretch run never follows another stretch run, or a run more than 10 points below the goal.
+
+**After a break.** If you leave a scenario for a few days, your old rating is only a rough guide to where you are now, so the next run is a calibration run again. That happens after three days away if the rating was still settling, and after about five and a half if it was well settled. The run starts from your old rating and adjusts target by target, and the screen says why ("9 days since your last run, finding your level again"). When it ends your rating is updated, and runs go back to one difficulty. A calibration run can't be a breakthrough, and your best held stays as it was.
 
 **Breakthroughs.** Holding 85% for a whole run at a value harder than your best is a breakthrough. The trainer announces it, and it becomes your new best held. A run of 30 targets or more holds the goal at 85% itself. A shorter run needs more, because a few lucky hits can look like skill: all 10 of 10, or 19 of 20. A tracking segment counts as three targets, so a tracking run of 20 seconds or more needs just 85%. A run with fewer than 10 targets or segments never counts. This rule got stricter in November 2026. A best you held before then stays as it is.
 
@@ -313,6 +315,7 @@ Nothing is sent anywhere. Deleting one of your scenarios or workouts removes the
 
 - **The mouse isn't locked to the trainer.** It locks again by itself within half a second of the trainer getting focus back. If it doesn't, click inside the trainer window.
 - **A rating started over.** The scenario's settings changed, so it calibrates again. This happens when you edit a scenario, and when an update changes a built-in.
+- **A calibration run on a scenario you've played before.** You were away from it for a few days, so the trainer finds your level again, starting from your old rating (see [Adaptive mode](#help/adaptive)).
 - **No KovaaK's runs.** Settings › KovaaK's shows where AimAdapt looked. It searches every Steam library for FPSAimTrainer\stats. Use **Rescan folder** after installing KovaaK's.
 - **The trainer opens in the wrong place.** It opens over the app window, so move the app window where you want the trainer, or use full screen.
 - **The trainer closed straight away.** The app shows why in a banner, such as a scenario file it couldn't load.
@@ -321,6 +324,7 @@ Nothing is sent anywhere. Deleting one of your scenarios or workouts removes the
 ## What's new {#whats-new}
 
 **November 2026**
+- After a long break from a scenario (three days or more), its next run is a calibration run that starts from your old rating, and the trainer says how many days it has been. Your rating and best held carry over.
 - Scenarios has three tabs now: **Browse**, **Workouts** and **Program**. Recent and Yours became filters on Browse: **Played**, and a **Yours** button next to Favorites. Once you've played something, Browse opens with your latest plays first. One **Rating or score** column shows your rating, or your best score where there is no rating. **All recent** on Today opens Browse showing what you've played. On a narrow window the lists drop columns so Play stays in view, and the page no longer scrolls sideways.
 - Breakthroughs are stricter. A run under 30 targets now has to beat 85% by a margin to count as held, so a lucky 9 of 10 no longer sets a best held. The results screen says when a run was at the goal but too short to count. Bests you already held are kept.
 - Scenarios has a **Program** tab with the week's plan: a card for each day with its drills, runs, your progress and a start button. Opening a drill from the tab and pressing back returns to it.

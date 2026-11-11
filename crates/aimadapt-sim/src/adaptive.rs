@@ -298,6 +298,28 @@ pub struct Prior {
     pub last_run: Option<(Pick, f32)>,
 }
 
+/// Days away after which an unsure rating is no longer trusted for a whole run.
+pub const BREAK_DAYS: f32 = 3.0;
+/// The sd (log units) below which a rating counts as settled.
+pub const SETTLED_SD: f32 = 0.12;
+/// How much the sd grows per day away, in log units.
+pub const DRIFT_PER_DAY: f32 = 0.02;
+
+impl Prior {
+    /// The prior's sd after time away: skill drifts, so widen it, like Glicko.
+    fn widened_sd(&self) -> f32 {
+        (self.sd * self.sd + (DRIFT_PER_DAY * self.days).powi(2)).sqrt().clamp(0.05, 0.6)
+    }
+
+    /// Whether the next run should be a calibration run again: at least [`BREAK_DAYS`]
+    /// days away and the widened sd back at [`SETTLED_SD`] or more. A settled rating
+    /// (sd 0.05) gets there after about five and a half days; a fresh, unsure one
+    /// from a short first run does not, because no time has passed.
+    pub fn needs_calibration(&self) -> bool {
+        self.days >= BREAK_DAYS && self.widened_sd() >= SETTLED_SD
+    }
+}
+
 /// The current rating: a posterior over (θ, s).
 #[derive(Debug, Clone)]
 pub struct Rating {
@@ -349,8 +371,7 @@ impl Rating {
         let (theta0, sd0, slope0, slope_sd, anchored) = match prior {
             Some(p) => {
                 // Skill drifts: widen the prior with time away, like Glicko.
-                let sd = (p.sd * p.sd + (0.02 * p.days).powi(2)).sqrt().clamp(0.05, 0.6);
-                (p.theta, sd, p.slope, p.slope_sd.unwrap_or(0.3).clamp(0.15, 1.0), true)
+                (p.theta, p.widened_sd(), p.slope, p.slope_sd.unwrap_or(0.3).clamp(0.15, 1.0), true)
             }
             None => (k.h(cfg.start) + 0.12 * logit_goal, 0.6, 0.12, 1.0, false),
         };
@@ -443,7 +464,7 @@ impl Rating {
 
     /// Whether the rating has settled enough to start mixing in stretch and easy targets.
     pub fn calibrated(&self) -> bool {
-        self.estimate().sd < 0.12 || self.outcomes.len() >= 25
+        self.estimate().sd < SETTLED_SD || self.outcomes.len() >= 25
     }
 
     /// Chooses one difficulty for a whole run from the mix. Guard rails: no stretch
@@ -811,6 +832,35 @@ mod tests {
         let fresh = Rating::new(cfg(), Some(p(0.0))).estimate().sd;
         let later = Rating::new(cfg(), Some(p(30.0))).estimate().sd;
         assert!(later > fresh * 2.0, "{fresh} -> {later}");
+    }
+
+    fn prior_of(sd: f32, days: f32) -> Prior {
+        Prior { theta: 0.0, slope: 0.12, sd, slope_sd: None, days, fastest: None, last_run: None }
+    }
+
+    #[test]
+    fn a_long_break_with_an_unsure_rating_asks_for_calibration() {
+        // Both lines, both sides.
+        assert!(!prior_of(0.3, 2.9).needs_calibration(), "under 3 days is never a break");
+        assert!(prior_of(0.12, 3.0).needs_calibration(), "3 days with a wide sd is a break");
+        assert!(!prior_of(0.05, 5.0).needs_calibration(), "a settled rating survives 5 days");
+        assert!(prior_of(0.05, 6.0).needs_calibration(), "but not 6");
+        // A fresh, unsure rating (short first run) must not loop back into calibration.
+        assert!(!prior_of(0.3, 0.0).needs_calibration());
+    }
+
+    #[test]
+    fn a_rating_after_a_break_keeps_the_old_best() {
+        let p = Prior { fastest: Some(0.7), ..prior_of(0.05, 10.0) };
+        assert_eq!(Rating::new(cfg(), Some(p)).best_before, Some(0.7));
+    }
+
+    #[test]
+    fn rating_new_keeps_its_estimate_for_a_prior_with_days() {
+        let p =
+            Prior { theta: 0.4, slope: 0.15, sd: 0.07, slope_sd: Some(0.25), days: 4.0, fastest: None, last_run: None };
+        let e = Rating::new(cfg(), Some(p)).estimate();
+        assert_eq!((e.h_goal, e.sd), (0.13980983, 0.10630146));
     }
 
     /// A player of fixed skill plays `runs` runs in a row, each started from the

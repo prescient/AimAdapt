@@ -72,7 +72,7 @@ Last reviewed: Nov 10, 2026 (after the layout review and the adaptive review; th
   - Steadier ratings (plan A1): the slope's uncertainty is carried between runs and the carried uncertainty applies to the goal point. A steady simulated player's rating moves about 2.2% from run to run, down from about 4.5%.
 - [x] Program figures and Insights keep a scenario's versions apart, as the trainer does: bests, notes, the rating chart, skill gains and carry-over use only the version last played, and the Runs table greys older versions' ratings (plan A3, a bug found by reading).
 - [x] Adapt between runs, not during them (from [playtesting](PLAYTEST.md): changing difficulty target by target felt chaotic).
-  - The first adaptive run on a scenario is a calibration run that adapts as you play.
+  - The first adaptive run on a scenario is a calibration run that adapts as you play. So is the next run after a break: three days or more away, with the rating's uncertainty widened back to 0.12 or more (about five and a half days for a settled rating). It starts from the old rating and keeps the old best, and the HUD and results say how many days it has been. It's automatic, because an offer would need a prompt in the middle of a session (plan A4).
   - Every later run plays at one value, shown up front ("This run: 0.62 s"), picked from the mix: at your level (80–90% chance), stretch (55–72%) and easy (93–97%).
   - Steady, Balanced and Push mixes are set per profile.
   - Guard rails: no stretch run after a stretch run, or after a run more than 10 points below the goal.
@@ -97,7 +97,6 @@ Last reviewed: Nov 10, 2026 (after the layout review and the adaptive review; th
 - [ ] `todo` P2 Planned order inside a block: first run at your level, stretch runs in the middle, an easy run last (plan A5).
 - [ ] `todo` P2 Planned against actual success by kind of run, with each run's kind and breakthroughs in the Runs table (plan A6).
 - [ ] `todo` P2 Ranges on gains, carry-over and the skill profile; changes inside the noise greyed; weak spots named only after three sessions (plan A7).
-- [ ] `todo` P2 A calibration run after a break of three days or more, once the rating has become uncertain, with a line on screen saying why (plan A4). The playtest note asked for an offer; the adaptive review recommended doing it automatically, since an offer needs a prompt in the middle of a session.
 
 ## 4. Programs and workouts
 

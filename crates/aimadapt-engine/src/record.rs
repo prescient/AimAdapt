@@ -495,6 +495,10 @@ mod tests {
         let p = prior(&db, &scenario, finished() + chrono::Duration::days(1) + chrono::Duration::minutes(1)).unwrap();
         assert!((p.days - 1.0).abs() < 0.01, "{}", p.days);
         assert!(first.adaptive.as_ref().unwrap().calibration(), "the first adaptive run calibrates");
+        assert!(!p.needs_calibration(), "a day away is not a break");
+        let long = prior(&db, &scenario, finished() + chrono::Duration::days(10)).unwrap();
+        assert!((long.days - 10.0).abs() < 0.01, "{}", long.days);
+        assert!(long.needs_calibration(), "ten days away is a break");
         assert_eq!(p.fastest, None, "a calibration run sets no best");
         assert_eq!(p.last_run.map(|r| r.0), Some(Pick::Calibrate));
         // How well the slope was known comes back too, so the next run starts from it
