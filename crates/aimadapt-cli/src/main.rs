@@ -628,8 +628,22 @@ fn describe_import(s: &aimadapt_sim::Scenario) -> String {
         }
         (None, _) => "standing still".into(),
     };
+    // The score rules beyond kills and hits, and the kills that end the run.
+    let mut rules = String::new();
+    if s.scoring.per_damage != 0.0 {
+        rules += &format!(", {}/damage", s.scoring.per_damage);
+    }
+    if w.time_score != 0.0 {
+        rules += &format!(", {}/s left", w.time_score);
+    }
+    if w.damage_efficiency {
+        rules += ", × damage efficiency";
+    }
+    if s.timing.kill_limit > 0 {
+        rules += &format!(", ends after {} kills", s.timing.kill_limit);
+    }
     format!(
-        "{} × {:?} r {:.2} m, {:.0} hp, {moves}, {} spawn points ({volumes} volumes) {:.1}–{:.1} m away ({:.2}° wide at the nearest), offset {:?}–{:?}, apart {:.2} m; {:.0} shots/s {:?}; score {}/kill {}/hit × {:?}",
+        "{} × {:?} r {:.2} m, {:.0} hp, {moves}, {} spawn points ({volumes} volumes) {:.1}–{:.1} m away ({:.2}° wide at the nearest), offset {:?}–{:?}, apart {:.2} m; {:.0} shots/s {:?}; score {}/kill {}/hit × {:?}{rules}",
         t.count,
         t.shape,
         t.radius,

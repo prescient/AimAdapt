@@ -1953,3 +1953,171 @@ fn a_scenarios_real_length_follows_its_time_scale() {
     s.world = None;
     assert_eq!(s.real_seconds(), 33.0);
 }
+
+/// A world scenario with one target that has 100 health, scoring nothing for kills and
+/// hits (so the rules under test are all that count), a weapon doing 10 per hit, and a
+/// run of `duration_s` game seconds.
+fn scored(duration_s: f32, time_score: f32) -> Scenario {
+    let mut s = timed(1.0);
+    s.timing.duration_s = duration_s;
+    s.scoring =
+        crate::scenario::Scoring { per_kill: 0.0, per_hit: 0.0, per_miss: 0.0, per_damage: 0.0, per_timeout: 0.0 };
+    s.targets.health = 100.0;
+    s.weapon.damage = 10.0;
+    s.world.as_mut().unwrap().time_score = time_score;
+    s
+}
+
+/// Fires at the target (`hit`) or away from it, then waits a real second.
+fn click(sim: &mut Sim, hit: bool) {
+    let aim = if hit { sim.targets()[0].pos } else { Vec3::Y };
+    sim.step(FRAME, Input { aim: aim.normalize(), fire_pressed: true, fire_held: true });
+    real_seconds(sim, 1.0);
+}
+
+/// The time score is the rate times the game seconds left when the run ends on its kill
+/// limit, in real seconds or at a time scale (the game clock is what counts).
+#[test]
+fn the_time_score_is_the_rate_times_the_game_seconds_left_at_the_end() {
+    for (scale, real_wait) in [(1.0, 4.0), (0.9, 4.0), (2.0, 4.0)] {
+        let mut s = scored(100.0, 2.0);
+        s.world.as_mut().unwrap().time_scale = scale;
+        s.timing.kill_limit = 1;
+        s.weapon.damage = 100.0;
+        let mut sim = Sim::new(s, 1);
+        real_seconds(&mut sim, real_wait);
+        let at = sim.targets()[0].pos;
+        sim.step(FRAME, shoot(at));
+        assert_eq!(sim.phase(), Phase::Finished, "at {scale}");
+        let played = real_wait * scale;
+        assert!((sim.elapsed() - played).abs() < 0.05, "at {scale}: {} game seconds", sim.elapsed());
+        let want = 2.0 * (100.0 - sim.elapsed());
+        assert!((sim.score() - want).abs() < 1e-3, "at {scale}: {} for {want}", sim.score());
+        assert!((sim.score() - 2.0 * (100.0 - played)).abs() < 0.2, "at {scale}: game seconds, not real");
+        assert!((sim.result().score - sim.score()).abs() < 1e-6, "the saved score is the same");
+    }
+}
+
+/// A run that times out has no time left, so no points for it; before that the same
+/// formula shows what the time left is worth now, and counts down.
+#[test]
+fn the_time_score_is_zero_at_a_timeout_and_counts_down_before() {
+    let mut sim = Sim::new(scored(10.0, 3.0), 1);
+    assert!((sim.score() - 30.0).abs() < 1e-3, "all the time is left at the start: {}", sim.score());
+    real_seconds(&mut sim, 2.0);
+    assert!((sim.score() - 24.0).abs() < 0.02, "{}", sim.score());
+    real_seconds(&mut sim, 3.0);
+    assert!((sim.score() - 15.0).abs() < 0.02, "{}", sim.score());
+    real_seconds(&mut sim, 6.0);
+    assert_eq!(sim.phase(), Phase::Finished);
+    assert_eq!(sim.score(), 0.0);
+    assert_eq!(sim.result().score, 0.0);
+}
+
+/// Four shots at a target with 100 health, three of them hits of 10 damage: 30 done of 40
+/// possible. Scored by damage only, the efficiency factor is 30/40.
+#[test]
+fn damage_efficiency_multiplies_the_score_by_damage_done_over_possible() {
+    let mut s = scored(100.0, 0.0);
+    s.scoring.per_damage = 1.0;
+    let play = |s: Scenario| {
+        let mut sim = Sim::new(s, 1);
+        real_seconds(&mut sim, 0.1);
+        for hit in [true, true, false, true] {
+            click(&mut sim, hit);
+        }
+        sim
+    };
+    let plain = play(s.clone());
+    assert_eq!((plain.stats().damage_done, plain.stats().damage_possible), (30.0, 40.0));
+    assert_eq!(plain.score(), 30.0);
+    s.world.as_mut().unwrap().damage_efficiency = true;
+    let sim = play(s.clone());
+    assert!((sim.score() - 30.0 * 30.0 / 40.0).abs() < 1e-4, "{}", sim.score());
+    // With the accuracy multiplier too (3 hits of 4 shots), both apply.
+    s.world.as_mut().unwrap().accuracy_mult = crate::world::AccuracyMult::Linear;
+    let sim = play(s.clone());
+    assert!((sim.score() - 30.0 * 0.75 * 0.75).abs() < 1e-4, "{}", sim.score());
+    // The multipliers apply to the points for time left as well.
+    s.world.as_mut().unwrap().time_score = 1.0;
+    let sim = play(s);
+    let want = (30.0 + sim.time_left()) * 0.75 * 0.75;
+    assert!((sim.score() - want).abs() < 1e-3, "{} for {want}", sim.score());
+}
+
+/// With no shots there is no efficiency to speak of, so the score isn't cut: the same as
+/// the accuracy multiplier with no shots.
+#[test]
+fn damage_efficiency_with_no_shots_leaves_the_score_alone() {
+    let mut s = scored(10.0, 1.0);
+    s.world.as_mut().unwrap().damage_efficiency = true;
+    s.world.as_mut().unwrap().accuracy_mult = crate::world::AccuracyMult::Linear;
+    let sim = Sim::new(s, 1);
+    assert_eq!(sim.stats().damage_efficiency(), None);
+    assert!((sim.score() - 10.0).abs() < 1e-4, "{}", sim.score());
+}
+
+/// A hit does no more damage than the target had left, so overkill counts as damage possible
+/// and not as damage done: the kill shot of 10 on a target with 4 left is 4 of 10. Not
+/// measured in KovaaK's.
+#[test]
+fn overkill_counts_as_possible_damage_and_not_as_done() {
+    let mut s = scored(100.0, 0.0);
+    s.targets.health = 4.0;
+    s.scoring.per_damage = 1.0;
+    s.world.as_mut().unwrap().damage_efficiency = true;
+    let mut sim = Sim::new(s, 1);
+    real_seconds(&mut sim, 0.1);
+    click(&mut sim, true);
+    let st = sim.stats();
+    assert_eq!((st.kills, st.damage_done, st.damage_possible), (1, 4.0, 10.0));
+    assert!((sim.score() - 4.0 * 0.4).abs() < 1e-4, "{}", sim.score());
+}
+
+/// The beam adds its damage per tick to damage possible whether or not it is on a target
+/// (as the run file does), so efficiency is the share of firing time spent on the target.
+#[test]
+fn the_beam_has_the_share_of_time_on_target_as_its_efficiency() {
+    let mut s = scored(100.0, 0.0);
+    s.weapon.kind = WeaponKind::Beam;
+    s.weapon.trigger = Trigger::Always;
+    s.weapon.damage_per_s = 10.0;
+    s.targets.health = 1e6;
+    s.scoring.per_damage = 1.0;
+    s.world.as_mut().unwrap().damage_efficiency = true;
+    let mut sim = Sim::new(s, 1);
+    let at = sim.targets()[0].pos.normalize();
+    for aim in [at, Vec3::Y, at, Vec3::Y] {
+        for _ in 0..240 {
+            sim.step(FRAME, Input { aim, fire_pressed: false, fire_held: false });
+        }
+    }
+    let st = sim.stats();
+    assert!((st.damage_possible - 40.0).abs() < 0.5, "{}", st.damage_possible);
+    assert!((st.damage_done - 20.0).abs() < 0.5, "{}", st.damage_done);
+    assert!((sim.score() - st.damage_done * st.damage_done / st.damage_possible).abs() < 1e-3);
+}
+
+/// The new fields are part of a scenario's identity only when they are set, so the
+/// fingerprint (and the bests and ratings tied to it) of every earlier scenario stays the
+/// same. `imported_fixtures_keep_their_fingerprints` pins two real imports.
+#[test]
+fn a_default_world_serialises_without_the_score_rules() {
+    let plain = timed(1.0);
+    let text = plain.to_toml();
+    assert!(!text.contains("time_score") && !text.contains("damage_efficiency"), "{text}");
+    let mut with_time = timed(1.0);
+    with_time.world.as_mut().unwrap().time_score = 1.0;
+    assert!(with_time.to_toml().contains("time_score"));
+    assert_ne!(plain.fingerprint(), with_time.fingerprint());
+    let mut with_eff = timed(1.0);
+    with_eff.world.as_mut().unwrap().damage_efficiency = true;
+    assert!(with_eff.to_toml().contains("damage_efficiency"));
+    assert_ne!(plain.fingerprint(), with_eff.fingerprint());
+    // They survive a round trip.
+    let back = Scenario::from_toml(&with_time.to_toml()).unwrap();
+    assert_eq!(back.world.unwrap().time_score, 1.0);
+    let mut bad = timed(1.0);
+    bad.world.as_mut().unwrap().time_score = f32::NAN;
+    assert!(!bad.problems().is_empty());
+}

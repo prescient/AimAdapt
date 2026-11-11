@@ -23,7 +23,7 @@ fn read(name: &str) -> Sce {
 #[test]
 fn finds_every_fixture() {
     let files = find_files(&[fixtures()]);
-    assert_eq!(files.len(), 6);
+    assert_eq!(files.len(), 7);
     assert!(files.iter().all(|f| f.extension().unwrap() == "sce"));
 }
 
@@ -337,4 +337,48 @@ fn every_local_scenario_file_reads() {
 fn imported_fixtures_keep_their_fingerprints() {
     assert_eq!(import(&path("Dash Lane")).unwrap().scenario.fingerprint(), "b4157023853bb7c5");
     assert_eq!(import(&path("Still Wall")).unwrap().scenario.fingerprint(), "dae40cef9b1e60b7");
+}
+
+/// One slot that plays three balls in turn, `BotMaxLives=3` and `ScorePerTime=1` with no
+/// points for kills: the run ends on the third kill, with each ball killed once in
+/// rotation order, and the score is the game seconds left.
+#[test]
+fn a_slot_with_lives_ends_on_its_last_kill_and_pays_for_the_time_left() {
+    let i = import(&path("Last Lives")).unwrap();
+    let s = &i.scenario;
+    assert_eq!(s.timing.kill_limit, 3);
+    assert_eq!(s.timing.duration_s, 100.0);
+    assert_eq!(s.scoring.per_kill, 0.0);
+    let w = s.world.as_ref().unwrap();
+    assert_eq!(w.time_score, 1.0);
+    assert_eq!((w.kinds.len(), w.slots.len(), w.rotations.clone()), (3, 1, vec![Some(0)]));
+    assert!(i.notes.is_empty(), "{:?}", i.notes);
+    assert!(s.problems().is_empty());
+
+    let mut sim = Sim::new(i.scenario, 3);
+    let mut killed = Vec::new();
+    let dt = 1.0 / 120.0;
+    for step in 0..(100.0 / dt) as usize {
+        if sim.phase() == Phase::Finished {
+            break;
+        }
+        // Aim at the ball when there is one and click every 0.1 s.
+        let input = match sim.targets().first() {
+            Some(t) if step % 12 == 0 => Input { aim: t.pos.normalize(), fire_pressed: true, fire_held: true },
+            Some(t) => Input { aim: t.pos.normalize(), fire_pressed: false, fire_held: false },
+            None => Input { aim: Vec3::Y, fire_pressed: false, fire_held: false },
+        };
+        let kind = sim.targets().first().and_then(|t| t.kind());
+        let before = sim.stats().kills;
+        sim.step(dt, input);
+        if sim.stats().kills > before {
+            killed.extend(kind);
+        }
+    }
+    assert_eq!(sim.phase(), Phase::Finished);
+    assert_eq!(sim.stats().kills, 3);
+    assert_eq!(killed, vec![0, 1, 2], "each ball once, in the order the rotation lists them");
+    assert!(sim.elapsed() < 10.0, "it ended on the kills, not the clock: {}", sim.elapsed());
+    assert!((sim.score() - (100.0 - sim.elapsed())).abs() < 1e-3, "{} at {} s", sim.score(), sim.elapsed());
+    assert!(sim.score() > 90.0);
 }

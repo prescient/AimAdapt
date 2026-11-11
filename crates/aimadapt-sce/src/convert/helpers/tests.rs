@@ -468,3 +468,23 @@ fn a_world_without_pushers_serialises_as_before() {
     let text = s.to_toml();
     assert!(!text.contains("pushers") && !text.contains("invincible"), "{text}");
 }
+
+/// Lives with a helper: the helper's own number must be 0 (a helper isn't a target, so
+/// only the one target's number counts), and a number on a helper was never measured.
+#[test]
+fn lives_beside_a_helper_count_only_the_target() {
+    let one_target =
+        with("AddedBots=Push.bot;Dot.bot;Dot.bot\nBotTeams=1;2;2", "AddedBots=Push.bot;Dot.bot\nBotTeams=1;2");
+    let lives = |n: &str| one_target.replacen("ScorePerKill=1.0", &format!("ScorePerKill=1.0\nBotMaxLives={n}"), 1);
+    assert_eq!(import(&lives("0;3")).unwrap().scenario.timing.kill_limit, 3);
+    for bad in ["2;3", "3;0"] {
+        let r = reasons(&lives(bad));
+        let gap =
+            r.iter().find(|g| g.feature == "bots with a set number of lives").unwrap_or_else(|| panic!("{bad}: {r:?}"));
+        assert!(gap.beyond_plan && gap.detail.contains("BotMaxLives") && gap.detail.contains("helper"), "{gap}");
+        assert!(gap.detail.contains("hasn't been measured in KovaaK's"), "{gap}");
+    }
+    // Two targets with lives and a helper: several bots, as without the helper.
+    let r = reasons(&with("ScorePerKill=1.0", "ScorePerKill=1.0\nBotMaxLives=0;1;1"));
+    assert!(r.iter().any(|g| g.feature == "bots with a set number of lives" && g.detail.contains("several")), "{r:?}");
+}

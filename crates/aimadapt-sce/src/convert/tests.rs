@@ -589,28 +589,6 @@ fn rotations_in_order_and_draining_health_come_through() {
     assert!(w.rotations.is_empty(), "{:?}", w.rotations);
 }
 
-/// Bug: Air Pure and Air CELESTIAL end when the bot runs out of lives and score
-/// the time left, which isn't played: they played 1000 s scoring nothing. Rules
-/// that decide the score or when a run ends say they can't be played yet.
-#[test]
-fn bot_lives_and_unplayed_score_rules_cant_play_yet() {
-    let lives = VOLUME_SCE.replace("ScorePerKill=1.0", "ScorePerKill=0.0\nBotMaxLives=5\nScorePerTime=1.0");
-    let r = reasons(&lives);
-    assert!(r.iter().any(|x| x.starts_with("bots with a set number of lives")), "{r:?}");
-    assert!(r.iter().any(|x| x.starts_with("a score for time")), "{r:?}");
-    // Bots that can't die never run out of lives.
-    let invincible = VOLUME_SCE.replace("ScorePerKill=1.0", "ScorePerKill=1.0\nBotMaxLives=1\nInvincibleBots=true");
-    assert!(!reasons(&invincible).iter().any(|x| x.contains("lives")), "{:?}", reasons(&invincible));
-    // Bug: `InvincibleBots` was ignored (VT Snake Track), so its bot died.
-    assert!(convert(&Sce::parse(&invincible), "box.sce", "0").unwrap().scenario.world.unwrap().invincible);
-    let eff = VOLUME_SCE.replace("ScorePerKill=1.0", "ScorePerKill=1.0\nScoreMultDamageEfficiency=true");
-    assert!(
-        reasons(&eff).iter().any(|x| x.starts_with("a score multiplied by damage efficiency")),
-        "{:?}",
-        reasons(&eff)
-    );
-}
-
 /// Skeet Tracking's targets stand behind its walls until something launches them,
 /// which isn't played: still targets that are all out of sight can't be played.
 #[test]
@@ -827,4 +805,166 @@ fn a_time_scale_outside_the_range_is_refused() {
         let text = VOLUME_SCE.replace("MapScale=1.0", &format!("MapScale=1.0\nTimescale={ok}"));
         assert!(convert(&Sce::parse(&text), "x.sce", "0").is_ok(), "{ok}");
     }
+}
+
+/// Two bot slots, so `BotMaxLives` is a list.
+fn two_slots(extra: &str) -> String {
+    VOLUME_SCE
+        .replace("AddedBots=Dot.bot;Dot.bot;Dot.bot", "AddedBots=Dot.bot;Dot.bot")
+        .replace("BotTeams=2;2;2", "BotTeams=2;2")
+        .replace("ScorePerKill=1.0", &format!("ScorePerKill=1.0\n{extra}"))
+}
+
+/// Bug: `BotMaxLives` is a list with one number per bot slot, and the importer read it as
+/// one number, so `1;1` parsed as nothing and a scenario with lives on two slots wasn't
+/// refused for lives at all.
+#[test]
+fn a_list_of_lives_is_read_one_number_per_slot() {
+    let r = reasons(&two_slots("BotMaxLives=1;1"));
+    assert!(r.iter().any(|x| x.starts_with("bots with a set number of lives")), "{r:?}");
+}
+
+fn imported(text: &str) -> Imported {
+    convert(&Sce::parse(text), "box.sce", "0").unwrap_or_else(|e| panic!("{e:?}"))
+}
+
+fn gaps_of(text: &str) -> Vec<Gap> {
+    convert(&Sce::parse(text), "box.sce", "0").err().unwrap_or_default()
+}
+
+/// One slot that plays three bots in order, as in the files `BotMaxLives` was measured on.
+fn one_slot(extra: &str) -> String {
+    VOLUME_SCE
+        .replace("AddedBots=Dot.bot;Dot.bot;Dot.bot", "AddedBots=Turns.rot")
+        .replace("BotTeams=2;2;2", "BotTeams=2")
+        .replace("ScorePerKill=1.0", &format!("ScorePerKill=1.0\n{extra}"))
+        .replace(
+            "[Bot Profile]",
+            "[Bot Rotation Profile]\nName=Turns\nProfileNames=Dot;Dot;Dot\nProfileWeights=1.0;1.0;1.0\nRandomized=false\n\
+             [Bot Profile]",
+        )
+}
+
+/// Every refusal of lives is beyond the plan and names the setting and what wasn't measured.
+fn lives_gap(text: &str, what: &str) {
+    let g = gaps_of(text);
+    let gap = g.iter().find(|x| x.feature == "bots with a set number of lives").unwrap_or_else(|| panic!("{g:?}"));
+    assert!(gap.beyond_plan, "{gap}");
+    assert!(gap.detail.contains("BotMaxLives") && gap.detail.contains(what), "{gap}");
+    assert!(gap.detail.contains("hasn't been measured in KovaaK's"), "{gap}");
+}
+
+/// A slot with lives ends the run on its last kill: `BotMaxLives=N` is N kills.
+#[test]
+fn one_slot_with_lives_sets_the_kill_limit() {
+    for text in [one_slot("BotMaxLives=3"), one_slot("BotMaxLives=3.0"), one_slot("BotMaxLives= 3 ")] {
+        assert_eq!(imported(&text).scenario.timing.kill_limit, 3, "{text}");
+    }
+    // A plain bot with one slot, not a rotation, too.
+    let plain = VOLUME_SCE
+        .replace("AddedBots=Dot.bot;Dot.bot;Dot.bot", "AddedBots=Dot.bot")
+        .replace("BotTeams=2;2;2", "BotTeams=2\nBotMaxLives=7");
+    assert_eq!(imported(&plain).scenario.timing.kill_limit, 7);
+    // No lives, or 0, is no limit.
+    assert_eq!(imported(&one_slot("BotMaxLives=0")).scenario.timing.kill_limit, 0);
+    assert_eq!(imported(&one_slot("")).scenario.timing.kill_limit, 0);
+    // Lives that are 0 everywhere leave a list of any length alone.
+    assert_eq!(imported(&two_slots("BotMaxLives=0")).scenario.timing.kill_limit, 0);
+    assert_eq!(imported(&two_slots("BotMaxLives=0;0")).scenario.timing.kill_limit, 0);
+}
+
+/// Lives on several bots, on some and not others, and a list that doesn't match the slots
+/// were never measured in KovaaK's.
+#[test]
+fn lives_beyond_what_was_measured_are_refused() {
+    lives_gap(&two_slots("BotMaxLives=1;1"), "several bots");
+    lives_gap(&two_slots("BotMaxLives=2;5"), "several bots");
+    lives_gap(&two_slots("BotMaxLives=0;2"), "some bots and not others");
+    lives_gap(&two_slots("BotMaxLives=2;0"), "some bots and not others");
+    // One number for two slots, and three for two.
+    lives_gap(&two_slots("BotMaxLives=2"), "1 number(s) for 2 bot slot(s)");
+    lives_gap(&two_slots("BotMaxLives=2;0;0"), "3 number(s) for 2 bot slot(s)");
+    // The default three slots with a single number.
+    let three = VOLUME_SCE.replace("ScorePerKill=1.0", "ScorePerKill=1.0\nBotMaxLives=5");
+    lives_gap(&three, "1 number(s) for 3 bot slot(s)");
+    // A slot whose bots are only sometimes invincible has no clear number of kills.
+    let mixed = one_slot("BotMaxLives=2").replace("ProfileNames=Dot;Dot;Dot", "ProfileNames=Dot;Tough;Dot").replace(
+        "[Bot Profile]",
+        "[Bot Profile]\nName=Tough\nCharacterProfile=Tough Ball\n\
+             [Character Profile]\nName=Tough Ball\nInvincibleBots=true\nMaxHealth=1.0\nMaxSpeed=0.0\n\
+             MainBBType=Spheroid\nMainBBRadius=20.0\nMainBBHeight=40.0\n[Bot Profile]",
+    );
+    lives_gap(&mixed, "only sometimes invincible");
+}
+
+/// Bots that can't die have no lives to use up, whether the scenario or their character says so.
+#[test]
+fn invincible_bots_ignore_their_lives() {
+    // Bug: `InvincibleBots` was ignored (VT Snake Track), so its bot died.
+    let own = one_slot("BotMaxLives=2\nInvincibleBots=true");
+    let i = imported(&own);
+    assert_eq!(i.scenario.timing.kill_limit, 0);
+    assert!(i.scenario.world.unwrap().invincible);
+    // Even a list that would be refused.
+    assert!(gaps_of(&two_slots("BotMaxLives=1;1\nInvincibleBots=true")).is_empty());
+    // The slot's character, with the scenario's own flag off.
+    let by_character = one_slot("BotMaxLives=2").replace(
+        "MaxHealth=1.0\nMaxSpeed=0.0\nMainBBType",
+        "MaxHealth=1.0\nMaxSpeed=0.0\nInvincibleBots=true\nMainBBType",
+    );
+    let i = imported(&by_character);
+    assert_eq!(i.scenario.timing.kill_limit, 0);
+    assert!(i.scenario.world.unwrap().invincible, "the character's flag comes through too");
+}
+
+/// `ScorePerTime` comes through to the world as points per game second left.
+#[test]
+fn a_score_for_time_reaches_the_world() {
+    let w = |extra: &str| imported(&one_slot(extra)).scenario.world.unwrap();
+    assert_eq!(w("ScorePerTime=2.5").time_score, 2.5);
+    assert_eq!(w("ScorePerTime=-1.0").time_score, -1.0);
+    assert_eq!(w("").time_score, 0.0);
+    assert_eq!(w("ScorePerTime=0.0").time_score, 0.0);
+    // By itself it has nothing unverified to say.
+    assert!(imported(&one_slot("ScorePerTime=2.5")).notes.is_empty());
+}
+
+/// Damage efficiency comes through to the world; kill efficiency can't be played, and no
+/// formula for it was ever checked.
+#[test]
+fn damage_efficiency_plays_and_kill_efficiency_is_beyond_the_plan() {
+    let w = |extra: &str| imported(&one_slot(extra)).scenario.world.unwrap();
+    assert!(w("ScoreMultDamageEfficiency=true\nScorePerKill=0.0\nScorePerDamage=1.0").damage_efficiency);
+    assert!(!w("ScoreMultDamageEfficiency=false").damage_efficiency);
+    assert!(!w("").damage_efficiency);
+    let g = gaps_of(&one_slot("ScoreMultKillEfficiency=true"));
+    assert_eq!(g.len(), 1, "{g:?}");
+    assert_eq!(g[0].feature, "a score multiplied by kill efficiency");
+    assert!(g[0].beyond_plan);
+    assert!(g[0].detail.contains("ScoreMultKillEfficiency") && g[0].detail.contains("no result file"), "{}", g[0]);
+}
+
+/// Combinations nobody checked against KovaaK's say so in a note, and checked ones don't.
+#[test]
+fn unverified_score_combinations_get_a_note() {
+    let notes = |extra: &str| imported(&one_slot(&format!("ScorePerKill=0.0\n{extra}"))).notes;
+    let has = |n: &[String], s: &str| n.iter().any(|x| x.contains(s) && x.contains("hasn't been checked"));
+    // The time score with a multiplier.
+    let n = notes("ScorePerTime=1.0\nScoreMultAccuracy=true");
+    assert!(has(&n, "points for time left"), "{n:?}");
+    let n = notes("ScorePerTime=1.0\nScoreMultDamageEfficiency=true");
+    assert!(has(&n, "points for time left"), "{n:?}");
+    // Both multipliers.
+    let n = notes("ScoreMultAccuracy=true\nScoreMultDamageEfficiency=true\nScorePerDamage=1.0");
+    assert!(has(&n, "both accuracy and damage efficiency"), "{n:?}");
+    // Damage efficiency on a score that has kills, hits or misses in it.
+    for extra in ["ScorePerKill=1.0", "ScorePerHit=1.0", "ScoreLossPerMiss=1.0"] {
+        let n = notes(&format!("ScoreMultDamageEfficiency=true\n{extra}"));
+        assert!(has(&n, "kills, hits and misses"), "{extra}: {n:?}");
+    }
+    // What was measured is quiet: damage only with the efficiency, the accuracy alone, time alone.
+    let quiet = notes("ScoreMultDamageEfficiency=true\nScorePerDamage=1.0");
+    assert!(quiet.is_empty(), "{quiet:?}");
+    assert!(notes("ScoreMultAccuracy=true").is_empty());
+    assert!(notes("ScorePerTime=1.0").is_empty());
 }

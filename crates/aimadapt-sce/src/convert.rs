@@ -23,6 +23,7 @@ use aimadapt_sim::{Scenario, Vec3};
 
 mod abilities;
 mod helpers;
+mod rules;
 
 use crate::inventory::Gap;
 use crate::map::{Map, MapFormat, Placement, Solid, Teams};
@@ -114,6 +115,7 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
     // Bots on the player's team push the targets around; they aren't targets.
     let helpers = helpers::plan(&r, player_team, &mut reasons, &mut notes);
     let targets: Vec<&BotSlot> = r.bots.iter().filter(|s| !s.is_helper(player_team)).collect();
+    let kill_limit = rules::kill_limit(top, &r.bots, player_team, &mut reasons);
     let pushed = !helpers.helpers.is_empty();
     let Bots { kinds, slots, rotations, teams, moving } = bots(&targets, other_team, pushed, &mut reasons);
     let kind = kinds.first().map(|(ch, _)| *ch);
@@ -197,6 +199,7 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
         world.motion = motion;
     }
     world_rules(&mut world, top, source, source_hash);
+    rules::score_notes(top, &mut notes);
     if kinds.len() == 1 {
         world.invincible |= characters[0].is("InvincibleBots");
     }
@@ -208,6 +211,7 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
     }
 
     let mut scenario = Scenario { world: Some(world), ..base_scenario(sce, top, weapon) };
+    scenario.timing.kill_limit = kill_limit;
     let t = &mut scenario.targets;
     t.count = targets.len() as u32;
     t.shape = shape;
@@ -235,27 +239,21 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
     Ok(Imported { scenario, notes })
 }
 
-/// Rules that decide the score or when a run ends, not played yet: Air Pure ends
-/// when its bot runs out of lives and scores the time left.
+/// Rules the trainer refuses: a time scale it can't run, and the kill efficiency score.
 fn rule_reasons(top: &Section, reasons: &mut Vec<Gap>) {
-    if top.f32_or("BotMaxLives", 0.0) > 0.0 && !top.is("InvincibleBots") {
-        push_once(reasons, Gap::planned("bots with a set number of lives", "the run ends when they run out"));
-    }
-    if top.f32_or("ScorePerTime", 0.0) != 0.0 {
-        push_once(reasons, Gap::planned("a score for time", ""));
-    }
     let (lo, hi) = aimadapt_sim::world::TIME_SCALE_RANGE;
     if let Some(v) = top.f32("Timescale").filter(|v| !(lo..=hi).contains(v)) {
         let detail = format!("Timescale is {v}; the trainer allows {lo} to {hi}");
         push_once(reasons, Gap { feature: "time scale", detail, beyond_plan: true });
     }
-    for (key, feature) in [
-        ("ScoreMultDamageEfficiency", "a score multiplied by damage efficiency"),
-        ("ScoreMultKillEfficiency", "a score multiplied by kill efficiency"),
-    ] {
-        if top.is(key) {
-            reasons.push(Gap::planned(feature, ""));
-        }
+    if top.is("ScoreMultKillEfficiency") {
+        // No KovaaK's result file has a score to check a formula against.
+        let detail = "ScoreMultKillEfficiency; no result file from KovaaK's exists to check a formula against";
+        reasons.push(Gap {
+            feature: "a score multiplied by kill efficiency",
+            detail: detail.into(),
+            beyond_plan: true,
+        });
     }
 }
 
@@ -360,7 +358,8 @@ fn add_kinds(
 }
 
 /// The scenario-wide rules the world keeps: where it came from, accuracy scoring,
-/// invincible bots, the time scale and a locked field of view.
+/// invincible bots, the time scale, the score for time left, damage efficiency and a locked
+/// field of view.
 fn world_rules(world: &mut World, top: &Section, source: &str, source_hash: &str) {
     world.source = source.into();
     world.source_hash = source_hash.into();
@@ -372,6 +371,8 @@ fn world_rules(world: &mut World, top: &Section, source: &str, source_hash: &str
     world.invincible = top.is("InvincibleBots");
     // Out-of-range values are refused in `rule_reasons`.
     world.time_scale = top.f32("Timescale").unwrap_or(1.0);
+    world.time_score = top.f32_or("ScorePerTime", 0.0);
+    world.damage_efficiency = top.is("ScoreMultDamageEfficiency");
     if top.is("LockFOVRange") {
         let lo = top.f32_or("LockedFOVMin", 0.0);
         let hi = top.f32_or("LockedFOVMax", 180.0);

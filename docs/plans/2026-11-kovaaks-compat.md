@@ -11,7 +11,7 @@ A scenario is refused when it uses something the trainer doesn't model, so every
 | K1 Every reason on a file | dc4732c | 98 of 225 |
 | K2 Dashes | fdf08f9 | 103 of 225, 31 of the 34 Novice benchmarks |
 | K3 Helper bots and knockback | 32d5397 | 107 of 225, all 34 Novice benchmarks |
-| K4 Lives, time score and efficiency | | |
+| K4 Lives, time score and efficiency | | 111 of 225 |
 | K5 Hitbox shapes | | |
 | K6 Standing and spawning details | | |
 | K15 Ability and helper setups K2 and K3 refuse | | |
@@ -79,7 +79,7 @@ Of the 118 files that don't play after K3, 58 wait on a single package, 30 on tw
 
 `aimadapt-cli sce --summary` counts the files that play. Since K1 it also counts files per reason and how many files each reason blocks alone. Each package's commit message gives the count before and after.
 
-The listing includes the test maps written for measuring in KovaaK's (the `AimAdapt -` prefix: 32 on the development machine at the start, all playable, 36 after K2, 34 of them playable, and 50 after K3, 47 of them playable). The counts in this plan leave them out: 130 of 257 in the listing was 98 of 225 here, 137 of 261 after K2 is 103 of 225, and 154 of 275 after K3 is 107 of 225.
+The listing includes the test maps written for measuring in KovaaK's (the `AimAdapt -` prefix: 32 on the development machine at the start, all playable, 36 after K2, 34 of them playable, and 50 after K3, 47 of them playable). The counts in this plan leave them out: 130 of 257 in the listing was 98 of 225 here, 137 of 261 after K2 is 103 of 225, 154 of 275 after K3 is 107 of 225, and 158 of 275 after K4 is 111 of 225.
 
 After K1, 50 of the 127 refused files had a single reason: armed bots 11, abilities 9, the player moving 5, heads 5, invincibility set on a character 5, solid props 5, waypoint paths 3, several pellets 3, and one each for map objects, aim assist, aim down sights and the damage efficiency score. The other 77 need two or more packages.
 
@@ -146,7 +146,7 @@ After K3, 107 of the 225 files play, and all 34 Voltaic S5 Novice benchmarks do.
 - Bots with a set number of lives: the run ends when the lives are used up.
 - A score for time, paid when the run ends that way.
 - A score multiplied by damage efficiency or kill efficiency.
-- Before building: check each formula against real KovaaK's result files (kills, shots, damage done and possible, and the score are all in them). The formulas go in SCENARIOS.md.
+- Before building: check each formula against real KovaaK's result files (kills, shots, damage done and possible, and the score are all in them). The formulas are in the user guide (SCENARIOS.md documents the built-in scenario file format, which this doesn't touch).
 - Checked on 11 November 2026 against result files:
   - Time score: `ScorePerTime` times the game seconds left (`Timelimit` minus the game seconds played) when the run ends. Four runs on three scenarios, each within 3 ms.
   - Lives: `BotMaxLives` holds one number per bot slot. The three local files with lives have one slot each, a rotation played in order with as many lives as it has bots. Their result files show exactly that many kills, each of the next bot in the rotation, and the run ends on the last kill. No local file has lives on several slots, so that isn't measured and is refused.
@@ -155,6 +155,10 @@ After K3, 107 of the 225 files play, and all 34 Voltaic S5 Novice benchmarks do.
 - The same result files showed that `Timescale` is the rate of KovaaK's whole game clock, and the importer ignored it. A challenge lasts `Timelimit / Timescale` real seconds (185 runs), shots per real second are the weapon's rate times the time scale, and the time score counts game seconds. 27 of the files that played after K3 set a time scale other than 1 and so ran at the wrong speed and length. Fixed in its own commit before K4, with a regression test.
 - `aimadapt-sim`: the world gets the lives, the time score and the two multipliers; `run_step` ends the run, `score()` applies them.
 - Tests: one per rule on a made-up scenario, and that old scenarios score as before.
+
+Done. `BotMaxLives` is read as a list with one number per bot slot (it was read as a single number before, so `1;1` wasn't refused for lives; regression test). A scenario with one target slot whose number is N, and 0 on every helper slot, sets `timing.kill_limit` to N, and the existing early end finishes the run on the Nth kill. A slot holds one bot at a time, so a kill is a life. Lives are ignored when the scenario or the slot's characters are invincible. Lives on several target slots, on some and not others, on a helper, on a slot whose bots are only sometimes invincible, and in a list whose length doesn't match the bot slots are refused as beyond the plan, with the setting named and a note that they weren't measured. The world gets `time_score` (points per game second left, added to the points in `Sim::score()` at every moment of the run) and `damage_efficiency` (the score times damage done over damage possible, the same two numbers the run file writes); both stay out of the file at their defaults, so fingerprints don't change. Notes on the page say when a multiplier meets a score rule that wasn't checked with it. Still refused: the lives cases above, and kill efficiency (beyond the plan, no result file to check a formula against). The made-up fixture Last Lives plays through lives and the time score.
+
+After K4, 111 of the 225 files play. The four new ones are the three local files with lives and a time score (one slot each, with 5, 7 and 8 lives) and one file with the damage efficiency multiplier, which also scores kills and so carries the unchecked note. None of them was played in the engine by hand. Four more files with damage efficiency wait on other packages. One file has lives on several slots and one uses kill efficiency, and both stay refused. No file that played before K4 changes, so no best starts again.
 
 ### K5. Hitbox shapes
 
@@ -265,3 +269,13 @@ These rows are filled in as packages land. A row leaves the table when a test ma
 | `StandStillUntilHurt` on a bot that is pushed | The pushes move it only once it has been hurt | No |
 | A flier's vertical speed when it is lifted | The push is added to it like any other speed | No |
 | A target bouncing on a push cushion | Not copied: in KovaaK's it lost about 4% of its height per cycle, cause unknown | Open |
+| A bot with lives that drains away (negative regen) | It counts as a timeout and uses up no life: only kills do, so the run isn't ended by drained bots | No |
+| Lives on a slot whose rotation is picked by weight | Still N kills, whichever bots come | No: measured on rotations played in order |
+| A fractional `BotMaxLives` | Rounded to the nearest whole number, at least 1 | No |
+| The score on screen with a score for time | One formula all run: the points so far plus the rate times the game seconds left now, so it counts down | No |
+| A score multiplier (accuracy or damage efficiency) with a score for time | Applies to the whole score, the time points too (the note says it's unchecked) | No: the time score was measured with no multiplier |
+| Accuracy and damage efficiency on one scenario | Both apply, one after the other (a note says it's unchecked) | No |
+| Damage efficiency on a score that has kills, hits or misses in it | The multiplier applies to the whole score (a note says it's unchecked) | No: measured on a score by damage only |
+| Overkill under damage efficiency | Damage done stops at the bot's health left, and the shot's full damage counts as possible | No |
+| The beam's damage possible | Its damage for every tick it fires, on target or off, as the run file writes it | No |
+| Damage efficiency with no shots fired | No cut, as with the accuracy multiplier | No |

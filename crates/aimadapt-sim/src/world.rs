@@ -76,6 +76,20 @@ pub struct World {
     /// time.
     #[serde(skip_serializing_if = "is_one")]
     pub time_scale: f32,
+    /// Points for each game second left on the clock (KovaaK's `ScorePerTime`). The
+    /// score always counts the time left now, so it is 0 after a timeout and goes down
+    /// as the run goes on.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub time_score: f32,
+    /// The score is multiplied by damage done over damage possible (KovaaK's
+    /// `ScoreMultDamageEfficiency`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub damage_efficiency: bool,
+}
+
+/// Whether a score rate is unset, so it stays out of the file (and the fingerprint).
+fn is_zero(v: &f32) -> bool {
+    *v == 0.0
 }
 
 /// Whether a time scale is the default, so it stays out of the file (and the fingerprint).
@@ -108,6 +122,8 @@ impl Default for World {
             rotations: Vec::new(),
             pushers: Vec::new(),
             time_scale: 1.0,
+            time_score: 0.0,
+            damage_efficiency: false,
         }
     }
 }
@@ -435,6 +451,9 @@ impl World {
         let (lo, hi) = TIME_SCALE_RANGE;
         if !(lo..=hi).contains(&self.time_scale) {
             p.push(format!("time scale must be {lo}–{hi}"));
+        }
+        if !self.time_score.is_finite() {
+            p.push("the score for time left must be a number".into());
         }
         if !self.pushers.is_empty() && !self.bots_move() {
             p.push("helper bots push nothing unless the bots can move".into());

@@ -766,11 +766,11 @@ mod tests {
     fn kovaaks_files_are_listed_once_each_with_whether_they_play() {
         let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../aimadapt-sce/tests/fixtures");
         let mut files = aimadapt_sce::find_files(std::slice::from_ref(&dir));
-        assert_eq!(files.len(), 6, "{files:?}");
+        assert_eq!(files.len(), 7, "{files:?}");
         // The same scenario in a second folder (the Workshop, say) is listed once.
         files.push(files[0].clone());
         let list = sce_entries(&files);
-        assert_eq!(list.len(), 6);
+        assert_eq!(list.len(), 7);
         let wall = list.iter().find(|e| e.name == "AimAdapt Test - Still Wall").expect("the still-wall fixture");
         assert!(wall.playable);
         assert_eq!(wall.aim_type, "Clicking");

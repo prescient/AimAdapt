@@ -296,6 +296,13 @@ impl Stats {
     pub fn accuracy(&self) -> Option<f32> {
         (self.shots > 0).then(|| self.hits as f32 / self.shots as f32)
     }
+
+    /// Damage done over damage possible, which is what the run file's "Damage Done" and
+    /// "Damage Possible" hold. `None` before anything could be done. Overkill isn't
+    /// counted as done (a hit does no more than the target had left), so it lowers this.
+    pub fn damage_efficiency(&self) -> Option<f32> {
+        (self.damage_possible > 0.0).then(|| (self.damage_done / self.damage_possible).clamp(0.0, 1.0))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -661,16 +668,17 @@ impl Sim {
     pub fn score(&self) -> f32 {
         let s = &self.scenario.scoring;
         let st = &self.stats;
-        let points = s.per_kill * st.kills as f32
+        let mut points = s.per_kill * st.kills as f32
             + s.per_hit * st.hits as f32
             + s.per_miss * st.misses as f32
             + s.per_damage * st.damage_done
             + s.per_timeout * st.timeouts as f32;
-        // Imported scenarios can scale the score by accuracy, as KovaaK's does.
-        match &self.scenario.world {
-            Some(w) => points * w.accuracy_mult.factor(st.accuracy()),
-            None => points,
-        }
+        // Imported scenarios can add points for the time left and scale the whole score by
+        // accuracy or damage efficiency, as KovaaK's does.
+        let Some(w) = &self.scenario.world else { return points };
+        points += w.time_score * self.time_left();
+        let efficiency = if w.damage_efficiency { st.damage_efficiency().unwrap_or(1.0) } else { 1.0 };
+        points * w.accuracy_mult.factor(st.accuracy()) * efficiency
     }
 
     /// Advances the simulation by `dt` real seconds with this frame's input. Once the
