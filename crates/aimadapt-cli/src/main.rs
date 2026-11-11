@@ -457,12 +457,13 @@ fn plan_check_text(plan: &PlanCheck) -> String {
             let pct = |v: Option<f64>| v.map_or("-".to_string(), |v| format!("{:.0}%", v * 100.0));
             let gap = match (k.gap, k.verdict.as_deref()) {
                 (Some(g), verdict) => {
-                    let points = (g * 100.0).round();
-                    let text = format!("{}{points:.0} pts", if points > 0.0 { "+" } else { "" });
+                    // Adding zero turns a negative zero into zero, which would print as "-0".
+                    let points = (g * 100.0).round() + 0.0;
+                    let unit = if points.abs() == 1.0 { "pt" } else { "pts" };
                     match verdict {
-                        Some("above") => format!("{text} above plan"),
-                        Some("below") => format!("{text} below plan"),
-                        _ => text,
+                        Some("above") => format!("{:.0} {unit} above plan", points.abs()),
+                        Some("below") => format!("{:.0} {unit} below plan", points.abs()),
+                        _ => format!("{}{points:.0} {unit}", if points > 0.0 { "+" } else { "" }),
                     }
                 }
                 _ => "-".to_string(),
@@ -794,12 +795,28 @@ mod tests {
             ],
             uncounted: 2,
         };
+        // A 1-point gap reads "pt", and a minus is only on a gap with no verdict.
+        let small = PlanCheck {
+            kinds: vec![
+                kind("near", 4, Some(0.85), Some(0.86), None),
+                kind("stretch", 3, Some(0.55), Some(0.54), None),
+                kind("easy", 2, Some(0.95), Some(0.948), None),
+            ],
+            uncounted: 0,
+        };
+        let small = plan_check_text(&small);
+        assert!(small.lines().any(|l| l.starts_with("At your level") && l.ends_with("+1 pt")), "{small}");
+        assert!(small.lines().any(|l| l.starts_with("Stretch") && l.ends_with("-1 pt")), "{small}");
+        // Bug: a gap just under zero rounded to negative zero and printed as "-0 pts".
+        assert!(small.lines().any(|l| l.starts_with("Easy") && l.ends_with(" 0 pts")), "{small}");
         let text = plan_check_text(&plan);
         let lines: Vec<&str> = text.lines().collect();
         assert_eq!(lines[0], "Planned against actual success, by kind of run");
         assert!(lines[2].starts_with("Kind") && lines[2].ends_with("Gap"), "{text}");
         assert!(lines[3].starts_with("At your level") && lines[3].ends_with("+3 pts"), "{text}");
-        assert!(lines[4].starts_with("Stretch") && lines[4].ends_with("-12 pts below plan"), "{text}");
+        assert!(lines[4].starts_with("Stretch") && lines[4].ends_with(" 12 pts below plan"), "{text}");
+        // Bug: a gap with a verdict read "-12 pts below plan", a sign and a word for the same thing.
+        assert!(!lines[4].contains("-12"), "{text}");
         assert!(lines[5].starts_with("Easy") && lines[5].contains(" 0 ") && lines[5].ends_with('-'), "{text}");
         assert!(text.contains("2 earlier runs are left out because their length was not recorded."), "{text}");
         let one = plan_check_text(&PlanCheck { uncounted: 1, ..plan });

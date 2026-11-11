@@ -6,7 +6,7 @@ AimAdapt is an aim trainer for Windows. It rates you in real units, keeps each d
 
 **Status:** `todo` · `doing` · `done` · `spike` (research before committing)
 
-Last reviewed: Nov 10, 2026 (after the layout review and the adaptive review; their changes are planned in [the review plan](docs/plans/2026-11-review-changes.md)).
+Last reviewed: Nov 10, 2026 (after the layout review and the adaptive review; every package in [the review plan](docs/plans/2026-11-review-changes.md) is done, and finished items were moved to Done).
 
 ---
 
@@ -52,11 +52,11 @@ Last reviewed: Nov 10, 2026 (after the layout review and the adaptive review; th
   - **Clicking:** static, dynamic, linear.
   - **Tracking:** precise, reactive, control.
   - **Switching:** speed, evasive, stability.
-
-### To do
 - [x] Scenarios page tabs: Recent, Browse (every playable scenario by skill, tag chips you can combine, sort by skill, name, most played or longest since played), Workouts and Yours. Favorites (starred, first on the lists and on Today) and Hidden, saved in `list.json` in the data folder. Today's favorites and recently played have Play.
 - [x] Scenarios tabs are Browse, Workouts and Program: Recent and Yours became Browse's Played filter and a Yours chip (the old addresses open Browse with the filter set), Browse opens by last played once anything is played, and one Rating or score column replaces Rating and Best score. Narrow windows drop Runs, Type and Skill so Play stays in view and the page doesn't scroll sideways (plan L6a).
 - [x] Scenarios lists across the whole page, one tab each, with each scenario and workout on its own page: a table sortable by every column (headings over each skill, type, kind of rating or day), a search over names, skills, tags and descriptions, Type (including KovaaK's that play here), Played, Made by and Favorites filters, 100 rows at a time, and each tab remembering its filters, sort and scroll.
+
+### To do
 - [ ] `todo` P2 Scenario and workout manager: one place to rename, edit, copy, delete (one or many) and archive your scenarios and workouts, imported KovaaK's scenarios included. Create, edit and delete already work one at a time in the editor, and hiding works from each item's page. Renaming needs care: history is stored by name, so a rename must carry the runs over (or scenarios get a stable id).
 - [ ] `todo` P3 Noise-based drift for control tracking (curve movement and acceleration already make smooth paths).
 - [ ] `todo` P3 Player movement (WASD strafing).
@@ -97,6 +97,8 @@ Last reviewed: Nov 10, 2026 (after the layout review and the adaptive review; th
 ### To do
 - [ ] `spike` P1 Tune against real play. The default easy/hard ranges, first guesses and the "consistent vs. fades gradually" cut-off are educated guesses that have only been checked with the bot.
 - [ ] `todo` P3 The Insights charts cover the last ten runs whatever their version, so for a few runs after an edit they mix old and new settings. Keep them to the current version, as the ratings are.
+- [ ] `spike` P2 Decide which 85% the rating means. The rating is the 85% point of the fitted curve before the 4% allowance for slips, so the true chance of success at the rating is about 83.6%. The Speed vs. hit rate chart marks 85% with the slips counted, so it sits about 1% easier than the rating in the page header (0.55 s beside 0.54 s; 14.9 °/s beside 15.0 °/s). Moving the rating to the chart's definition would shift every rating by about that much, so it needs a decision before any change.
+- [ ] `todo` P3 Planned against actual works its gap out from the unrounded figures, so a row can read 86% planned, 86% actual and a gap of +1 pt. Work the gap out from the figures as shown.
 
 ## 4. Programs and workouts
 
@@ -112,13 +114,13 @@ Last reviewed: Nov 10, 2026 (after the layout review and the adaptive review; th
   - Weekly summary and streak.
   - Rep and carry-over gains for each drill.
 - [x] Today's workout card (now the Today page).
+- [x] A Program tab on Scenarios with the week, each day's drills and a start button; Core Week's day workouts are kept off the Workouts list, which points to it (plan L4).
 
 ### To do
-- [ ] `todo` P1 Start Core Week from the real app window and play it by hand for a full week; fix whatever comes up.
+- [ ] `todo` P1 Start Core Week from the real app window and play it by hand for a full week; fix whatever comes up. On the way, check that closing the trainer lands on the session summary in the built app, and time the summary on a long history (neither is covered by the bot or the browser preview).
 - [ ] `todo` P2 Pick the active program, and add more programs (e.g. a clicking-heavy or tracking-heavy week).
 - [ ] `todo` P2 Program editor and weekly calendar: edit the plan in the app (each day's workout, drills, runs and blocks) and set your week (which days you train, which are rest days, which day is weak spots), instead of Core Week's fixed Mon–Sat. Goes with the scenario and workout manager (section 2).
 - [ ] `todo` P2 Weak-spots day from Insights detail, not just sub-skills: e.g. your weakest flick direction, distance band or tracking speed.
-- [x] A Program tab on Scenarios with the week, each day's drills and a start button; Core Week's day workouts are kept off the Workouts list, which points to it (plan L4).
 
 ## 5. Insights and analytics
 
@@ -148,10 +150,10 @@ Last reviewed: Nov 10, 2026 (after the layout review and the adaptive review; th
 ### Done
 - [x] Settings tab with profiles, usually one per game. Each profile holds sensitivity in that game's units (Overwatch 2, Valorant, CS2, Apex, Call of Duty, or cm/360), DPI, FOV with the game's usual value, crosshair with a preview, and display settings.
 - [x] Profiles switch in Settings (Scenarios shows the active one); `--profile <name>` in the engine. The first profile is matched to your latest KovaaK's run.
+- [x] Settings › Training: the mix (one for every profile), a daily goal that can be changed, and advice on session length, in one tab that replaces Goals and time (plan L5). Both are saved in training.toml.
 
 ### To do
 - [ ] `todo` P2 More games (Fortnite, Rainbow Six Siege, Marvel Rivals, The Finals) once their sensitivity formulas are checked.
-- [x] Settings › Training: the mix (one for every profile), a daily goal that can be changed, and advice on session length, in one tab that replaces Goals and time (plan L5). Both are saved in training.toml.
 - [ ] `todo` P2 Session gap, day start and the restart rule that can be changed. They are fixed and listed on Settings › Training.
 
 ## 7. App screens
@@ -165,12 +167,12 @@ Last reviewed: Nov 10, 2026 (after the layout review and the adaptive review; th
 - [x] Play always means an adaptive run of one scenario; workouts and program days say Start session, Continue session and Repeat session; a KovaaK's scenario that plays here says Play in AimAdapt (plan L1).
 - [x] A scenario's page has Overview, Insights and Runs tabs under one header, each with its own address, and a KovaaK's scenario's page has Overview and Runs the same way (plan L2).
 - [x] Closing the trainer after a run opens a session summary: each scenario's rating before and after the session with the change and its likely range, breakthroughs, the time played and one note. Today has a Last session card with the same changes (planned as "Since your last session"; plan L3b). Ratings and scoring are unchanged and there is no migration.
-
-### To do (second step of the simpler layout)
 - [x] Progress trimmed: Skills leads with the profile and carry-over and has no start buttons, Benchmarks says it comes from KovaaK's, Time folds its extra cards, and notes are ranked once, with Today showing the top one (plan L4).
 - [x] Help has its filter at the top of the contents rail, which lists only the matching sections, marks the current one and scrolls on its own; the sidebar shows icons only at 1180 px and under; editor sections that hold only defaults start folded; every page's Help link lands on a guide section (plan L6b).
+- [x] The sidebar stays in view on a long page, and scrolls on its own in a window too short for it, so the page links, Help and the status box don't leave the window.
+
+### To do (second step of the simpler layout)
 - [ ] `todo` P2 One streak: the program streak and the all-runs streak still differ (Today shows the all-runs one).
-- [ ] `todo` P2 Keep the sidebar in view on a long page. It scrolls away with the page, so the page links leave the window and Help and the status box sit at the very bottom.
 - [ ] `todo` P2 Settings save as you change them, instead of Save and Undo.
 - [ ] `todo` P3 Folder picker for the KovaaK's stats folder.
 - [ ] `todo` P3 Skill and tags for KovaaK's scenarios (Voltaic packs map to sub-skills), so the Skill filter covers them.

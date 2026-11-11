@@ -4,6 +4,31 @@ Two reviews were written on 10 November 2026. One looked at how the app is laid 
 
 Each package is small enough to build, check and commit on its own. The papers behind the adaptive decisions are in [docs/research/papers](../research/papers/README.md).
 
+## Status
+
+Finished on 10 November 2026. Each package has its own commit, and so does the final pass.
+
+| Package | Commit |
+|---|---|
+| L1 One meaning for Play | 179e294 |
+| A1 Steadier ratings | a5ac46a |
+| L2 Scenario page tabs | 61ce281 |
+| A3 Scenario versions kept apart | 13bb26b |
+| L4 Program tab, Progress trimmed | 705ec9b |
+| A8 Stricter breakthroughs | e0943ce |
+| L6a Browse takes in Recent and Yours | 540c900 |
+| A4 Calibration after a break | 2604f35 |
+| L6b Help, narrow sidebar, editor folds | cef17bc |
+| A5 Planned order inside a block | b952977 |
+| A2 Name the run and judge it against its plan | 5e44a30 |
+| A6 Planned against actual success | 3ac8e6c |
+| A7 Ranges and noise on derived measures | 17239c1 |
+| L5 Settings › Training, with an editable daily goal | 6d38a7b |
+| L3a Results screen in the trainer | b6c9791 |
+| L3b Session summary and "Since your last session" | e245ade |
+
+Still to check by hand, because the bot and the browser preview can't: closing the trainer in the built app and landing on the session summary, and how long the summary takes to build on a large history.
+
 ## What is out of scope
 
 Decided earlier and not part of this plan:
@@ -247,7 +272,22 @@ This closes two backlog items: the results chart (with L3a) and Today's "Since y
 
 ## Final pass
 
-- Retake every README screenshot that no longer matches, from the bot and a scratch database.
-- Reread the README and the guide from top to bottom against the app.
-- BACKLOG: move finished items to Done and set "Last reviewed".
-- Run the whole hook once more on a clean tree.
+Done on 10 November 2026, in one commit.
+
+- Seven small fixes left over from the packages, done by a cheaper model and reviewed: a rest day on Progress says so
+  once, the Time page's last hour label stays inside its box, a workout's page finds its drills the way the Program
+  tab does, the sidebar stays in view on a long page, the Accuracy tile names the runs it covers, a gap in Planned
+  against actual reads "9 pts above plan" in the app and in `plan-check`, and the weak-spots day says where its drills
+  come from.
+- Every README screenshot was retaken from a history the bot played into a scratch database, spread over two weeks.
+  Two pictures are new: a scenario's page and the session summary.
+- Retaking the pictures turned up eight display bugs, each fixed with a test that failed first: a "-0.0" change shown
+  in red on a key figure, rating ticks that read the same, a Runs count that left out older versions, a "run 5.5" on
+  the rating chart, a dropped Overshoot column, a "40-180°" distance row, a speed label cut off at the chart's edge,
+  and a "-0%" change on Progress.
+- The first set of pictures was thrown away. Three runs from a real KovaaK's stats folder had been imported into the
+  scratch database by a step that ran without `--no-import`. They were removed, the demo data was rebuilt, and every
+  picture was taken again. Use `--no-import` with the app and `--stats <empty folder>` with the CLI on any scratch
+  database.
+- The README and the guide were reread against the app, BACKLOG's finished items moved to Done, and "Last reviewed"
+  set.

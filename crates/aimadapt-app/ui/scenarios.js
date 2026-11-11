@@ -80,7 +80,8 @@ function scenarioItems() {
       tags: s.tags ?? [],
       description: s.description ?? "",
       last: later(e.last_played, o?.last_played ?? null),
-      plays: (e.runs || 0) + (e.adaptive_runs || 0),
+      // Every run on any version. Standard runs used to count only on the current one.
+      plays: Math.max(o?.runs ?? 0, (e.runs || 0) + (e.adaptive_runs || 0)),
       rating: rated ? e.rating : null,
       knob: e.knob ?? null,
       best: e.runs ? e.best ?? null : null,
@@ -569,7 +570,7 @@ function itemTabs(key, have, asked) {
 function workoutDetail(e) {
   const w = e.workout;
   const playing = ui.trainer.data.playing ? "disabled" : "";
-  const byId = new Map(ui.trainer.data.scenarios.map((s) => [s.id, s]));
+  const drill = drillLookup();
   return `<section class="card detail-head">
       <div class="card-head" style="align-items:flex-start">
         <div><div class="eyebrow">Workout${e.builtin ? "" : " · yours"}${isHidden(`workout:${e.id}`) ? " · hidden" : ""}</div><h2 class="detail-title">${esc(w.name)}</h2>
@@ -579,8 +580,7 @@ function workoutDetail(e) {
           <button class="btn primary" type="button" data-action="play-workout" data-id="${esc(e.id)}" ${playing} aria-label="Start session ${esc(w.name)}">${playIcon}Start session</button></span>
       </div>
       <div class="steps">${w.items.map((it, i) => {
-        const s = byId.get(it.scenario);
-        const name = s?.scenario?.name ?? scenarioName(it.scenario);
+        const { entry: s, name } = drill(it);
         return `<div class="step"><span class="mono muted">${i + 1}</span>
           ${s?.scenario ? `<a href="${scenarioHref(s.id)}">${esc(name)}</a>` : `<span>${esc(name)}</span>`}
           <span>${it.runs} run${it.runs === 1 ? "" : "s"}</span><span class="muted">${it.mode === "standard" ? "Standard" : "Adaptive"}</span></div>`;

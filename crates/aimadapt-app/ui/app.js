@@ -415,6 +415,12 @@ function dailyChart(n) {
     <div class="bars"><div class="goal" style="bottom:calc(24px + (100% - 48px) * ${goalFrac.toFixed(4)})"></div>${cols.join("")}</div>`;
 }
 
+// The Accuracy tile averages the last `window` counted runs, or all of them when there are fewer.
+function recentRunsLabel(count, window) {
+  if (count >= window) return `Last ${window} runs`;
+  return count > 1 ? `All ${count} runs` : count === 1 ? "1 run" : "No counted runs";
+}
+
 // A KovaaK's scenario's score history: the figures and the score chart.
 function scoreHistoryCard({ stats: s, history }) {
   const periods = ui.snap.sens_periods;
@@ -426,7 +432,7 @@ function scoreHistoryCard({ stats: s, history }) {
       <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px">
         <div class="tile"><div class="kpi-label">Personal best</div><div class="kpi-value" style="color:var(--gold)">${num(s.best_score)}</div><div class="small muted">${s.best_at ? esc(fmtShort(dt(s.best_at)) + ", " + fmtTime(dt(s.best_at))) : ""}</div></div>
         <div class="tile"><div class="kpi-label">Average</div><div class="kpi-value">${num(s.average)}</div><div class="small muted">${plural(s.counted_runs, "counted run")}</div></div>
-        <div class="tile"><div class="kpi-label">Accuracy</div><div class="kpi-value">${acc(s.recent_accuracy)}</div><div class="small muted">Last ${ui.snap.progress_settings.trend_window} runs</div></div>
+        <div class="tile"><div class="kpi-label">Accuracy</div><div class="kpi-value">${acc(s.recent_accuracy)}</div><div class="small muted">${recentRunsLabel(s.counted_runs, ui.snap.progress_settings.trend_window)}</div></div>
         <div class="tile"><div class="kpi-label">Improvement</div><div class="kpi-value pos">${pct(s.improvement_pct)}</div><div class="small muted">First run → best</div></div>
       </div>
       ${scoreChart(history, periods)}
@@ -641,7 +647,7 @@ function timeline() {
   const ticks = [];
   for (let h = Math.ceil(lo / 3) * 3; h <= hi; h += 3) {
     const hr = ((h % 24) + 24) % 24;
-    ticks.push(`<span style="left:${pos(h).toFixed(2)}%">${hr === 0 ? "12a" : hr < 12 ? `${hr}a` : hr === 12 ? "12p" : `${hr - 12}p`}</span>`);
+    ticks.push(`<span${h === hi ? ' class="end"' : ""} style="left:${pos(h).toFixed(2)}%">${hr === 0 ? "12a" : hr < 12 ? `${hr}a` : hr === 12 ? "12p" : `${hr - 12}p`}</span>`);
   }
   const body = rows.map(({ d, sessions }) => {
     const isToday = dayKey(d) === t.today;

@@ -112,7 +112,11 @@ Help is at the bottom of the sidebar, and every page links to its section of the
 
 ![Scenarios](docs/screenshots/scenarios.png)
 
+![A scenario's page](docs/screenshots/scenario.png)
+
 ![Progress](docs/screenshots/progress.png)
+
+![Session summary](docs/screenshots/session.png)
 
 ## Insights
 

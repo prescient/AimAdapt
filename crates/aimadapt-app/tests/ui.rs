@@ -1435,3 +1435,151 @@ fn today_and_a_scenarios_page_show_the_mix_and_link_to_training() {
     assert!(item.contains("mixChip()") && item.contains("kovaaks"));
     assert!(!decl(&scenarios, "scenariosHead").contains("mixChip"));
 }
+
+/// Bug: a day with no workout said "Rest" three times on This week (the focus line, a
+/// second line and a tag). It says it once now, in the focus line.
+#[test]
+fn a_rest_day_says_rest_once() {
+    let program = ui("program.js");
+    let week = decl(&program, "weekCard");
+    assert_eq!(week.matches("Rest day").count(), 1, "{week}");
+    assert!(week.contains(r#"w.status !== "rest""#), "the tag is drawn on a rest day: {week}");
+}
+
+/// Bug: the last hour tick sat at 100% and was centered on it, so half its label hung past
+/// the box. The last tick is right-aligned instead. The overflow itself only shows in a
+/// window, so this checks the markup and the rule that fix it.
+#[test]
+fn the_last_hour_tick_is_kept_inside_the_axis() {
+    let timeline = ui("app.js");
+    let timeline = decl(&timeline, "timeline");
+    assert!(timeline.contains("h === hi") && timeline.contains(r#"class="end""#), "{timeline}");
+    let css = ui("styles.css");
+    assert!(css.contains(".tl-axis span.end { transform: translateX(-100%); }"));
+}
+
+/// Cleanup: a workout's page looks drills up with the shared `drillLookup()`, not its own map.
+#[test]
+fn a_workouts_page_uses_the_shared_drill_lookup() {
+    let scenarios = ui("scenarios.js");
+    let detail = decl(&scenarios, "workoutDetail");
+    assert!(detail.contains("drillLookup()") && !detail.contains("new Map("), "{detail}");
+}
+
+/// The sidebar stays in view while the page scrolls and scrolls by itself in a window too
+/// short for it. The behavior only shows in a window, so this checks the rule.
+#[test]
+fn the_sidebar_stays_in_view() {
+    let css = ui("styles.css");
+    let rule = css.split(".sidebar {").nth(1).and_then(|r| r.split('}').next()).expect(".sidebar rule");
+    for needle in ["position: sticky", "top: 0", "height: 100vh", "overflow-y: auto"] {
+        assert!(rule.contains(needle), "missing {needle}: {rule}");
+    }
+}
+
+/// Bug: the Accuracy tile said "Last 5 runs" for a scenario with one run. The label counts
+/// the runs the average covers.
+#[test]
+fn the_accuracy_label_counts_the_runs_it_covers() {
+    let app = ui("app.js");
+    decl(&app, "recentRunsLabel");
+    let card = decl(&app, "scoreHistoryCard");
+    assert!(card.contains("recentRunsLabel("), "{card}");
+    assert!(!card.contains("Last ${ui.snap.progress_settings.trend_window} runs</div>"), "fixed label is back");
+}
+
+/// Bug: a gap read "-9 pts below plan" (a sign and a word for the same thing) and "+1 pts".
+#[test]
+fn the_plan_gap_reads_cleanly() {
+    let insights = ui("insights.js");
+    let gap = decl(&insights, "gapCell");
+    assert!(gap.contains("Math.abs(") && gap.contains("\"−\"") && gap.contains("\"pt\""), "{gap}");
+}
+
+/// Bug: a tile whose change rounded to zero read "-0.0 bits/s vs. runs before" in red.
+/// The sign and the colour now come from the rounded figure.
+#[test]
+fn a_change_that_rounds_to_zero_has_no_sign_or_colour() {
+    let insights = ui("insights.js");
+    let delta = decl(&insights, "delta");
+    assert!(delta.contains("shown === 0") && delta.contains("Math.abs(shown)") && delta.contains("\"−\""), "{delta}");
+    assert!(!delta.contains("d > 0 ? \"+\" : \"\""), "{delta}");
+}
+
+/// Bug: on a run where the rating barely moved, the Last run chart's axis read
+/// "0.54, 0.54, 0.55, 0.55, 0.55". Tick labels now take the decimals their step needs.
+#[test]
+fn close_rating_ticks_read_differently() {
+    let insights = ui("insights.js");
+    let tick = decl(&insights, "knobTick");
+    assert!(tick.contains("Math.log10(") && tick.contains("toFixed("), "{tick}");
+    let card = decl(&insights, "ratingCard");
+    assert!(card.contains("knobTick(knob, lo, hi)") && card.contains("knobTick(knob, tlo, thi)"), "{card}");
+    assert!(!card.contains("fmtKnob(knob, v).replace"), "{card}");
+}
+
+/// Bug: Browse counted a scenario's standard runs only on its current version, so one
+/// played only as a warm-up before its settings changed showed a last-played date and no runs.
+#[test]
+fn browse_counts_runs_on_every_version() {
+    let scenarios = ui("scenarios.js");
+    let plays = scenarios
+        .lines()
+        .find(|l| l.trim_start().starts_with("plays: ") && l.contains("adaptive_runs"))
+        .expect("the trainer row's plays");
+    assert!(plays.contains("o?.runs"), "{plays}");
+}
+
+/// Bug: the rating by run chart labelled a "run 5.5" and a "run 14.5" along the bottom.
+#[test]
+fn the_run_axis_counts_whole_runs() {
+    let insights = ui("insights.js");
+    let card = decl(&insights, "ratingCard");
+    assert!(card.contains("runTicks") && card.contains(".map(Math.round)"), "{card}");
+}
+
+/// Bug: at the app's default width the By flick direction table sat squeezed beside its
+/// chart, so the Overshoot column was cut off and "480 ms" broke over two lines. The
+/// table now drops under the chart when the card can't hold both.
+#[test]
+fn the_direction_table_keeps_all_its_columns() {
+    let insights = ui("insights.js");
+    let card = decl(&insights, "directionCard");
+    assert!(card.contains("class=\"dir-split\"") && !card.contains("flex:1 1 200px"), "{card}");
+    let css = ui("styles.css");
+    let width = css.lines().find(|l| l.starts_with(".dir-split .table-wrap")).expect("the table's width rule");
+    assert!(width.contains("flex: 1 1 320px"), "{width}");
+    assert!(css.lines().any(|l| l.starts_with(".dir-split td") && l.contains("white-space: nowrap")), "cells can wrap");
+}
+
+/// Bug: the last row of By flick distance was labelled "40–+°".
+#[test]
+fn the_longest_flick_distance_reads_as_a_minimum() {
+    let insights = ui("insights.js");
+    let card = decl(&insights, "distanceCard");
+    assert!(card.contains("°+") && !card.contains("? \"+\" :"), "{card}");
+}
+
+/// Bug: the last label under Speed vs. hit rate was centred on the chart's right edge, so
+/// a long one lost its end ("29.6 °/" on a tracking scenario).
+#[test]
+fn the_last_speed_label_ends_at_the_charts_edge() {
+    let insights = ui("insights.js");
+    let card = decl(&insights, "curveCard");
+    assert!(card.contains("[f.w - 2, \"end\"]") && card.contains("text-anchor=\"${anchor}\""), "{card}");
+}
+
+/// Bug: a change on Progress took its sign from the unrounded value, so a skill that had
+/// slipped by a fraction of a percent read "−0%".
+#[test]
+fn a_percent_change_that_rounds_to_zero_has_no_sign() {
+    let program = ui("program.js");
+    assert!(decl(&program, "shownPct").contains("Number((v * 100).toFixed(digits))"));
+    let pct = decl(&program, "pctChange");
+    assert!(pct.contains("const shown = shownPct(v, digits)"), "{pct}");
+    assert!(pct.contains("shown > 0 ? \"+\" : shown < 0 ? \"−\" : \"\""), "{pct}");
+    assert!(!pct.contains("v >= 0 ?"), "the sign should come from the rounded figure: {pct}");
+    // The colour follows the same figure, so a zero is grey.
+    let span = decl(&program, "changeSpan");
+    assert!(span.contains("shown > 0 ? \"pos\" : shown < 0 ? \"neg\" : \"muted\""), "{span}");
+}

@@ -19,7 +19,14 @@ const SKILL_LABELS = {
 const BLOCK_LABELS = { warmup: "Warm-up", main: "Main", secondary: "Secondary", maintenance: "Maintenance", none: "" };
 const STATUS_LABELS = { done: "Done", partial: "Partial", missed: "Missed", today: "Today", upcoming: "", rest: "Rest" };
 
-const pctChange = (v, digits = 0) => (v === null || v === undefined ? "–" : `${v >= 0 ? "+" : "−"}${Math.abs(v * 100).toFixed(digits)}%`);
+// The figure as shown, in points: the sign and the colour both come from it. A change that
+// rounded to zero used to read "−0%".
+const shownPct = (v, digits = 0) => Number((v * 100).toFixed(digits));
+const pctChange = (v, digits = 0) => {
+  if (v === null || v === undefined) return "–";
+  const shown = shownPct(v, digits);
+  return `${shown > 0 ? "+" : shown < 0 ? "−" : ""}${Math.abs(shown).toFixed(digits)}%`;
+};
 
 // A change's likely range, e.g. "+2% to +9%". `sp` is { low, high, noise } (Spread in programs.rs).
 const rangeText = (sp, digits = 0) => `${pctChange(sp.low, digits)} to ${pctChange(sp.high, digits)}`;
@@ -30,7 +37,8 @@ const plusMinus = (sp, digits = 0) => `±${(((sp.high - sp.low) / 2) * 100).toFi
 // grey when it is inside (the change may be noise). With no range (older runs), the bare figure.
 function changeSpan(v, sp, digits = 0) {
   if (v === null || v === undefined) return "–";
-  const tone = v >= 0 ? "pos" : "neg";
+  const shown = shownPct(v, digits);
+  const tone = shown > 0 ? "pos" : shown < 0 ? "neg" : "muted";
   if (!sp) return `<span class="${tone}">${pctChange(v, digits)}</span>`;
   const title = `Likely ${rangeText(sp, digits)}${sp.noise ? ". Zero is inside that range, so this may be noise." : ""}`;
   return `<span class="${sp.noise ? "muted" : tone}" title="${title}">${pctChange(v, digits)} <span class="small">${plusMinus(sp, digits)}</span></span>`;
@@ -192,10 +200,10 @@ function weekCard(d) {
       const share = w.planned ? Math.min(1, w.done / w.planned) : 0;
       return `<div class="week-day ${w.status} ${w.day === d.today ? "is-today" : ""}">
         <div class="wd-name">${esc(info.name.slice(0, 3))} <span class="small muted">${esc(fmtShort(day(w.date)))}</span></div>
-        <div class="small muted wd-focus">${esc(info.focus ?? "Rest")}</div>
+        <div class="small muted wd-focus">${esc(info.focus ?? "Rest day")}</div>
         ${w.planned ? `<div class="bar-track"><div class="bar-fill" style="width:${share * 100}%"></div></div>
-          <div class="small">${w.done} / ${w.planned} runs${w.minutes ? ` · ${Math.round(w.minutes)} min` : ""}</div>` : `<div class="small muted">Rest day</div>`}
-        ${STATUS_LABELS[w.status] ? `<span class="tag ${w.status === "done" ? "" : "grey"}">${STATUS_LABELS[w.status]}</span>` : ""}
+          <div class="small">${w.done} / ${w.planned} runs${w.minutes ? ` · ${Math.round(w.minutes)} min` : ""}</div>` : ""}
+        ${STATUS_LABELS[w.status] && w.status !== "rest" ? `<span class="tag ${w.status === "done" ? "" : "grey"}">${STATUS_LABELS[w.status]}</span>` : ""}
         ${w.focus_change !== null ? `<div class="small">${changeSpan(w.focus_change, w.focus_spread, 1)} vs last ${esc(info.name)}${w.focus_spread?.noise ? " (within noise)" : ""}</div>` : ""}
       </div>`;
     }).join("")}</div>
@@ -246,7 +254,7 @@ function dayCard(d, w, info, drill) {
   return `<article class="card day-card ${w.status} ${isToday ? "is-today" : ""}">
     <div class="card-head">${head}</div>
     <div class="small muted">${info.workout.items.length} drills · ${info.runs} runs · about ${Math.round(info.minutes)} min</div>
-    ${info.weak_spots ? `<div class="small muted">Its drills are rebuilt from your skill profile, so they change as you improve.</div>` : ""}
+    ${info.weak_spots ? `<div class="small muted">Its drills come from the skills you have trained least and improved least, so they change from week to week.</div>` : ""}
     <ul class="day-drills">${info.workout.items.map((it) => {
       const { entry, name } = drill(it);
       return `<li><span class="small muted dd-block">${esc(BLOCK_LABELS[it.block ?? "none"] || "")}</span>

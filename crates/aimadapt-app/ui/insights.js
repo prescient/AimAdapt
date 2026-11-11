@@ -28,9 +28,13 @@ const ms = (v) => (v === null || v === undefined ? "–" : `${Math.round(v)} ms`
 const share = (v) => (v === null || v === undefined ? "–" : `${Math.round(v * 100)}%`);
 const delta = (now, before, unit = "", better = 1) => {
   if (now === null || now === undefined || before === null || before === undefined) return "";
-  const d = now - before;
-  const good = d * better > 0;
-  return `<span class="${good ? "pos" : "neg"}">${d > 0 ? "+" : ""}${unit === "%" ? Math.round(d * 100) : d.toFixed(unit === "bits/s" ? 1 : 0)}${unit === "%" ? " pts" : unit ? ` ${unit}` : ""}</span> vs. runs before`;
+  // The sign and the colour come from the figure as shown: a change that rounded to
+  // zero used to read "-0.0 bits/s" in red.
+  const places = unit === "bits/s" ? 1 : 0;
+  const shown = unit === "%" ? Math.round((now - before) * 100) : Number((now - before).toFixed(places));
+  const cls = shown === 0 ? "muted" : shown * better > 0 ? "pos" : "neg";
+  const word = unit === "%" ? (Math.abs(shown) === 1 ? " pt" : " pts") : unit ? ` ${unit}` : "";
+  return `<span class="${cls}">${shown > 0 ? "+" : shown < 0 ? "−" : ""}${Math.abs(shown).toFixed(places)}${word}</span> vs. runs before`;
 };
 
 // The scenario's ratings that are on one scale: adaptive runs with its current rated
@@ -79,10 +83,10 @@ const PLAN_KINDS = ["near", "stretch", "easy"];
 function gapCell(k) {
   if (k.gap === null || k.gap === undefined) return "–";
   const points = Math.round(k.gap * 100);
-  const text = `${points > 0 ? "+" : ""}${points} pts`;
-  if (k.verdict === "above") return `<strong class="pos">${text} above plan</strong>`;
-  if (k.verdict === "below") return `<strong class="neg">${text} below plan</strong>`;
-  return `<span class="muted">${text}</span>`;
+  const unit = Math.abs(points) === 1 ? "pt" : "pts";
+  if (k.verdict === "above") return `<strong class="pos">${Math.abs(points)} ${unit} above plan</strong>`;
+  if (k.verdict === "below") return `<strong class="neg">${Math.abs(points)} ${unit} below plan</strong>`;
+  return `<span class="muted">${points > 0 ? "+" : points < 0 ? "−" : ""}${Math.abs(points)} ${unit}</span>`;
 }
 function planCheckCard(plan) {
   const kinds = PLAN_KINDS.map((id) => (plan?.kinds ?? []).find((k) => k.kind === id)
@@ -171,16 +175,27 @@ function yTicks(lo, hi, yfmt = (v) => Math.round(v * 10) / 10, n = 4, f = CHART)
       <text x="${f.l - 6}" y="${sy(v, lo, hi, f) + 4}" text-anchor="end" font-size="11" fill="var(--dim)">${yfmt(v)}</text>`).join("");
 }
 
-// Both axes of a CHART-sized chart, with their labels.
-function axes(xlo, xhi, ylo, yhi, xlabel, ylabel, yfmt, yn) {
+// Both axes of a CHART-sized chart, with their labels. xs are the values labelled
+// along the bottom.
+function axes(xlo, xhi, ylo, yhi, xlabel, ylabel, yfmt, yn, xs = tickValues(xlo, xhi)) {
   const f = CHART;
   return `${yTicks(ylo, yhi, yfmt, yn)}
-    ${tickValues(xlo, xhi).map((v) => `<text x="${sx(v, xlo, xhi)}" y="${f.h - f.b + 16}" text-anchor="middle" font-size="11" fill="var(--dim)">${Math.round(v * 10) / 10}</text>`).join("")}
+    ${xs.map((v) =>`<text x="${sx(v, xlo, xhi)}" y="${f.h - f.b + 16}" text-anchor="middle" font-size="11" fill="var(--dim)">${Math.round(v * 10) / 10}</text>`).join("")}
     <text x="${f.w - f.r}" y="${f.h - 2}" text-anchor="end" font-size="11" fill="var(--dim)">${xlabel}</text>
     <text x="${f.l}" y="${f.t - 2}" font-size="11" fill="var(--dim)">${ylabel}</text>`;
 }
 
 const svg = (body, h = CHART.h, w = CHART.w) => `<svg viewBox="0 0 ${w} ${h}" width="100%" role="img" style="max-height:${h + 40}px">${body}</svg>`;
+
+// A tick label for a rating from lo to hi, without its unit. It has fmtKnob's decimals,
+// or more when the ticks are closer than that: on a run where the rating barely moved
+// the axis used to read "0.54, 0.54, 0.55, 0.55, 0.55".
+const knobTick = (knob, lo, hi, n = 4) => {
+  const usual = knob === "target_speed" ? 1 : knob === "lifetime" || knob === "kill_pace" ? 2 : 3;
+  const step = Math.abs(hi - lo) / n;
+  const places = step > 0 ? Math.min(6, Math.max(usual, Math.ceil(-Math.log10(step)))) : usual;
+  return (v) => v.toFixed(places);
+};
 
 // Rating by run, drawn so "better" is always up: for lifetime and size the axis is
 // flipped, since lower is better.
@@ -192,8 +207,9 @@ function ratingCard(d, adaptive) {
   let lo = Math.min(...vals) - pad, hi = Math.max(...vals) + pad;
   if (!up) [lo, hi] = [hi, lo];
   const n = Math.max(1, adaptive.length - 1);
-  const fmtTick = (v) => fmtKnob(knob, v).replace(" °/s", "").replace(" s", "").replace(" m", "");
-  const band = adaptive.map((r, i) => `${sx(i, 0, n)},${sy(r.rating_high ?? r.rating, lo, hi)}`).join(" ") + " " +
+  // Whole runs along the bottom: evenly spaced ticks used to label a "run 5.5".
+  const runTicks = [...new Set(tickValues(1, n + 1).map(Math.round))].filter((v) => v <= adaptive.length);
+  const band =adaptive.map((r, i) => `${sx(i, 0, n)},${sy(r.rating_high ?? r.rating, lo, hi)}`).join(" ") + " " +
     [...adaptive].reverse().map((r, j) => `${sx(adaptive.length - 1 - j, 0, n)},${sy(r.rating_low ?? r.rating, lo, hi)}`).join(" ");
   const line = adaptive.map((r, i) => `${i ? "L" : "M"}${sx(i, 0, n)},${sy(r.rating, lo, hi)}`).join("");
   const tl = d.latest_timeline;
@@ -208,12 +224,12 @@ function ratingCard(d, adaptive) {
     if (!up) [tlo, thi] = [thi, tlo];
     const tline = tl.map((p, i) => `${i ? "L" : "M"}${sx(p[0], 0, tmax)},${sy(p[1], tlo, thi)}`).join("");
     tchart = `<section class="card grow-1"><div class="card-head"><h2>Last run</h2><span class="small muted">Your rating as the run went on</span></div>
-      ${svg(`${axes(0, tmax, tlo, thi, "seconds", knob === "target_speed" ? "°/s" : knob === "lifetime" || knob === "kill_pace" ? "s" : "m", fmtTick)}<path d="${tline}" fill="none" stroke="var(--blue)" stroke-width="2"/>`)}
+      ${svg(`${axes(0, tmax, tlo, thi, "seconds", knob === "target_speed" ? "°/s" : knob === "lifetime" || knob === "kill_pace" ? "s" : "m", knobTick(knob, tlo, thi))}<path d="${tline}" fill="none" stroke="var(--blue)" stroke-width="2"/>`)}
       <div class="small muted">The rating takes in each target or segment as you play. A calibration run moves the difficulty with it; later runs stay at one value and the rating settles as it gets more certain.</div></section>`;
   }
   return `<div class="row">
     <section class="card grow-2"><div class="card-head"><h2>85% ${knobWord(knob)} by run</h2><span class="small muted">Up is better · shaded = likely range</span></div>
-      ${svg(`${axes(1, n + 1, lo, hi, "run", knob === "target_speed" ? "°/s" : knob === "lifetime" || knob === "kill_pace" ? "s" : "m", fmtTick)}
+      ${svg(`${axes(1, n + 1, lo, hi, "run", knob === "target_speed" ? "°/s" : knob === "lifetime" || knob === "kill_pace" ? "s" : "m", knobTick(knob, lo, hi), undefined, runTicks)}
         <polygon points="${band}" fill="var(--rust)" opacity="0.15"/>
         <path d="${line}" fill="none" stroke="var(--rust)" stroke-width="2.5"/>
         ${adaptive.map((r, i) => `<circle cx="${sx(i, 0, n)}" cy="${sy(r.rating, lo, hi)}" r="3.5" fill="var(--rust)"><title>Run ${i + 1}: ${esc(fmtKnob(knob, r.rating))}</title></circle>`).join("")}`)}
@@ -236,7 +252,9 @@ function curveCard(c) {
     <text x="${X(v) + 4}" y="${f.h - f.b - 8 - row * 14}" font-size="11" fill="var(--muted)">${label} ${esc(fmtKnob(knob, v))}</text>`;
   const xTicks = [0, 0.25, 0.5, 0.75, 1].map((k) => {
     const v = c.model[Math.round(k * (c.model.length - 1))][0];
-    return `<text x="${X(v)}" y="${f.h - f.b + 16}" text-anchor="middle" font-size="11" fill="var(--dim)">${esc(fmtKnob(knob, v))}</text>`;
+    // The last label ends at the chart's edge: centred on it, "29.6 °/s" lost its "s".
+    const [x, anchor] = k === 1 ? [f.w - 2, "end"] : [X(v), "middle"];
+    return `<text x="${x}" y="${f.h - f.b + 16}" text-anchor="${anchor}" font-size="11" fill="var(--dim)">${esc(fmtKnob(knob, v))}</text>`;
   }).join("");
   return `<section class="card"><div class="card-head"><h2>Speed vs. hit rate</h2><span class="small muted">Harder to the right</span></div>
     ${svg(`${yTicks(0, 100, (v) => `${v}%`)}
@@ -275,9 +293,9 @@ function directionCard(dirs) {
       <text x="${cx + (R + 22) * Math.cos((d.direction_deg * Math.PI) / 180)}" y="${cy - (R + 22) * Math.sin((d.direction_deg * Math.PI) / 180) + 4}" text-anchor="middle" font-size="11" fill="var(--muted)">${Math.round(d.success * 100)}%</text>`;
   };
   return `<section class="card"><div class="card-head"><h2>By flick direction</h2><span class="small muted">From the crosshair to the target</span></div>
-    <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">
+    <div class="dir-split">
       ${svg(`<circle cx="${cx}" cy="${cy}" r="${R}" fill="none" stroke="var(--border)"/><circle cx="${cx}" cy="${cy}" r="${20 + (R - 20) * 0.5}" fill="none" stroke="var(--border)" stroke-dasharray="3 4"/>${dirs.map(wedge).join("")}`, 300, 300).replace('width="100%"', 'width="300"')}
-      <div class="table-wrap" style="flex:1 1 200px"><table><thead><tr><th>Direction</th><th class="r">Hit</th><th class="r">Median</th><th class="r">Overshoot</th></tr></thead><tbody>
+      <div class="table-wrap"><table><thead><tr><th>Direction</th><th class="r">Hit</th><th class="r">Median</th><th class="r">Overshoot</th></tr></thead><tbody>
         ${dirs.map((d) => `<tr><td>${d.label}</td><td class="r mono">${share(d.success)}</td><td class="r mono">${ms(d.median_ms)}</td><td class="r mono">${d.overshoot_deg.toFixed(2)}°</td></tr>`).join("")}
       </tbody></table></div>
     </div>
@@ -321,7 +339,7 @@ function reactionCard(r) {
 
 function distanceCard(ds) {
   return `<section class="card"><div class="card-head"><h2>By flick distance</h2><span class="small muted">Share hit and median time</span></div>
-    ${bars(ds.map((d) => [`${d.from_deg}–${d.to_deg >= 180 ? "+" : d.to_deg}°`, d.success, `${ms(d.median_ms)} · ${d.targets}`]), share)}
+    ${bars(ds.map((d) => [d.to_deg >= 180 ? `${d.from_deg}°+` : `${d.from_deg}–${d.to_deg}°`, d.success, `${ms(d.median_ms)} · ${d.targets}`]), share)}
   </section>`;
 }
 

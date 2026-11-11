@@ -50,7 +50,8 @@ h3 { font-size: 16px; font-weight: 700; }
 
 /* Layout */
 .app { display: flex; flex-wrap: wrap; min-height: 100vh; }
-.sidebar { flex: 1 1 220px; max-width: 100%; padding: 24px 16px; background: var(--sidebar); border-right: 1px solid var(--border-soft); display: flex; flex-direction: column; gap: 4px; }
+/* The sidebar stays in view while the page scrolls, and scrolls on its own in a window too short for it. */
+.sidebar { flex: 1 1 220px; max-width: 100%; padding: 24px 16px; background: var(--sidebar); border-right: 1px solid var(--border-soft); display: flex; flex-direction: column; gap: 4px; position: sticky; top: 0; align-self: flex-start; height: 100vh; overflow-y: auto; }
 .brand { display: flex; align-items: center; gap: 10px; padding: 4px 12px 24px; font: 700 20px var(--font-display); color: var(--text-strong); }
 .nav { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 0 12px; border-radius: 8px; color: var(--muted); font-weight: 500; }
 .nav svg { stroke: currentColor; }
@@ -196,6 +197,7 @@ td.r, th.r { text-align: right; }
 .tl-total { width: 56px; text-align: right; font: 13px var(--font-mono); flex: none; }
 .tl-axis { position: relative; flex: 1; height: 16px; font: 11px var(--font-mono); color: var(--dim); }
 .tl-axis span { position: absolute; transform: translateX(-50%); }
+.tl-axis span.end { transform: translateX(-100%); }
 .hours { height: 140px; display: flex; gap: 3px; align-items: flex-end; border-bottom: 1px solid var(--control); }
 .hours div { flex: 1; background: var(--rust); border-radius: 3px 3px 0 0; min-height: 0; }
 .hour-axis { display: flex; gap: 3px; font: 11px var(--font-mono); color: var(--dim); }
@@ -345,6 +347,10 @@ svg text { font-family: var(--font); }
 .detail-head { gap: 12px; }
 .insights-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-top: 8px; }
 .insight-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); gap: 16px; align-items: start; }
+/* By flick direction: the chart beside its table, or above it when the card is too narrow for both. */
+.dir-split { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: center; }
+.dir-split .table-wrap { flex: 1 1 320px; }
+.dir-split td, .dir-split th { white-space: nowrap; }
 .steps { display: flex; flex-direction: column; }
 .step { display: grid; grid-template-columns: 28px minmax(0, 1fr) 80px 90px; gap: 12px; align-items: center; padding: 10px 0; border-top: 1px solid var(--border-soft); }
 
