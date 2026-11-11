@@ -510,6 +510,45 @@ mod tests {
         assert_eq!(chart.points.last().unwrap().run_id, c);
     }
 
+    /// Bug: the next run started up to a few percent harder than the rating the last one
+    /// ended on, because a run saved the posterior mean of theta instead of the curve
+    /// midpoint that goes with its rating. The rating saved is where the next run starts.
+    #[test]
+    fn a_saved_rating_is_where_the_next_run_starts() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("t.db");
+        let scenario = Scenario { name: "Timed Flicks".into(), ..Default::default() };
+        // A calibration run where about every other target is missed, so the rating is
+        // somewhere in the middle of the scenario's range and the slope is unsure.
+        let mut s = scenario.clone();
+        s.timing.countdown_s = 0.0;
+        s.timing.duration_s = 10.0;
+        let mut sim = Sim::adaptive(s, 7, None, Mix::Balanced);
+        let mut frame = 0;
+        while sim.phase() != Phase::Finished {
+            // Aim well off the target in every other half second.
+            let off = if (frame / 120) % 2 == 0 { aimadapt_sim::Vec3::ZERO } else { aimadapt_sim::Vec3::X };
+            let aim = (sim.targets()[0].pos.normalize() + off).normalize();
+            let fire = frame % 60 == 0;
+            sim.step(1.0 / 240.0, Input { aim, fire_pressed: fire, fire_held: fire });
+            frame += 1;
+        }
+        let first = sim.result();
+        save(&path, &info(&scenario, &first, &PlayerSettings::default(), 1)).unwrap();
+        let db = Db::open(&path).unwrap();
+        let p = prior(&db, &scenario, finished() + chrono::Duration::days(1)).unwrap();
+        let rating = first.adaptive.as_ref().unwrap().value;
+        let start = play(&scenario, true, Some(p)).adaptive.unwrap().start_value;
+        assert!((start / rating - 1.0).abs() < 0.003, "the run starts at {start}, the last rating was {rating}");
+        // The Insights chart's 85% mark agrees with the rating in the header, as long as the
+        // rating isn't held at one of the scenario's limits.
+        let limits = scenario.adaptive.resolve(&scenario);
+        assert!(rating > limits.easy.min(limits.hard) * 1.01 && rating < limits.easy.max(limits.hard) * 0.99);
+        let insights = aimadapt_core::insights::scenario(&db, "Timed Flicks").unwrap().unwrap();
+        let at85 = insights.curve.expect("a rated run has a curve").at85;
+        assert!((at85 / f64::from(rating) - 1.0).abs() < 0.001, "the chart marks {at85}, the rating is {rating}");
+    }
+
     #[test]
     fn adaptive_runs_save_rating_and_telemetry() {
         let dir = tempfile::tempdir().unwrap();

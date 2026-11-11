@@ -13,7 +13,11 @@
 //! where `h` is the knob on a log scale with higher meaning harder (so each step is
 //! the same relative change), `θ` is where the player succeeds half the time, and
 //! `s` is how quickly success falls off (small = consistent). The headline number
-//! is the knob value at the goal rate (85%).
+//! is the knob value at the goal rate (85%), counting the slips: at the rating the
+//! chance of success is the goal itself (see [`logit_with_slips`]). It is the
+//! posterior mean of the goal point `θ − s · logit_with_slips(goal)`, not a point
+//! read off the mean curve. A finished run carries [`Rating::carry_theta`] and the
+//! slope into the next one, which put the goal point exactly at the rating.
 //!
 //! The estimate is Bayesian, like Glicko: a posterior over (θ, s) on a grid, with
 //! its uncertainty. Each outcome updates it by how surprising it was, so the first
@@ -347,6 +351,9 @@ pub fn judge_against_plan(planned: f32, rate: f32, evidence: f32) -> PlanVerdict
 /// A rating carried between runs.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Prior {
+    /// The curve midpoint, on the log scale, as [`Rating::carry_theta`] gives it. Only
+    /// the anchor `theta - slope * logit_with_slips(goal)` is used, so the prior is
+    /// centred on the goal point of the run it came from.
     pub theta: f32,
     pub slope: f32,
     /// Uncertainty of the goal-rate point, in log units.
@@ -411,6 +418,8 @@ pub struct Estimate {
     /// Goal-rate point on the log scale, and its standard deviation.
     pub h_goal: f32,
     pub sd: f32,
+    /// Posterior mean of the curve midpoint. Not what a run carries to the next one:
+    /// see [`Rating::carry_theta`].
     pub theta: f32,
     pub slope: f32,
     /// Standard deviation of ln(slope).
@@ -425,13 +434,19 @@ fn p_success(h: f32, theta: f32, s: f32) -> f32 {
     LAPSE / 2.0 + (1.0 - LAPSE) * logistic((theta - h) / s)
 }
 
+/// The curve's logit at which the chance of success, slips included, is `chance`.
+pub fn logit_with_slips(chance: f32) -> f32 {
+    let q = ((chance - LAPSE / 2.0) / (1.0 - LAPSE)).clamp(0.01, 0.99);
+    (q / (1.0 - q)).ln()
+}
+
 impl Rating {
     pub fn new(cfg: Resolved, prior: Option<Prior>) -> Rating {
         let k = cfg.knob;
         let (he, hh) = (k.h(cfg.easy), k.h(cfg.hard));
         let (lo, hi) = (he.min(hh) - 1.0, he.max(hh) + 1.0);
         let thetas: Vec<f32> = (0..GRID).map(|i| lo + (hi - lo) * i as f32 / (GRID - 1) as f32).collect();
-        let logit_goal = (cfg.goal / (1.0 - cfg.goal)).ln();
+        let logit_goal = logit_with_slips(cfg.goal);
         let (theta0, sd0, slope0, slope_sd, anchored) = match prior {
             Some(p) => {
                 // Skill drifts: widen the prior with time away, like Glicko.
@@ -479,7 +494,7 @@ impl Rating {
     }
 
     pub fn estimate(&self) -> Estimate {
-        let logit_goal = (self.cfg.goal / (1.0 - self.cfg.goal)).ln();
+        let logit_goal = logit_with_slips(self.cfg.goal);
         let w = self.weights();
         let (mut mh, mut mh2, mut mt, mut ms, mut ms2) = (0.0f64, 0.0f64, 0.0f64, 0.0f64, 0.0f64);
         for (i, &t) in self.thetas.iter().enumerate() {
@@ -501,6 +516,15 @@ impl Rating {
             slope: ms.exp() as f32,
             slope_sd: (ms2 - ms * ms).max(0.0).sqrt() as f32,
         }
+    }
+
+    /// The curve midpoint to carry into the next run's [`Prior`]. With the stored slope
+    /// it puts the goal rate exactly at the rating's unclamped goal point, so the next
+    /// run starts where this one ended (the posterior mean of theta would not, because
+    /// the rating averages the slope arithmetically and the stored slope is a geometric mean).
+    pub fn carry_theta(&self) -> f32 {
+        let e = self.estimate();
+        e.h_goal + e.slope * logit_with_slips(self.cfg.goal)
     }
 
     /// The goal-rate value in knob units (the headline number).
@@ -563,8 +587,7 @@ impl Rating {
     /// The knob value with this chance of success, at the posterior mean.
     fn value_at(&self, chance: f32) -> f32 {
         let e = self.estimate();
-        let q = ((chance - LAPSE / 2.0) / (1.0 - LAPSE)).clamp(0.01, 0.99);
-        let h = (e.theta - e.slope * (q / (1.0 - q)).ln()).clamp(self.h_easy(), self.h_hard());
+        let h = (e.theta - e.slope * logit_with_slips(chance)).clamp(self.h_easy(), self.h_hard());
         self.cfg.knob.value(h)
     }
 
@@ -713,8 +736,51 @@ mod tests {
 
     /// A simulated player whose true 85% lifetime is `true85` with slope `s`.
     fn player(true85: f32, s: f32) -> impl Fn(f32) -> f32 {
-        let theta = Knob::Lifetime.h(true85) + s * (0.85f32 / 0.15).ln();
+        let theta = Knob::Lifetime.h(true85) + s * logit_with_slips(0.85);
         move |v: f32| p_success(Knob::Lifetime.h(v), theta, s)
+    }
+
+    /// Bug: the rating's goal point ignored slips, so the chance of success at the
+    /// rating was about 83.6%, not the 85% the app names.
+    #[test]
+    fn the_rating_is_hit_at_the_goal_rate_slips_included() {
+        let prior = Prior {
+            theta: Knob::Lifetime.h(0.6) + 0.12 * logit_with_slips(0.85),
+            slope: 0.12,
+            sd: 0.01,
+            slope_sd: Some(0.15),
+            days: 0.0,
+            fastest: None,
+            last_run: None,
+        };
+        let r = Rating::new(cfg(), Some(prior));
+        let chance = p_success(Knob::Lifetime.h(r.value()), prior.theta, prior.slope);
+        assert!((chance - 0.85).abs() < 0.006, "chance at the rating: {chance}");
+    }
+
+    /// Bug: a finished run stored the posterior mean of theta and the geometric mean
+    /// of the slope, but the rating used the arithmetic mean of the slope, so the next
+    /// run started harder than the rating the last one ended on.
+    #[test]
+    fn the_next_run_starts_at_the_last_rating() {
+        let p = player(0.6, 0.12);
+        let mut r = Rating::new(cfg(), None);
+        play(&mut r, &p, 20, Mix::Balanced, 5);
+        let e = r.estimate();
+        let (lo, hi) = (r.h_easy().min(r.h_hard()), r.h_easy().max(r.h_hard()));
+        assert!(e.h_goal > lo + 0.05 && e.h_goal < hi - 0.05, "not at a limit: {}", e.h_goal);
+        let next = Prior {
+            theta: r.carry_theta(),
+            slope: e.slope,
+            sd: e.sd,
+            slope_sd: Some(e.slope_sd),
+            days: 0.0,
+            fastest: None,
+            last_run: None,
+        };
+        let (done, start) = (r.value(), Rating::new(cfg(), Some(next)).value());
+        let gap = (start / done - 1.0).abs();
+        assert!(gap < 0.003, "the next run starts at {start}, the last rating was {done}");
     }
 
     fn play(r: &mut Rating, p: &dyn Fn(f32) -> f32, n: usize, mix: Mix, seed: u64) -> f32 {
@@ -747,7 +813,7 @@ mod tests {
     fn mix_keeps_success_near_the_goal() {
         let p = player(0.6, 0.1);
         let prior = Prior {
-            theta: Knob::Lifetime.h(0.6) + 0.1 * 1.7346,
+            theta: Knob::Lifetime.h(0.6) + 0.1 * logit_with_slips(0.85),
             slope: 0.1,
             sd: 0.05,
             slope_sd: None,
@@ -764,7 +830,7 @@ mod tests {
 
     fn rated(at: f32, sd: f32, fastest: Option<f32>, last_run: Option<(Pick, f32)>) -> Prior {
         Prior {
-            theta: Knob::Lifetime.h(at) + 0.12 * 1.7346,
+            theta: Knob::Lifetime.h(at) + 0.12 * logit_with_slips(0.85),
             slope: 0.12,
             sd,
             slope_sd: None,
@@ -1021,15 +1087,17 @@ mod tests {
     }
 
     /// The single-run draw is unchanged by the planned order (values recorded from
-    /// the code before the change).
+    /// the code before the change; re-recorded when the goal point began to count
+    /// slips: the rating is still 0.6, but the curve behind it has its midpoint about
+    /// 1.5% harder now, so the same picks land on slightly harder values).
     #[test]
     fn unplanned_pick_run_is_unchanged() {
         let r = Rating::new(cfg(), Some(rated(0.6, 0.05, None, None)));
         let mut rng = Rng::new(11);
         let got: Vec<(f32, Pick)> = (0..6).map(|_| r.pick_run(&mut rng, Mix::Push)).map(|(v, _, k)| (v, k)).collect();
-        let want = [(0.5887758, Pick::Near), (0.5169579, Pick::Stretch), (0.60640925, Pick::Near)]
+        let want = [(0.5799616, Pick::Near), (0.5092189, Pick::Stretch), (0.59733105, Pick::Near)]
             .into_iter()
-            .chain([(0.62342125, Pick::Near), (0.63956356, Pick::Near), (0.588328, Pick::Near)])
+            .chain([(0.61408836, Pick::Near), (0.629989, Pick::Near), (0.57952046, Pick::Near)])
             .collect::<Vec<_>>();
         assert_eq!(got, want);
     }
@@ -1076,7 +1144,7 @@ mod tests {
         let p =
             Prior { theta: 0.4, slope: 0.15, sd: 0.07, slope_sd: Some(0.25), days: 4.0, fastest: None, last_run: None };
         let e = Rating::new(cfg(), Some(p)).estimate();
-        assert_eq!((e.h_goal, e.sd), (0.13980983, 0.10630146));
+        assert_eq!((e.h_goal, e.sd), (0.12191627, 0.10630146));
     }
 
     /// A player of fixed skill plays `runs` runs in a row, each started from the
@@ -1112,7 +1180,7 @@ mod tests {
             let e = r.estimate();
             values.push(r.value());
             prior = Some(Prior {
-                theta: e.theta,
+                theta: r.carry_theta(),
                 slope: e.slope,
                 sd: e.sd,
                 slope_sd: Some(e.slope_sd),

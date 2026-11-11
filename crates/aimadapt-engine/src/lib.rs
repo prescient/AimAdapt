@@ -325,6 +325,11 @@ mod core_copies {
     #[test]
     fn core_copies_of_sim_values_match() {
         assert!((aimadapt_core::insights::LAPSE - f64::from(aimadapt_sim::adaptive::LAPSE)).abs() < 1e-6);
+        for chance in [0.6f32, 0.85, 0.95] {
+            let sim = f64::from(aimadapt_sim::adaptive::logit_with_slips(chance));
+            let core = aimadapt_core::insights::logit_with_slips(f64::from(chance));
+            assert!((sim - core).abs() < 1e-5, "{chance}: {sim} vs {core}");
+        }
         let sample_s = 1.0 / f64::from(aimadapt_sim::sim::SAMPLE_HZ);
         assert!((aimadapt_core::insights::SAMPLE_S - sample_s).abs() < 1e-9);
     }

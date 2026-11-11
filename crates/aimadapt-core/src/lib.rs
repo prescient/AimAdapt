@@ -12,6 +12,7 @@ pub mod programs;
 pub mod progress;
 pub mod replay;
 pub mod results;
+mod slips;
 pub mod summary;
 pub mod telemetry;
 pub mod trainer_runs;

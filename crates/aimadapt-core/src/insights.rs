@@ -646,6 +646,13 @@ pub(crate) fn breakthroughs(runs: &[Held]) -> Vec<bool> {
 /// in aimadapt-engine, which has both crates, checks.
 pub const LAPSE: f64 = 0.04;
 
+/// The curve's logit at which the chance of success, slips included, is `chance`.
+/// Must match `aimadapt_sim::adaptive::logit_with_slips`, which the same test checks.
+pub fn logit_with_slips(chance: f64) -> f64 {
+    let q = ((chance - LAPSE / 2.0) / (1.0 - LAPSE)).clamp(0.01, 0.99);
+    (q / (1.0 - q)).ln()
+}
+
 fn knob_h(knob: &str, v: f64) -> f64 {
     Knob::from_id(knob).h(v)
 }
@@ -657,10 +664,7 @@ fn knob_value(knob: &str, h: f64) -> f64 {
 fn speed_curve(knob: &str, theta: f64, slope: f64, decided: &[&T]) -> Curve {
     let chance = |h: f64| LAPSE / 2.0 + (1.0 - LAPSE) / (1.0 + ((h - theta) / slope).exp());
     // Value at a given chance, inverting the model.
-    let at = |p: f64| {
-        let q = ((p - LAPSE / 2.0) / (1.0 - LAPSE)).clamp(1e-3, 1.0 - 1e-3);
-        knob_value(knob, theta - slope * (q / (1.0 - q)).ln())
-    };
+    let at = |p: f64| knob_value(knob, theta - slope * logit_with_slips(p));
     let (h95, h20) = (knob_h(knob, at(0.95)), knob_h(knob, at(0.2)));
     let model = (0..=40)
         .map(|i| {

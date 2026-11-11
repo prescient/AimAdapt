@@ -98,7 +98,7 @@ pub(crate) fn clicking_run(rating: f64) -> EngineRun {
         rating_low: Some(rating * 0.95),
         rating_high: Some(rating * 1.05),
         start_rating: Some(rating + 0.1),
-        theta: Some(-(rating.ln()) + 0.12 * 1.7346),
+        theta: Some(-(rating.ln()) + 0.12 * logit_with_slips(0.85)),
         slope: Some(0.12),
         rating_sd: Some(0.05),
         fastest: Some(rating * 0.8),
@@ -196,6 +196,18 @@ fn fitts_chart_keeps_the_newest_flicks() {
     let f = i.fitts.as_ref().unwrap();
     assert_eq!(f.points.len(), 400);
     assert!(f.points.iter().any(|p| p.distance_deg > 100.0), "the newest run's flicks are left out");
+}
+
+/// Bug: the chart's 85% mark sat about 1% easier than the rating in the page header,
+/// because the rating ignored slips and the chart counted them. A run stores a curve
+/// through its rating, and the chart's mark must land on it.
+#[test]
+fn the_charts_85_mark_is_the_rating() {
+    let mut db = Db::open_in_memory().unwrap();
+    save(&mut db, 1, &clicking_run(0.62));
+    let i = scenario(&db, "Timed Flicks").unwrap().unwrap();
+    let c = i.curve.as_ref().unwrap();
+    assert!((c.at85 / 0.62 - 1.0).abs() < 1e-6, "{} vs 0.62", c.at85);
 }
 
 #[test]

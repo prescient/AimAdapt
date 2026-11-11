@@ -37,7 +37,7 @@ Requirements: Windows 10 or 11 with the WebView2 runtime (included with Windows 
 
 ## Adaptive mode
 
-Each scenario has one difficulty setting, chosen for what it trains: target lifetime for timed clicking, kill pace for grids, untimed flicks and speed switching, target size for precision (Micro Flicks, Precise Track), and target speed for tracking and strafe clicking. Adaptive mode estimates the value you succeed at 85% of the time, along with how certain that estimate is.
+Each scenario has one difficulty setting, chosen for what it trains: target lifetime for timed clicking, kill pace for grids, untimed flicks and speed switching, target size for precision (Micro Flicks, Precise Track), and target speed for tracking and strafe clicking. Adaptive mode estimates the value you succeed at 85% of the time, slips included, along with how certain that estimate is.
 
 - **How it updates:** a Bayesian estimate similar to Glicko. A surprising result moves the rating more than an expected one. The next run starts from your last rating on the same version of the scenario, including how well your consistency is known, so a steady player's rating holds still between runs. The uncertainty grows with the days since you last played. Changing a scenario's settings starts it over.
 - **Calibration run:** your first adaptive run on a scenario changes difficulty as you play, to find your level within the run. A scenario you come back to after several days gets one again, starting from your old rating.
@@ -123,7 +123,7 @@ Help is at the bottom of the sidebar, and every page links to its section of the
 Every run stores each target, each shot, tracking samples 30 times a second, a 240 Hz aim trace, and where the targets were 60 times a second. Each scenario's page shows the rating by run on its Overview tab and the rest on its Insights tab:
 
 - **Rating by run** with its likely range, and how it moved during the last run.
-- **Speed vs. hit rate curve:** where you're reliable (95%), your 85% rating, and the coin-flip point (50%), with observed hit rates.
+- **Speed vs. hit rate curve:** where you're reliable (95%), your 85% rating (the same figure as in the page header), and the coin-flip point (50%), with observed hit rates.
 - **Flick speed:** time to kill vs. difficulty, as a Fitts' law fit and throughput in bits per second.
 - **By direction and distance:** hit rate and median time in 8 flick directions and 5 distance bands.
 - **Shot placement** relative to the target, aligned to the flick direction: overshooting vs. stopping short, and any vertical bias.

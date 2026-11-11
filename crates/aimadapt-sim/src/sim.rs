@@ -319,7 +319,9 @@ pub struct AdaptiveSummary {
     pub range: (f32, f32),
     /// The rating going in.
     pub start_value: f32,
-    /// Model parameters, kept to start the next run (log scale).
+    /// Model parameters, kept to start the next run (log scale). `theta` is the curve
+    /// midpoint that, with `slope`, puts the goal rate (slips counted) exactly at the
+    /// unclamped rating: `h(value) = theta - slope * logit_with_slips(goal)`.
     pub theta: f32,
     pub slope: f32,
     /// Standard deviation of ln(slope).

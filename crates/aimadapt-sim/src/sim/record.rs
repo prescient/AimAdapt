@@ -23,7 +23,7 @@ impl Sim {
                 value: r.value(),
                 range: r.range(),
                 start_value: r.start_value,
-                theta: e.theta,
+                theta: r.carry_theta(),
                 slope: e.slope,
                 slope_sd: e.slope_sd,
                 sd: e.sd,

@@ -21,7 +21,9 @@ pub struct EngineRun {
     pub rating_low: Option<f64>,
     pub rating_high: Option<f64>,
     pub start_rating: Option<f64>,
-    /// Model parameters (log scale), to start the next run from.
+    /// Model parameters (log scale), to start the next run from. `theta` is the curve
+    /// midpoint that, with `slope`, puts the goal rate (slips counted, see
+    /// [`crate::insights::logit_with_slips`]) exactly at `rating`.
     pub theta: Option<f64>,
     pub slope: Option<f64>,
     /// Standard deviation of ln(slope), so the next run knows how well the slope is
@@ -408,7 +410,7 @@ ALTER TABLE engine_targets ADD COLUMN chance REAL;
 ALTER TABLE engine_targets ADD COLUMN pick TEXT;
 "#;
 
-fn timeline_json(points: &[(f64, f64)]) -> String {
+pub(crate) fn timeline_json(points: &[(f64, f64)]) -> String {
     let inner: Vec<String> = points.iter().map(|(t, l)| format!("[{t:.3},{l:.2}]")).collect();
     format!("[{}]", inner.join(","))
 }

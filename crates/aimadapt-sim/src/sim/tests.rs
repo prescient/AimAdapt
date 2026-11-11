@@ -814,7 +814,7 @@ fn adaptive_tracking_rates_target_speed() {
 
 fn prior_at(knob: Knob, value: f32, fastest: Option<f32>) -> Prior {
     Prior {
-        theta: knob.h(value) + 0.12 * (0.85f32 / 0.15).ln(),
+        theta: knob.h(value) + 0.12 * crate::adaptive::logit_with_slips(0.85),
         slope: 0.12,
         sd: 0.08,
         slope_sd: None,
@@ -822,6 +822,31 @@ fn prior_at(knob: Knob, value: f32, fastest: Option<f32>) -> Prior {
         fastest,
         last_run: Some((Pick::Near, 0.85)),
     }
+}
+
+/// Bug: a run stored the posterior mean of theta, so its stored curve (theta and slope,
+/// which the next run and the Insights chart start from) did not pass through the rating.
+#[test]
+fn a_run_keeps_a_curve_through_its_rating() {
+    let mut s = no_countdown(Scenario::default());
+    s.timing.duration_s = 20.0;
+    let mut sim = Sim::adaptive(s, 4, Some(prior_at(Knob::Lifetime, 0.8, None)), Mix::Balanced);
+    let mut i = 0;
+    while sim.phase() != Phase::Finished {
+        // Kill every other target; let the rest time out.
+        if let Some(t) = sim.targets().first()
+            && i % 40 == 0
+        {
+            let at = t.pos;
+            sim.step(FRAME, shoot(at));
+        } else {
+            sim.step(FRAME, idle());
+        }
+        i += 1;
+    }
+    let a = sim.result().adaptive.unwrap();
+    let through = a.theta - a.slope * crate::adaptive::logit_with_slips(a.goal);
+    assert!((a.knob.h(a.value) - through).abs() < 1e-4, "{} vs {through}", a.knob.h(a.value));
 }
 
 /// Planned order: five runs of one drill on Balanced play at level, at level,

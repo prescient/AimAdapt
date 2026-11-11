@@ -117,7 +117,14 @@ CREATE INDEX runs_source ON runs (source, scenario);
     crate::telemetry::MIGRATION_REPLAY,
     crate::telemetry::MIGRATION_SLOPE_SD,
     crate::telemetry::MIGRATION_EVIDENCE,
+    crate::slips::MIGRATION,
 ];
+
+/// Steps in Rust that run right after the SQL of the given schema version, in the same
+/// transaction (a migration that has to do arithmetic the database can't).
+const RUST_STEPS: &[(usize, MigrationStep)] = &[(10, crate::slips::convert_ratings)];
+
+type MigrationStep = fn(&Transaction) -> Result<(), DbError>;
 
 /// Value of the `Source` field (and `runs.source`) for runs played in AimAdapt's
 /// engine. Stored in every run, so it keeps the app's old name (RustyAim).
@@ -349,6 +356,11 @@ fn migrate(conn: &mut Connection) -> Result<(), DbError> {
     for (i, sql) in (0i64..).zip(MIGRATIONS).skip(current as usize) {
         let tx = conn.transaction()?;
         tx.execute_batch(sql)?;
+        for (version, step) in RUST_STEPS {
+            if *version as i64 == i + 1 {
+                step(&tx)?;
+            }
+        }
         tx.pragma_update(None, "user_version", i + 1)?;
         tx.commit()?;
     }
@@ -511,6 +523,7 @@ mod tests {
         let db = Db::open(&path).unwrap();
         assert!(db.schema_version().unwrap() >= 8);
         let stored = db.last_rating("Timed Flicks").unwrap().expect("the old run is still there");
+        // This row has no goal, so the version 10 conversion (which needs one) leaves it as it was.
         assert_eq!((stored.rating, stored.theta, stored.slope, stored.sd), (0.6, 0.7, 0.12, 0.05));
         assert_eq!(stored.slope_sd, None, "an old run has no slope uncertainty");
     }
@@ -545,6 +558,321 @@ mod tests {
         let evidence: Option<f64> =
             db.conn().query_row("SELECT evidence FROM engine_runs WHERE run_id = 1", [], |r| r.get(0)).unwrap();
         assert_eq!(evidence, None, "an old run has no recorded length");
+    }
+
+    /// One engine run of a version 9 database, as the old code stored it. `h_goal` is
+    /// the unclamped goal point on the log scale (bigger is harder).
+    struct OldRun {
+        knob: &'static str,
+        goal: f64,
+        slope: f64,
+        h_goal: f64,
+        sd: Option<f64>,
+        /// The stored rating, when the run was held at a limit instead of at `h_goal`.
+        held_at: Option<f64>,
+        start: Option<f64>,
+        timeline: Option<&'static str>,
+        theta: Option<f64>,
+    }
+
+    impl OldRun {
+        /// The rating as stored: at the limit when held there, else at the goal point.
+        fn rating(&self) -> f64 {
+            self.held_at.unwrap_or_else(|| value_of(self.knob, self.h_goal))
+        }
+
+        fn lifetime(h_goal: f64) -> OldRun {
+            OldRun {
+                knob: "lifetime",
+                goal: 0.85,
+                slope: 0.12,
+                h_goal,
+                sd: None,
+                held_at: None,
+                start: None,
+                timeline: None,
+                theta: None,
+            }
+        }
+    }
+
+    /// The knob value at log difficulty `h`, written out here on purpose (see `Knob::value`).
+    fn value_of(knob: &str, h: f64) -> f64 {
+        if knob == "target_speed" { h.exp() } else { (-h).exp() }
+    }
+
+    fn h_of(knob: &str, v: f64) -> f64 {
+        if knob == "target_speed" { v.ln() } else { -v.ln() }
+    }
+
+    /// The logit of the success chance with slips counted, written out here on purpose.
+    fn logit_counting_slips(goal: f64) -> f64 {
+        let q = (goal - 0.02) / 0.96;
+        (q / (1.0 - q)).ln()
+    }
+
+    /// A timeline as the migration writes it: `dh` easier, two decimals, except points
+    /// at `limit` (when there is one), which stay.
+    fn shifted_timeline(knob: &str, dh: f64, limit: Option<f64>, old: &[(f64, f64)]) -> String {
+        let pts: Vec<String> = old
+            .iter()
+            .map(|&(t, v)| {
+                let at_limit = limit.is_some_and(|l| (v - l).abs() < 0.005 + 1e-9);
+                format!("[{t:.3},{:.2}]", if at_limit { v } else { value_of(knob, h_of(knob, v) - dh) })
+            })
+            .collect();
+        format!("[{}]", pts.join(","))
+    }
+
+    /// The runs of [`version_9_runs`] that have field rows.
+    const WITH_FIELDS: [i64; 4] = [1, 2, 3, 8];
+
+    fn rounded(v: f64, places: usize) -> f64 {
+        format!("{v:.places$}").parse().unwrap()
+    }
+
+    fn field_texts(conn: &Connection, id: i64) -> Vec<(String, String)> {
+        let mut stmt = conn.prepare("SELECT key, value FROM run_fields WHERE run_id = ?1 ORDER BY key").unwrap();
+        stmt.query_map([id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().collect::<Result<_, _>>().unwrap()
+    }
+
+    type Stored = (f64, Option<f64>, Option<f64>, Option<f64>, Option<f64>, Option<String>);
+
+    fn stored(conn: &Connection, table: &str, id: i64) -> Stored {
+        conn.query_row(
+            &format!(
+                "SELECT rating, rating_low, rating_high, start_rating, theta, level_timeline FROM {table}
+                 WHERE run_id = ?1"
+            ),
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
+        )
+        .unwrap()
+    }
+
+    fn near(a: f64, b: f64, what: &str) {
+        assert!((a - b).abs() < 1e-9 * b.abs().max(1.0), "{what}: {a} vs {b}");
+    }
+
+    /// Version 9 rows, as the old code stored them: runs 1 to 8 except 5, which is a
+    /// standard run with no rating.
+    fn version_9_runs() -> Vec<(i64, OldRun)> {
+        let limit = 0.25; // a lifetime limit: h = ln 4 = 1.3863
+        vec![
+            // Lifetime, with a range, a start, a timeline and a theta.
+            (
+                1,
+                OldRun {
+                    sd: Some(0.05),
+                    start: Some(0.9),
+                    timeline: Some("[[0.000,0.90],[30.000,0.70],[60.000,0.61]]"),
+                    theta: Some(0.7),
+                    ..OldRun::lifetime(0.5)
+                },
+            ),
+            // Target speed, another goal and slope.
+            (
+                2,
+                OldRun {
+                    knob: "target_speed",
+                    goal: 0.8,
+                    slope: 0.2,
+                    sd: Some(0.04),
+                    start: Some(42.0),
+                    timeline: Some("[[0.000,42.00],[60.000,50.00]]"),
+                    theta: Some(4.0),
+                    ..OldRun::lifetime(50f64.ln())
+                },
+            ),
+            // Held at the hardest limit, with the real point well past it.
+            (
+                3,
+                OldRun {
+                    sd: Some(0.1),
+                    held_at: Some(limit),
+                    start: Some(limit),
+                    timeline: Some("[[0.000,0.25],[30.000,0.40],[60.000,0.25]]"),
+                    theta: Some(1.7),
+                    ..OldRun::lifetime(1.5)
+                },
+            ),
+            // Held at the limit, but the new goal point falls just inside it.
+            (
+                4,
+                OldRun {
+                    sd: Some(0.1),
+                    held_at: Some(limit),
+                    start: Some(0.4),
+                    timeline: Some("[[0.000,0.40],[60.000,0.25]]"),
+                    theta: Some(1.6),
+                    ..OldRun::lifetime(1.40)
+                },
+            ),
+            // Held at the easiest limit (1.5 s), with the real point easier still.
+            (
+                8,
+                OldRun {
+                    sd: Some(0.1),
+                    held_at: Some(1.5),
+                    start: Some(1.5),
+                    timeline: Some("[[0.000,1.20],[60.000,1.50]]"),
+                    theta: Some(-0.4),
+                    ..OldRun::lifetime(-0.6)
+                },
+            ),
+            // No range, start, theta or timeline.
+            (6, OldRun::lifetime(0.2)),
+            // An empty timeline.
+            (7, OldRun { timeline: Some(""), theta: Some(0.5), ..OldRun::lifetime(0.3) }),
+        ]
+    }
+
+    /// The tenth migration makes stored ratings count slips: the goal point moves to where
+    /// the chance of success, slips included, is the goal, and the stored theta puts the
+    /// curve through it. A version 9 database must keep a copy of what it had, convert
+    /// each rating once, and leave a rating that was held at a scenario limit there.
+    #[test]
+    fn a_version_9_database_converts_its_ratings_to_count_slips() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.db");
+        let conn = Connection::open(&path).unwrap();
+        for sql in &MIGRATIONS[..9] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 9).unwrap();
+        let old_runs = version_9_runs();
+        for (id, o) in &old_runs {
+            conn.execute(
+                "INSERT INTO runs (id, file_name, scenario, mode, finished_at, imported_at, score)
+                 VALUES (?1, ?2, 'Timed Flicks', ?3, '2026-11-01T07:00:00.000', '2026-11-01T07:00:00.000', ?4)",
+                params![id, format!("aimadapt/test/{id}"), MODE_ADAPTIVE, rounded(o.rating(), 3)],
+            )
+            .unwrap();
+            // Some runs also keep the rating as text fields, the way the trainer saves it; the
+            // others have no field rows.
+            if WITH_FIELDS.contains(id) {
+                let start = o.start.unwrap_or(0.0);
+                let fields = [
+                    ("Score", format!("{:.3}", o.rating())),
+                    ("Rating", format!("{:.4}", o.rating())),
+                    ("Start Rating", format!("{start:.4}")),
+                    ("Run Value", "0.5000".to_string()),
+                ];
+                for (key, v) in fields {
+                    let sql = "INSERT INTO run_fields (run_id, key, value) VALUES (?1, ?2, ?3)";
+                    conn.execute(sql, params![id, key, v]).unwrap();
+                }
+            }
+            let rating = o.rating();
+            let low = o.sd.map(|sd| value_of(o.knob, o.h_goal - sd));
+            let high = o.sd.map(|sd| value_of(o.knob, o.h_goal + sd));
+            conn.execute(
+                "INSERT INTO engine_runs (run_id, base_scenario, category, adaptive, knob, goal, rating, rating_low,
+                                          rating_high, start_rating, theta, slope, rating_sd, level_timeline)
+                 VALUES (?1, 'Timed Flicks', 'clicking', 1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                params![id, o.knob, o.goal, rating, low, high, o.start, o.theta, o.slope, o.sd, o.timeline],
+            )
+            .unwrap();
+        }
+        // A standard run has no rating at all.
+        conn.execute_batch(
+            "INSERT INTO runs (id, file_name, scenario, mode, finished_at, imported_at)
+             VALUES (5, 'aimadapt/test/5', 'Standard', 'RustyAim', '2026-11-01T07:00:00.000', '2026-11-01T07:00:00.000');
+             UPDATE runs SET score = 7.5 WHERE id = 5;
+             INSERT INTO run_fields (run_id, key, value) VALUES (5, 'Score', '7.500'), (5, 'Rating', '0.6000');
+             INSERT INTO engine_runs (run_id, base_scenario, category, adaptive, goal, level_timeline)
+             VALUES (5, 'Standard', 'clicking', 0, 0.85, '[[0.000,1.00]]');",
+        )
+        .unwrap();
+        let before: Vec<Stored> = old_runs.iter().map(|(id, _)| stored(&conn, "engine_runs", *id)).collect();
+        drop(conn);
+
+        let db = Db::open(&path).unwrap();
+        assert_eq!(db.schema_version().unwrap(), 10);
+        for ((id, o), old) in old_runs.iter().zip(&before) {
+            let dh = o.slope * (logit_counting_slips(o.goal) - (o.goal / (1.0 - o.goal)).ln());
+            let got = stored(db.conn(), "engine_runs", *id);
+            assert_eq!(&stored(db.conn(), "engine_ratings_v9", *id), old, "run {id}: the copy keeps the old values");
+
+            // A held rating stays at its limit unless the real point has moved inside it.
+            let new_h = o.h_goal - dh;
+            let want = o.held_at.map_or(new_h, |l| {
+                let lh = h_of(o.knob, l);
+                if o.h_goal > lh { new_h.min(lh) } else { new_h.max(lh) }
+            });
+            near(got.0, value_of(o.knob, want), &format!("run {id} rating"));
+            let (low, high) = (o.sd.map(|sd| o.h_goal - sd - dh), o.sd.map(|sd| o.h_goal + sd - dh));
+            near(got.1.unwrap_or(0.0), low.map_or(0.0, |h| value_of(o.knob, h)), &format!("run {id} low"));
+            near(got.2.unwrap_or(0.0), high.map_or(0.0, |h| value_of(o.knob, h)), &format!("run {id} high"));
+            let start_stays = o.held_at.is_some_and(|l| o.start.is_some_and(|s| (s - l).abs() < 1e-9));
+            let want_start = o.start.map(|s| if start_stays { s } else { value_of(o.knob, h_of(o.knob, s) - dh) });
+            near(got.3.unwrap_or(0.0), want_start.unwrap_or(0.0), &format!("run {id} start"));
+            assert_eq!(got.3.is_some(), o.start.is_some());
+            // The new theta is the new goal point plus slope * logit(goal with slips).
+            assert_eq!(got.4.is_some(), o.theta.is_some(), "run {id} theta");
+            if let Some(t) = got.4 {
+                near(t, o.h_goal + o.slope * (o.goal / (1.0 - o.goal)).ln(), &format!("run {id} theta"));
+                if o.held_at.is_none() {
+                    let through = value_of(o.knob, t - o.slope * crate::insights::logit_with_slips(o.goal));
+                    near(through, got.0, &format!("run {id} curve through the rating"));
+                }
+            }
+            let want_timeline = match o.timeline {
+                Some(text) if !text.is_empty() => {
+                    Some(shifted_timeline(o.knob, dh, o.held_at, &crate::telemetry::parse_timeline(text)))
+                }
+                text => text.map(str::to_string),
+            };
+            // The score and the text fields hold the rating too: the new one, rounded as the trainer
+            // saves it. Run Value is a played value and stays.
+            let score_of = |table: &str| -> f64 {
+                let sql =
+                    format!("SELECT score FROM {table} WHERE {} = ?1", if table == "runs" { "id" } else { "run_id" });
+                db.conn().query_row(&sql, [id], |r| r.get(0)).unwrap()
+            };
+            assert_eq!(score_of("runs"), rounded(got.0, 3), "run {id} score");
+            assert_eq!(score_of("engine_ratings_v9"), rounded(o.rating(), 3), "run {id} copy keeps the score");
+            let fields = field_texts(db.conn(), *id);
+            if WITH_FIELDS.contains(id) {
+                let start = want_start.unwrap();
+                let want = [
+                    ("Rating".to_string(), format!("{:.4}", got.0)),
+                    ("Run Value".to_string(), "0.5000".to_string()),
+                    ("Score".to_string(), format!("{:.3}", got.0)),
+                    ("Start Rating".to_string(), format!("{start:.4}")),
+                ];
+                assert_eq!(fields, want, "run {id} fields");
+            } else {
+                assert!(fields.is_empty(), "run {id} has no field rows");
+            }
+            assert_eq!(got.5, want_timeline, "run {id} timeline");
+        }
+        // The standard run is untouched and not copied.
+        let (timeline, copied): (String, i64) = db
+            .conn()
+            .query_row(
+                "SELECT level_timeline, (SELECT COUNT(*) FROM engine_ratings_v9 WHERE run_id = 5) FROM engine_runs
+                 WHERE run_id = 5",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((timeline.as_str(), copied), ("[[0.000,1.00]]", 0));
+        let score: f64 = db.conn().query_row("SELECT score FROM runs WHERE id = 5", [], |r| r.get(0)).unwrap();
+        assert_eq!(score, 7.5, "a standard run's score is a game score");
+        assert_eq!(
+            field_texts(db.conn(), 5),
+            [("Rating".to_string(), "0.6000".to_string()), ("Score".to_string(), "7.500".to_string())]
+        );
+        let copies: i64 = db.conn().query_row("SELECT COUNT(*) FROM engine_ratings_v9", [], |r| r.get(0)).unwrap();
+        assert_eq!(copies, old_runs.len() as i64, "every rated run is copied");
+
+        // Opening it again doesn't convert a second time.
+        let after: Vec<Stored> = old_runs.iter().map(|(id, _)| stored(db.conn(), "engine_runs", *id)).collect();
+        drop(db);
+        let db = Db::open(&path).unwrap();
+        let again: Vec<Stored> = old_runs.iter().map(|(id, _)| stored(db.conn(), "engine_runs", *id)).collect();
+        assert_eq!(after, again);
     }
 
     fn put(p: &std::path::Path, text: &str) {

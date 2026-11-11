@@ -6,7 +6,7 @@ AimAdapt is an aim trainer for Windows. It rates you in real units, keeps each d
 
 **Status:** `todo` · `doing` · `done` · `spike` (research before committing)
 
-Last reviewed: Nov 10, 2026 (after the layout review and the adaptive review; every package in [the review plan](docs/plans/2026-11-review-changes.md) is done, and finished items were moved to Done).
+Last reviewed: Nov 11, 2026 (after the layout review, the adaptive review and the change that makes the rating count slips; every package in [the review plan](docs/plans/2026-11-review-changes.md) is done, and finished items were moved to Done).
 
 ---
 
@@ -93,11 +93,12 @@ Last reviewed: Nov 10, 2026 (after the layout review and the adaptive review; ev
   - Insights adds centering while on target and, on lifetime ratings, the share that's reaction time.
 - [x] Replaced the first version, which used 0–100 levels and a staircase.
 - [x] Ranges and noise on the figures derived from ratings (plan A7). Every change on Progress › Skills (the skill profile, each day's change against last week, reps and carry-over, the biggest gain) has a likely range built from the ratings' stored ranges (`rating_sd`, or half the distance between `rating_low` and `rating_high` on the knob's log scale), and one with zero inside its range is greyed as noise. A change from runs with no stored range shows no range and is never flagged. Carry-over has a By drill summary, and both it and a least improved skill need three sessions. Saturday's day ranks untrained skills first, then skills with under three sessions (fewest first), then the rest by change. "Weakest" is no longer used for a gain. Ratings and scoring are unchanged and there is no migration.
+- [x] The rating now means the difficulty the player really hits 85% of the time, slips included (before, it was the 85% point of the curve before the 4% allowance for slips, so the true chance of success at the rating was about 83.6%). Every rating reads about 1 to 3% easier, once. The Insights chart's 85% mark is the same figure as the rating in the page header (the two differed by a percent or more because of the slips and because the chart drew its curve from numbers that were not quite the ones behind the rating). A run starts from the rating the last run ended on (it started up to a few percent harder while the slope was uncertain). Schema version 10 converts saved ratings the first time the database opens, so history, charts and changes stay on one scale: a rating held at a scenario's limit stays there, best held figures are played values and do not change, and the old figures are kept in `engine_ratings_v9`. The conversion has been run on bot data only.
 
 ### To do
 - [ ] `spike` P1 Tune against real play. The default easy/hard ranges, first guesses and the "consistent vs. fades gradually" cut-off are educated guesses that have only been checked with the bot.
 - [ ] `todo` P3 The Insights charts cover the last ten runs whatever their version, so for a few runs after an edit they mix old and new settings. Keep them to the current version, as the ratings are.
-- [ ] `spike` P2 Decide which 85% the rating means. The rating is the 85% point of the fitted curve before the 4% allowance for slips, so the true chance of success at the rating is about 83.6%. The Speed vs. hit rate chart marks 85% with the slips counted, so it sits about 1% easier than the rating in the page header (0.55 s beside 0.54 s; 14.9 °/s beside 15.0 °/s). Moving the rating to the chart's definition would shift every rating by about that much, so it needs a decision before any change.
+- [ ] `spike` P3 Targets within a run are picked from the curve's mean midpoint and typical steepness, which sits a little harder than the rating while the steepness is still uncertain. Check whether picks should use the same curve the rating is stored with.
 - [ ] `todo` P3 Planned against actual works its gap out from the unrounded figures, so a row can read 86% planned, 86% actual and a gap of +1 pt. Work the gap out from the figures as shown.
 
 ## 4. Programs and workouts
