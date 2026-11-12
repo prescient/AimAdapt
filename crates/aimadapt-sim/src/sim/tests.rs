@@ -2845,3 +2845,48 @@ fn the_cost_doesnt_restart_the_regen_delay() {
     // after the shot, so 59 + 10. If the hop at 0.05 s had restarted the wait it would still be 59.
     assert_eq!(sim.targets()[0].health, 69.0);
 }
+
+/// A bot that can't be hurt, standing still with one hop it uses only when hit: a reaction to damage
+/// wasn't played. Hits on it count with the weapon's damage.
+fn flincher(threshold: f32) -> Scenario {
+    use crate::motion::{Abilities, Ability, Motion, Reaction};
+    let reaction = Reaction { threshold, reset_s: 1.0, ignore_chance: 0.0, delay_s: [0.05, 0.05] };
+    let hop =
+        Ability { max_charges: 9, spawn_charges: 9, up_speed: 4.0, reaction: Some(reaction), ..Ability::default() };
+    let abilities =
+        Abilities { press_every_s: 0.05, chance: 0.0, window_s: [1.0, 1.0], list: vec![hop], ..Default::default() };
+    let motion = Motion { gravity: 8.0, abilities: Some(abilities), ..Default::default() };
+    let mut s = on_a_floor(Vec::new(), Some(motion));
+    s.targets.health = 1000.0;
+    s.weapon.damage = 10.0;
+    s
+}
+
+/// Plan K15d, through the sim: with a threshold of 30 under shots of 10, the reaction follows the third
+/// hit and not the first two, whether the bot can't be hurt through the world or through its kind.
+#[test]
+fn a_bot_that_cant_be_hurt_reacts_to_the_third_hit_of_ten() {
+    for per_kind in [false, true] {
+        let mut s = flincher(30.0);
+        let w = s.world.as_mut().unwrap();
+        if per_kind {
+            let motion = w.motion.take();
+            w.kinds = vec![crate::world::WorldKind { health: 1000.0, invincible: true, motion, ..Default::default() }];
+            w.slots = vec![vec![(0, 1.0)]];
+        } else {
+            w.invincible = true;
+        }
+        let mut sim = Sim::new(s, 1);
+        for hit in 1..=3u32 {
+            let at = sim.targets()[0].pos;
+            sim.step(FRAME, shoot(at));
+            // A quarter of a second is well past the reaction's wait of 0.05 s.
+            for _ in 0..(0.25 / FRAME) as usize {
+                sim.step(FRAME, idle());
+            }
+            assert_eq!(sim.stats().hits, hit, "per kind {per_kind}");
+            assert_eq!(uses_of(&sim), u32::from(hit == 3), "after hit {hit}, per kind {per_kind}");
+        }
+        assert_eq!(sim.stats().damage_done, 30.0, "hits on a bot that can't be hurt count with the weapon's damage");
+    }
+}

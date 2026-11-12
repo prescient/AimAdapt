@@ -23,7 +23,7 @@ fn read(name: &str) -> Sce {
 #[test]
 fn finds_every_fixture() {
     let files = find_files(&[fixtures()]);
-    assert_eq!(files.len(), 13);
+    assert_eq!(files.len(), 14);
     assert!(files.iter().all(|f| f.extension().unwrap() == "sce"));
 }
 
@@ -416,6 +416,9 @@ fn imported_fixtures_keep_their_fingerprints() {
     // Plan K15c: a bot with a dash that goes up or down has an aim lift. High Blink had no stored best
     // before, so its fingerprint is pinned the way it was first taken.
     assert_eq!(import(&path("High Blink")).unwrap().scenario.fingerprint(), "a3090bfdae8ca8f6");
+    // Plan K15d: a reaction to damage is left out of the file when an ability has none, so the others
+    // above kept theirs. Flinch Kite is the first file with one.
+    assert_eq!(import(&path("Flinch Kite")).unwrap().scenario.fingerprint(), "332d0b6934b5c9eb");
 }
 
 /// Regression test: CI failed on every push from plan K3 on. Git on Windows checked the
@@ -445,6 +448,7 @@ fn git_keeps_the_fixtures_bytes() {
         "Costly Hop",
         "Quiet Guns",
         "High Blink",
+        "Flinch Kite",
     ] {
         assert!(!crlf(name), "{name} was given CRLF line ends");
     }
@@ -722,4 +726,63 @@ fn bots_jump_use_jetpacks_and_fly_by_keys() {
     for (kind, (lo, hi)) in range.into_iter().enumerate() {
         assert!(hi - lo > 0.4, "kind {kind} moved up and down: {lo}..{hi}");
     }
+}
+
+/// Plan K15d on one made-up file: a flying ball that can't be hurt and blinks only when it is hit. It
+/// imports with the reaction its numbers give (ten shots of 5 make a trigger, a wait of 0.1 to 0.3 s), and
+/// in play never blinks with no shot fired, but blinks about once for every ten hits when fire is held on
+/// it. Played on frames of 1/120 s and on uneven ones.
+#[test]
+fn a_ball_that_blinks_only_when_hit_does_so_about_once_for_every_ten_hits() {
+    let i = import(&path("Flinch Kite")).unwrap();
+    assert!(i.scenario.problems().is_empty());
+    let w = i.scenario.world.as_ref().unwrap();
+    let ab = w.motion.as_ref().unwrap().abilities.as_ref().unwrap();
+    assert_eq!((ab.chance, ab.list.len()), (0.0, 1), "it never presses its key");
+    let a = &ab.list[0];
+    assert_eq!((a.duration_s, a.max_charges), (0.12, 6));
+    assert_eq!(
+        a.reaction,
+        Some(aimadapt_sim::motion::Reaction { threshold: 50.0, reset_s: 0.5, ignore_chance: 0.0, delay_s: [0.1, 0.3] })
+    );
+    assert_eq!(i.scenario.weapon.damage, 5.0);
+
+    for seed in [None, Some(1), Some(2), Some(3)] {
+        let (quiet_blinks, quiet_hits) = blinks_while(&i.scenario, seed, false);
+        assert_eq!((quiet_blinks, quiet_hits), (0, 0), "seed {seed:?}: no shot, no blink");
+        let (blinks, hits) = blinks_while(&i.scenario, seed, true);
+        println!("seed {seed:?}: {hits} hits, {blinks} blinks");
+        assert!(hits >= 200, "seed {seed:?}: {hits} hits");
+        let tenths = hits as f32 / 10.0;
+        assert!(
+            blinks as f32 >= 0.6 * tenths && blinks as f32 <= 1.2 * tenths,
+            "seed {seed:?}: {blinks} blinks for {hits} hits"
+        );
+    }
+}
+
+/// Plays 12 s of the run, with fire held on the ball (aimed where it is each frame) or not, and counts the
+/// blinks (a burst above 15 m/s) and the hits.
+fn blinks_while(s: &aimadapt_sim::Scenario, seed: Option<u64>, fire: bool) -> (u32, u32) {
+    let mut rng = seed.map(aimadapt_sim::rng::Rng::new);
+    let mut sim = started(s.clone());
+    let (mut last, mut blinks, mut fast, mut played) = (sim.targets()[0].pos, 0, false, 0.0);
+    while played < 12.0 {
+        let dt = rng.as_mut().map_or(1.0 / 120.0, |r| 1.0 / (60.0 + 180.0 * r.next_f32()));
+        let input = if fire {
+            Input { aim: sim.targets()[0].pos.normalize(), fire_pressed: true, fire_held: true }
+        } else {
+            idle()
+        };
+        sim.step(dt, input);
+        played += dt;
+        let p = sim.targets()[0].pos;
+        let speed = (p - last).length() / dt;
+        if speed > 15.0 && !fast {
+            blinks += 1;
+        }
+        fast = speed > 15.0;
+        last = p;
+    }
+    (blinks, sim.stats().hits)
 }

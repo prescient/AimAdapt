@@ -7,6 +7,7 @@
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
 
+use super::reaction::{Pending, Reaction, Until};
 use super::{BotState, Motion, between, is_zero};
 use crate::rng::Rng;
 
@@ -105,6 +106,9 @@ pub struct Ability {
     /// in KovaaK's). A use that takes its last health makes it leave as a timeout.
     #[serde(skip_serializing_if = "is_zero")]
     pub health_cost: f32,
+    /// Uses the ability when the bot is hurt (`AIDamageReaction`), see [`Reaction`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reaction: Option<Reaction>,
 }
 
 impl Default for Ability {
@@ -132,6 +136,7 @@ impl Default for Ability {
             max_distance: 0.0,
             max_angle_deg: 360.0,
             health_cost: 0.0,
+            reaction: None,
         }
     }
 }
@@ -164,6 +169,10 @@ impl Abilities {
             check(fine(a.min_distance, 0.0, 10_000.0) && fine(a.max_distance, 0.0, 10_000.0), "a distance");
             check(fine(a.max_angle_deg, 0.0, 360.0), "a view angle");
             check(fine(a.health_cost, 0.0, 1.0e6), "a health cost");
+            if let Some(r) = &a.reaction {
+                check(fine(r.threshold, 0.0, 1.0e6) && fine(r.ignore_chance, 0.0, 1.0), "a damage reaction");
+                check(timers(&[r.reset_s, r.delay_s[0], r.delay_s[1]]), "a time");
+            }
         }
         p
     }
@@ -172,7 +181,7 @@ impl Abilities {
 /// How far a time may be from a scheduled one and still be "exactly at" it, so that
 /// rounding in the clock or in a tick's time (a count times the interval) doesn't decide
 /// a tie.
-const TIE_S: f32 = 1e-3;
+pub(super) const TIE_S: f32 = 1e-3;
 
 /// The most ticks one frame tries; the rest are skipped (see [`AbilityState::skip_to`]).
 const MAX_TICKS_A_FRAME: u32 = 64;
@@ -183,7 +192,7 @@ const MAX_WINDOWS_AT_ONCE: u32 = 64;
 /// One ability's state for one bot. Every time in it is on the bot's clock and comes from
 /// the key's ticks and the schedule of the uses, never from the lengths of frames.
 #[derive(Debug, Clone, PartialEq)]
-struct Slot {
+pub(super) struct Slot {
     /// Charges it has, as of the last time the refills were settled.
     have: u32,
     /// When the refill that is going on began: the next charge is back a charge time
@@ -197,13 +206,22 @@ struct Slot {
     last_press: Option<f32>,
     /// The tick that was last a try for this ability, used or not.
     last_try: Option<f32>,
+    /// What the bot's reaction to damage has counted and is waiting to do.
+    pub(super) react: Pending,
 }
 
 impl Slot {
     fn new(a: &Ability) -> Slot {
         let have = a.spawn_charges.min(a.max_charges);
         let short = have < a.max_charges;
-        Slot { have, refill_from: short.then_some(0.0), from_spawn: short, last_press: None, last_try: None }
+        Slot {
+            have,
+            refill_from: short.then_some(0.0),
+            from_spawn: short,
+            last_press: None,
+            last_try: None,
+            react: Pending::default(),
+        }
     }
 
     /// Whether a tick at `at` is a try for this ability: strictly more than the reuse time
@@ -256,8 +274,8 @@ struct Active {
 /// All of a bot's ability state. Its clock starts when the bot appears.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct AbilityState {
-    clock: f32,
-    slots: Vec<Slot>,
+    pub(super) clock: f32,
+    pub(super) slots: Vec<Slot>,
     active: Option<Active>,
     /// When the latest use is scheduled to end: its tick plus its duration.
     last_end: Option<f32>,
@@ -346,6 +364,10 @@ impl AbilityState {
     ///   used. No ability starts while one is going on, and a try exactly at the moment
     ///   one ends (its tick plus `AbilityDuration`) isn't used either.
     ///
+    /// A bot's use of an ability because it was hurt (`AIDamageReaction`) isn't a tick of the key: its
+    /// rules, measured and not, are written on [`BotState::react_to_hit`] and the ones this function
+    /// states about the key (the window, the reuse time) play no part in it.
+    ///
     /// Not measured, and played as follows: a tick in a window in which the bot isn't
     /// willing isn't a try. A tick is a try whether or not an ability's rules (combat,
     /// ground and air, distance, view angle) allow the use. At a tick the abilities are
@@ -375,7 +397,7 @@ impl AbilityState {
     /// tick, the reuse time, the shared cooldown and the ability's rules aren't part of
     /// it, so that a use that isn't the bot's key (a reaction to damage) can ask the same
     /// question.
-    fn ready_at(&mut self, a: &Ability, i: usize, at: f32) -> bool {
+    pub(super) fn ready_at(&mut self, a: &Ability, i: usize, at: f32) -> bool {
         let busy = self.active.is_some() || self.last_end.is_some_and(|end| at <= end + TIE_S);
         let Some(s) = self.slots.get_mut(i) else { return false };
         if busy {
@@ -467,28 +489,35 @@ impl BotState {
     /// [`AbilityState::decide`]) is tried in order, and one that finds an ability ready
     /// starts it. `seen` is whether the bot has a line of sight to the player. A key that
     /// ticks every 0 s ticks once a frame, at the frame's clock. At most 64 ticks are
-    /// tried in a frame; if more came due, the rest are skipped, not tried.
+    /// tried in a frame; if more came due, the rest are skipped, not tried. The bot's
+    /// reactions to damage that have come due are handled here too, each in its place
+    /// among the ticks by its time (see [`BotState::react_to_hit`]).
     pub(super) fn use_abilities(&mut self, m: &Motion, rng: &mut Rng, view: &View, pos: Vec3, seen: bool) {
         let Some(ab) = &m.abilities else { return };
         let clock = self.ab.clock;
         if ab.press_every_s <= 0.0 {
+            self.fire_reactions(m, view, pos, seen, Until::Before(clock));
             self.try_at(m, rng, view, pos, seen, clock);
-            return;
-        }
-        let mut tried = 0;
-        loop {
-            let at = self.ab.next_tick as f32 * ab.press_every_s;
-            if at.is_nan() || at > clock + TIE_S {
-                break;
+        } else {
+            let mut tried = 0;
+            loop {
+                let at = self.ab.next_tick as f32 * ab.press_every_s;
+                if at.is_nan() || at > clock + TIE_S {
+                    break;
+                }
+                if tried == MAX_TICKS_A_FRAME {
+                    self.ab.skip_to(ab.press_every_s, clock + TIE_S);
+                    break;
+                }
+                self.ab.next_tick = self.ab.next_tick.saturating_add(1);
+                tried += 1;
+                // Reactions to damage that came due before this tick go first (see
+                // `BotState::react_to_hit`); one due together with it comes after.
+                self.fire_reactions(m, view, pos, seen, Until::Before(at));
+                self.try_at(m, rng, view, pos, seen, at);
             }
-            if tried == MAX_TICKS_A_FRAME {
-                self.ab.skip_to(ab.press_every_s, clock + TIE_S);
-                break;
-            }
-            self.ab.next_tick = self.ab.next_tick.saturating_add(1);
-            tried += 1;
-            self.try_at(m, rng, view, pos, seen, at);
         }
+        self.fire_reactions(m, view, pos, seen, Until::By(clock));
     }
 
     /// The tick at `at`: for each ability it is a try for, in list order, the first that
@@ -504,14 +533,22 @@ impl BotState {
                 continue;
             }
             slot.last_try = Some(at);
-            if self.ab.ready_at(a, i, at)
-                && self.ab.last_end.is_none_or(|end| at - end + TIE_S >= ab.global_cooldown_s)
-                && self.rules_allow(m, a, view, pos, seen || ab.sees_through_walls)
-            {
+            if self.can_start(m, i, view, pos, seen, at) {
                 self.start_ability(m, ab, i, view, pos, at);
                 return;
             }
         }
+    }
+
+    /// Whether the ability in slot `i` can start at `at`, a tick of the key or a reaction to damage:
+    /// it is ready (see [`AbilityState::ready_at`]), the shared cooldown is over (a tie counts as over)
+    /// and its own rules allow it.
+    pub(super) fn can_start(&mut self, m: &Motion, i: usize, view: &View, pos: Vec3, seen: bool, at: f32) -> bool {
+        let Some(ab) = &m.abilities else { return false };
+        let Some(a) = ab.list.get(i) else { return false };
+        self.ab.ready_at(a, i, at)
+            && self.ab.last_end.is_none_or(|end| at - end + TIE_S >= ab.global_cooldown_s)
+            && self.rules_allow(m, a, view, pos, seen || ab.sees_through_walls)
     }
 
     /// The ability's own rules: combat, ground or air, distance, view angle.
@@ -539,7 +576,7 @@ impl BotState {
     /// Spends a charge and begins the ability at the tick `at`: an impulse ends at once, a
     /// longer one is held by [`BotState::hold_ability`]. It is scheduled to end at `at`
     /// plus its duration, whenever the frames end it.
-    fn start_ability(&mut self, m: &Motion, ab: &Abilities, i: usize, view: &View, pos: Vec3, at: f32) {
+    pub(super) fn start_ability(&mut self, m: &Motion, ab: &Abilities, i: usize, view: &View, pos: Vec3, at: f32) {
         let a = &ab.list[i];
         self.ab.slots[i].spend(at);
         self.ab.last_end = Some(at + a.duration_s.max(0.0));

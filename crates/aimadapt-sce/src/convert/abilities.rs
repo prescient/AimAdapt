@@ -7,8 +7,12 @@
 //! keeps gravity for its duration, when it is an impulse along the movement keys, when it isn't
 //! along the keys on a bot that doesn't aim, and when the bot's or the player's hitbox is
 //! neither a spheroid nor a capsule: none of those was measured.
+//!
+//! An ability with `AIDamageReaction=true` is one the bot also uses when it is hurt (plan K15d, see
+//! [`reaction`]). That plays for abilities with a duration. One with no duration (an impulse) is
+//! refused: KovaaK's sometimes showed nothing for such a reaction, and why wasn't understood.
 
-use aimadapt_sim::motion::{Abilities, Ability};
+use aimadapt_sim::motion::{Abilities, Ability, Reaction};
 
 use super::{UU_PER_M, camera_offset, push_once};
 use crate::inventory::Gap;
@@ -37,8 +41,6 @@ const UNPLAYED: &[(&str, Unplayed)] = &[
     ("AIMinTargHealth", |a| a.f32_or("AIMinTargHealth", 0.0) > 0.0),
     ("AIMaxTargHealth", |a| a.f32_or("AIMaxTargHealth", 100.0) < 100.0),
     ("CancelDashOnGreaterThan45Collisions", |a| a.is("CancelDashOnGreaterThan45Collisions")),
-    // Not measured in KovaaK's.
-    ("AIDamageReaction", |a| a.is("AIDamageReaction")),
 ];
 
 /// Whether a movement ability costs the bot health each time it uses it (a negative
@@ -120,6 +122,10 @@ pub(super) fn reasons(
             push_once(reasons, Gap::planned("a movement ability the trainer can't play yet", detail));
         }
     }
+    for a in movement(c).filter(|a| reacts(a) && !lasts(a)) {
+        let detail = format!("{}: AIDamageReaction=true with no AbilityDuration", a.name());
+        push_once(reasons, Gap::planned("a movement ability the trainer can't play yet", detail));
+    }
     for a in &c.abilities {
         if is_kind(a, 1) {
             let detail = format!("a target's melee ability: {}", a.name());
@@ -160,6 +166,16 @@ fn vertical_refusal(a: &Section, c: &BotChoice, ch: &Section, player: Option<&Se
         return Some(format!("with a bot MainBBType of {} and a player MainBBType of {}", name(ch), name(player)));
     }
     None
+}
+
+/// Whether a movement ability has a duration, so it is a dash or a blink and not an impulse.
+fn lasts(a: &Section) -> bool {
+    a.f32_or("AbilityDuration", 0.0) > 0.0
+}
+
+/// Whether the bot also uses a movement ability when it is hurt (`AIDamageReaction`).
+fn reacts(a: &Section) -> bool {
+    a.is("AIDamageReaction")
 }
 
 /// Whether a movement ability changes the bot's speed or sends it up.
@@ -203,6 +219,10 @@ pub(super) fn cost_notes(slots: &[&BotSlot], kill_limit: u32, notes: &mut Vec<St
 /// never or everywhere in any run, so larger values in a file are cut to these.
 const LONGEST_S: f32 = 3600.0;
 const FARTHEST_M: f32 = 10_000.0;
+
+/// The highest damage threshold of a reaction the trainer allows. A file's higher one is cut to it: no
+/// bot takes that much, so it never reacts either way.
+const HIGHEST_THRESHOLD: f32 = 1.0e6;
 
 /// The bot's movement abilities and the settings for using them, or none if it has
 /// no movement ability. `ch` is its character profile and `player` the player's.
@@ -260,5 +280,26 @@ fn ability(a: &Section) -> Ability {
         max_angle_deg: a.f32_or("AIMaxTargFOV", 360.0).clamp(0.0, 360.0),
         // In health points, like `MaxHealth`: a cost of 40 takes 40 off a bot of 100.
         health_cost: (-a.f32_or("HealthRestore", 0.0)).max(0.0),
+        reaction: reaction(a),
     }
+}
+
+/// How a bot uses an ability when it is hurt: the settings of `AIDamageReaction`, read as KovaaK's 3.9.13
+/// was measured to play them (the rules themselves are written on `BotState::react_to_hit` in the sim).
+/// A key that is missing is read as the value KovaaK's editor writes for a new ability (a threshold of 0,
+/// a reset timer of 0.1 s, no chance to ignore a trigger and a wait of 0.125 to 0.25 s); that a missing
+/// key means that value is inference, not measured. The two ends of the wait are put in order. Times are
+/// cut to [`LONGEST_S`]. `AIDamageReactionCooldown` isn't read: it did nothing in any test.
+fn reaction(a: &Section) -> Option<Reaction> {
+    if !reacts(a) {
+        return None;
+    }
+    let secs = |key: &str, default: f32| a.f32_or(key, default).clamp(0.0, LONGEST_S);
+    let (min, max) = (secs("AIDamageReactionMinDelay", 0.125), secs("AIDamageReactionMaxDelay", 0.25));
+    Some(Reaction {
+        threshold: a.f32_or("AIDamageReactionThreshold", 0.0).clamp(0.0, HIGHEST_THRESHOLD),
+        reset_s: secs("AIDamageReactionResetTimer", 0.1),
+        ignore_chance: a.f32_or("AIDamageReactionIgnoreChance", 0.0).clamp(0.0, 1.0),
+        delay_s: [min.min(max), min.max(max)],
+    })
 }

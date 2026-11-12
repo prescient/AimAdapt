@@ -1,6 +1,7 @@
 //! Tests for turning `.sce` files into scenarios.
 
 use super::*;
+use aimadapt_sim::motion::Reaction;
 
 /// Bug: `TeamMask` was read with `1 << (team - 1)`, which panics (or wraps in a
 /// release build) for a player team above 32.
@@ -986,13 +987,92 @@ fn a_dash_on_a_bot_that_doesnt_dodge_is_refused() {
     assert_eq!(reasons(&idle), Vec::<String>::new());
 }
 
-/// Damage reactions weren't measured in KovaaK's, so the trainer doesn't play them.
+/// Plan K15d changed this test. Every file with `AIDamageReaction=true` used to be refused, whatever the
+/// ability (the row for it in `UNPLAYED`). Now only a reaction on an ability with no duration (an
+/// impulse) is refused: what showed nothing now and then in KovaaK's wasn't understood.
 #[test]
-fn an_ability_that_reacts_to_damage_is_refused() {
+fn an_ability_with_no_duration_that_reacts_to_damage_is_refused() {
     let text = dasher("UpVelocity=400.0\nAIDamageReaction=true");
     let gaps = convert(&Sce::parse(&text), "box.sce", "0").map(|_| ()).unwrap_err();
     assert_eq!(gaps.len(), 1, "{gaps:?}");
-    assert_eq!(gaps[0].to_string(), "a movement ability the trainer can't play yet (Zip: AIDamageReaction=true)");
+    assert_eq!(
+        gaps[0].to_string(),
+        "a movement ability the trainer can't play yet (Zip: AIDamageReaction=true with no AbilityDuration)"
+    );
+    // A negative duration is none.
+    let negative = dasher("UpVelocity=400.0\nAbilityDuration=-1.0\nAIDamageReaction=true");
+    assert_eq!(reasons(&negative).len(), 1);
+    // The same impulse that doesn't react imports.
+    assert!(reasons(&dasher("UpVelocity=400.0\nAIDamageReaction=false")).is_empty());
+}
+
+/// A dash with a duration that reacts to damage, with the delays the wrong way round.
+const FLINCH: &str = "AbilityDuration=0.2\nMainVelocity=1800.0\nAIDamageReaction=true\n\
+    AIDamageReactionThreshold=35.0\nAIDamageReactionResetTimer=0.7\nAIDamageReactionIgnoreChance=0.3\n\
+    AIDamageReactionMinDelay=0.4\nAIDamageReactionMaxDelay=0.15\nAIDamageReactionCooldown=5.0";
+
+fn reaction_of(ability: &str) -> Option<Reaction> {
+    imported_motion(&dasher(ability)).unwrap().abilities.unwrap().list[0].reaction
+}
+
+#[test]
+fn a_damage_reaction_comes_through_with_its_values_and_the_editors_defaults() {
+    // Plan K15d. The delays given the wrong way round come out sorted; the cooldown isn't read.
+    let r = reaction_of(FLINCH).expect("a reaction");
+    assert_eq!((r.threshold, r.reset_s, r.ignore_chance, r.delay_s), (35.0, 0.7, 0.3, [0.15, 0.4]));
+    // Keys that are missing give what KovaaK's editor writes for a new ability.
+    let r = reaction_of("AbilityDuration=0.2\nMainVelocity=1800.0\nAIDamageReaction=true").expect("a reaction");
+    assert_eq!((r.threshold, r.reset_s, r.ignore_chance, r.delay_s), (0.0, 0.1, 0.0, [0.125, 0.25]));
+    // Out of range values are cut to what the trainer allows: a threshold of 0 to a million, a chance of
+    // 0 to 1, no time over an hour.
+    let wild = "AbilityDuration=0.2\nMainVelocity=1800.0\nAIDamageReaction=true\nAIDamageReactionThreshold=-5.0\n\
+        AIDamageReactionResetTimer=1e9\nAIDamageReactionIgnoreChance=2.0\nAIDamageReactionMinDelay=1e9\n\
+        AIDamageReactionMaxDelay=-3.0";
+    let r = reaction_of(wild).expect("a reaction");
+    assert_eq!((r.threshold, r.reset_s, r.ignore_chance, r.delay_s), (0.0, 3600.0, 1.0, [0.0, 3600.0]));
+    let r = reaction_of(&wild.replace("IgnoreChance=2.0", "IgnoreChance=-1.0")).unwrap();
+    assert_eq!(r.ignore_chance, 0.0);
+    let ok = imported_motion(&dasher(wild)).unwrap().abilities.unwrap();
+    assert!(ok.problems().is_empty(), "{:?}", ok.problems());
+    // A threshold no bot can reach still plays (it was a problem that refused the file, in review).
+    let never = imported_motion(&dasher(&wild.replace("Threshold=-5.0", "Threshold=1e9"))).unwrap().abilities.unwrap();
+    assert_eq!(never.list[0].reaction.unwrap().threshold, 1.0e6);
+    assert!(never.problems().is_empty(), "{:?}", never.problems());
+}
+
+#[test]
+fn an_ability_that_doesnt_react_has_no_reaction_and_writes_no_key() {
+    for ability in ["AIDamageReaction=false", "UpVelocity=400.0"] {
+        let text = dasher(&format!("AbilityDuration=0.2\nMainVelocity=1800.0\n{ability}"));
+        let scenario = convert(&Sce::parse(&text), "box.sce", "0").unwrap().scenario;
+        let a = &scenario.world.as_ref().unwrap().motion.as_ref().unwrap().abilities.as_ref().unwrap().list[0];
+        assert_eq!(a.reaction, None, "{ability}");
+        assert!(!serde_json::to_string(&scenario).unwrap().contains("reaction"), "{ability}");
+    }
+    let scenario = convert(&Sce::parse(&dasher(FLINCH)), "box.sce", "0").unwrap().scenario;
+    assert!(serde_json::to_string(&scenario).unwrap().contains("reaction"));
+}
+
+/// A reaction on a dash or blink with a duration imports with no reason, also on a bot that never presses
+/// its key (`UseAbilityFrequency=0`), which keeps its abilities.
+#[test]
+fn a_damage_reaction_on_an_ability_with_a_duration_plays() {
+    assert!(reasons(&dasher(FLINCH)).is_empty());
+    let silent = dasher(FLINCH).replace("UseAbilityFrequency=0.5", "UseAbilityFrequency=0.0");
+    let ab = imported_motion(&silent).unwrap().abilities.expect("it keeps its abilities");
+    assert_eq!((ab.chance, ab.list.len()), (0.0, 1));
+    assert!(ab.list[0].reaction.is_some());
+    // A melee ability on a target is refused as before, with or without a reaction.
+    let melee = dasher(FLINCH)
+        .replace("AbilityProfileNames=Zip.abilmov;;", "AbilityProfileNames=Zip.abilmov;Shove.abilmelee;")
+        .replace(
+            "[Map Data]",
+            "[Melee Ability Profile]
+Name=Shove
+AIDamageReaction=true
+[Map Data]",
+        );
+    assert_eq!(reasons(&melee), vec!["bots that use abilities (a target's melee ability: Shove)".to_string()]);
 }
 
 /// Bug: the importer ignored `Timescale`, so a scenario saved at 0.8 played at normal

@@ -21,8 +21,9 @@ A scenario is refused when it uses something the trainer doesn't model, so every
 | Fix: spawn offsets follow the map's axes | 4e0c441 | 132 of 225 |
 | Fix: regeneration between shots | cf9d8ca | 132 of 225 |
 | Fix: when a bot uses an ability | a94eb94 | 132 of 225 |
-| K15c Dashes that go up or down | | 132 of 225 |
-| K15 The rest: abilities used when hurt, the smaller refusals | | |
+| K15c Dashes that go up or down | 65512d7 | 132 of 225 |
+| K15d Abilities used when hurt | | 133 of 225 |
+| K15e The smaller refusals | | |
 | K8 Bots that destroy themselves | | |
 | K9 Heads | | |
 | K10 Waypoint paths | | |
@@ -407,7 +408,20 @@ No imported scenario with such a dash was watched in the game window, and none o
 - The direction of a reaction's blink follows the rules for that ability.
 - One case isn't understood. An ability that is a single upward impulse sometimes shows nothing when the hit lands while the bot is in the air: with half the triggers ignored and shots 0.25 s apart, hops never followed two shots in a row. A flying bot's blink doesn't have it. A reaction on an impulse stays refused.
 
-Not measured: whether an ability's rules for combat, distance and view angle hold a reaction back (they are played as holding it back), and a reaction that comes due while another ability is going on (played as dropped). Four of the eighteen files have such a reaction on a movement ability. In two it is a blink with a duration, which is what K15d builds. The others are impulses and one dash with rules nobody measured, and they stay refused, as does a reaction on a melee ability. Each of those files is refused for something else as well.
+Not measured: whether an ability's rules for combat, distance and view angle hold a reaction back (they are played as holding it back), and a reaction that comes due while another ability is going on (played as dropped). Four of the eighteen files have such a reaction on a movement ability. In three it is a dash or blink with a duration, which is what K15d builds. One of the three has a dash with rules of its own, and those are played as holding the reaction back. The fourth file has impulses, which stay refused, as does a reaction on a melee ability.
+
+What gets built in K15d:
+
+- `aimadapt-sim`: an ability can carry a reaction: the threshold, the reset time, the chance to ignore a trigger and the two ends of the wait. Every hit is counted for each ability that has one, on a bot that can't be hurt too, and before the dodge's own answer to the hit. A trigger that isn't ignored sets the time its use is due. Waiting reactions are handled between the key's ticks in the order of their times. Each is tried at its own time, so charges, `DelayAfterUse` and the end of the use count from that time and the length of a frame doesn't matter. One that can't go is dropped. The random numbers come only from abilities that have a reaction, so every other bot keeps its random stream.
+- `aimadapt-sce`: the reaction's keys are read, with the editor's defaults for the missing ones, the two ends of the wait put in order and each value cut to the trainer's limits. The refusal of every reaction goes. A reaction on an ability with no duration is still refused, and so is a melee ability on a target.
+- No rule mark. A scenario without a reaction stores nothing new, so it keeps its stored settings and its fingerprint.
+- A made-up fixture, Flinch Kite: a flying ball that never presses its key and blinks once it has taken enough damage.
+
+K15d is done. 133 of the 225 files play. One started and none stopped, and the 132 that played before keep their fingerprints, their notes and their stored settings, so no best starts again. Of the four files with a reaction on a movement ability, three no longer have a reason about it. One of them plays, and two are still refused for other things. The fourth keeps its reasons about impulses.
+
+Thirty-six changes were made to the new code one at a time. Thirty-five fail at least one test. The last one, always storing the reaction, makes no difference, because the writer leaves out an empty value either way. Three of the thirty-five got through at first and showed gaps in the tests: the order of two reactions due in one frame, a tick and a reaction due at the same moment, and an ignored trigger while a reaction waits. Each now has a test that fails under its change.
+
+The file that started was played without the game window. With no shots its bot never blinks, and under held fire it blinks every few seconds at uneven gaps, which fits the rules above. No imported scenario with a reaction was watched in the game window.
 
 **The smaller refusals (K15e).** What is left after those three: a bot with a size of zero (3 files), a melee ability on a target (2), a health cost on an ability that doesn't move the bot (2), `AIMaxSelfHealth` (1), `AIMaxTargHealth` (1), an ability on a bot that doesn't dodge (1) and a hurtbox on a movement ability (1). One of the two files that K15 alone can start needs the first three. Each is read in the local files and measured before it is built. A setting that only files with other refusals use stays refused, with its reason.
 
@@ -638,3 +652,13 @@ These rows are filled in as packages land. A row leaves the table when a test ma
 | A flyer with gravity and `AlterateJumpCrouchInput` on | Falls during the swap pause | No: no installed file has one |
 | A flyer with gravity, crouch key held | Flies down at the flight speed, as without gravity | No |
 | `FlightObeysPitch` | Not read | No: 15 playing kinds have it |
+| `AIDamageReactionResetTimer` running out | Clears the damage counted so far | No: taken from the name. Measured: the timer starts again at each hit |
+| An ability's own rules, `BlockAbilityOnStartDuration` and `AbilityGlobalCooldown` when a reaction comes due | They hold it back, and the reaction is dropped | No |
+| A reaction that comes due while an ability is going on, or at the moment one ends | Dropped, like a try of the key | No |
+| A trigger that is ignored while a reaction waits | The waiting reaction stays | No |
+| A tick of the key and a reaction due at the same moment | The tick goes first | No |
+| Two abilities' reactions due at the same moment | In the order of the abilities' list | No |
+| A reaction's keys that a file leaves out | The values the editor writes for a new ability: a threshold of 0, a reset timer of 0.1 s, no chance to ignore, a wait of 0.125 to 0.25 s | No: every test map had them all |
+| `AIDamageReactionThreshold` above a million | Cut to a million | No: no local file comes near |
+| `AIDamageReactionCooldown` | Not read | Yes: it did nothing in any test |
+| A reaction on an ability with no duration, or on a melee ability | Refused | Partly: an impulse's reaction sometimes showed nothing, cause unknown. A melee ability wasn't tried |

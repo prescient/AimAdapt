@@ -21,9 +21,13 @@ mod ability_tests;
 mod jump;
 #[cfg(test)]
 mod jump_tests;
+mod reaction;
+#[cfg(test)]
+mod reaction_tests;
 use ability::AbilityState;
 pub use ability::{Abilities, Ability};
 use jump::Keys;
+pub use reaction::Reaction;
 
 /// Unreal's default terminal velocity, m/s.
 const TERMINAL: f32 = 40.0;
@@ -462,6 +466,8 @@ impl BotState {
     /// The bot took `damage` at `now` (seconds into the run).
     pub fn on_hit(&mut self, m: &Motion, rng: &mut Rng, damage: f32, now: f32) {
         self.hurt = true;
+        // Before the dodge's turn logic, which returns early for a dodge that doesn't turn.
+        self.react_to_hit(m, rng, damage);
         let Some(h) = m.dodges.get(self.dodge).and_then(|d| d.hit_turn.as_ref()) else { return };
         if now - self.last_hit > h.reset_s.max(0.0) {
             self.hit_damage = 0.0;
