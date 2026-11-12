@@ -17,6 +17,7 @@ use crate::telemetry::{
     Outcome, ShotRecord, TargetFrame, TargetPose, TargetRecord, Telemetry, TrackSample, angle_deg, screen_offset,
 };
 use crate::world::World;
+pub use geometry::{HeadShape, Part};
 
 /// Beam damage and accuracy are sampled at this rate, independent of frame rate.
 pub const BEAM_TICK_HZ: f32 = 60.0;
@@ -103,6 +104,8 @@ pub struct Target {
     kind: Option<u32>,
     slot: u32,
     shape: Shape,
+    /// The head on its body, if it has one (see `geometry`): radius and offset at its base size.
+    head: Option<HeadShape>,
     /// Health regenerated per second, and the seconds after a hit before it starts.
     regen: (f32, f32),
     /// Game time at which the next step of healing is due. Only imported scenarios use it: they heal
@@ -225,11 +228,6 @@ impl Target {
             height_deg,
             health: self.health_fraction(),
         }
-    }
-
-    fn hit_by(&self, aim: Vec3) -> Option<f32> {
-        let h = self.height * self.radius / self.base_radius.max(1e-6);
-        ray_hit(aim, self.pos, self.radius, self.shape, h)
     }
 
     fn record(&self, ended_at: f32, outcome: Outcome) -> TargetRecord {
@@ -929,6 +927,7 @@ fn closest_ray_segment(dir: Vec3, a: Vec3, seg: Vec3) -> (f32, f32) {
 }
 
 mod firing;
+mod geometry;
 mod movement;
 mod pushing;
 mod rating;

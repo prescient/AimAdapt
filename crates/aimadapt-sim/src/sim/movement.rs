@@ -28,11 +28,11 @@ impl Sim {
                 let k = t.age / t.lifetime;
                 t.radius = t.base_radius * (1.0 + (shrink - 1.0) * k);
             }
+            let half = t.bump_half_segment();
             if let Some(b) = &mut t.bot
                 && let Some(m) = self.current.world.as_ref().and_then(|w| w.motion_of(t.kind))
             {
                 // An imported scenario's bot: dodge profile and character movement.
-                let half = half_segment(t.shape, t.radius, t.height * t.radius / t.base_radius.max(1e-6));
                 let (yaw, pitch) = (t.yaw, t.pitch);
                 // Only abilities use sight: a ray from the bot to the eye against the walls
                 // that stop shots (not the invisible clip walls).
@@ -67,13 +67,8 @@ impl Sim {
             i += 1;
         }
         if self.current.world.as_ref().is_some_and(World::bots_bump) {
-            let mut bodies: Vec<(Vec3, f32, f32)> = self
-                .targets
-                .iter()
-                .map(|t| {
-                    (t.pos, t.radius, half_segment(t.shape, t.radius, t.height * t.radius / t.base_radius.max(1e-6)))
-                })
-                .collect();
+            let mut bodies: Vec<(Vec3, f32, f32)> =
+                self.targets.iter().map(|t| (t.pos, t.radius, t.bump_half_segment())).collect();
             separate(&mut bodies);
             for (t, (p, _, _)) in self.targets.iter_mut().zip(bodies) {
                 // A bot that stays put (a fuse) isn't pushed by the others.
@@ -114,7 +109,6 @@ struct Area {
     yaw: Range,
     pitch: Range,
     distance: Range,
-    shape: Shape,
     half_w: f32,
     half_d: f32,
     floor: f32,
@@ -128,7 +122,6 @@ impl Area {
             yaw: sp.yaw,
             pitch: sp.pitch,
             distance: sp.distance,
-            shape: s.targets.shape,
             half_w: a.size[0] / 2.0,
             half_d: a.size[2] / 2.0,
             floor: -a.eye_height,
@@ -210,10 +203,7 @@ fn move_free(t: &mut Target, mv: &Movement, area: &Area, rng: &mut Rng, now: f32
     }
     // Bounce off the edges of the spawn area, and off the floor, ceiling
     // and walls: the spawn area can reach further than the room allows.
-    let half_h = match area.shape {
-        Shape::Sphere => t.radius,
-        Shape::Capsule | Shape::Box => (t.height * t.radius / t.base_radius.max(1e-6) / 2.0).max(t.radius),
-    };
+    let half_h = t.bump_half_height();
     let (yr, mut pr) = (area.yaw, area.pitch);
     let d = t.distance.max(1e-3);
     let pitch_at = |y: f32| (y / d).clamp(-1.0, 1.0).asin().to_degrees();

@@ -242,6 +242,17 @@ pub struct Weapon {
     pub damage: f32,
     /// Beam: damage per second while the crosshair is on a target.
     pub damage_per_s: f32,
+    /// What a hit on a target's head does, as a multiple of the plain damage (KovaaK's
+    /// `HeadshotMultiplier` of a weapon that can headshot). A shot's possible damage, which damage
+    /// efficiency divides by, is the plain damage times this whether or not any target has a head
+    /// (measured with test maps in KovaaK's 3.9.13 on 12 November 2026). Left out of the file at 1.
+    #[serde(skip_serializing_if = "is_one")]
+    pub headshot_multiplier: f32,
+}
+
+/// Whether a multiplier is 1, so it stays out of the file (and the fingerprint).
+fn is_one(v: &f32) -> bool {
+    *v == 1.0
 }
 
 impl Default for Weapon {
@@ -252,6 +263,7 @@ impl Default for Weapon {
             fire_rate: 0.0,
             damage: 100.0,
             damage_per_s: 100.0,
+            headshot_multiplier: 1.0,
         }
     }
 }
@@ -315,6 +327,10 @@ pub struct Targets {
     pub alt_color: String,
     pub spawn: Spawn,
     pub movement: Movement,
+    /// A head on each target (imported KovaaK's bots only, see [`Head`]). Left out of the file when
+    /// there is none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub head: Option<Head>,
 }
 
 impl Default for Targets {
@@ -337,7 +353,67 @@ impl Default for Targets {
             alt_color: "#4da3ff".into(),
             spawn: Spawn::default(),
             movement: Movement::default(),
+            head: None,
         }
+    }
+}
+
+impl Targets {
+    /// Half the height a target takes up, as far as fitting in a room goes: a ball's radius, a
+    /// capsule's or box's half height (never under its radius) and, with a head, half the height of
+    /// the body and head together.
+    pub fn half_height(&self) -> f32 {
+        match (&self.head, self.shape) {
+            (Some(h), shape) => {
+                let body = if shape == Shape::Sphere { 2.0 * self.radius } else { self.height };
+                ((body + 2.0 * h.radius + h.offset).max(2.0 * self.radius)) / 2.0
+            }
+            (None, Shape::Sphere) => self.radius,
+            (None, _) => self.radius.max(self.height / 2.0),
+        }
+    }
+}
+
+/// A head on a target's body (KovaaK's `MainBBHasHead`): a ball stacked on the body, with its own
+/// radius and offset. Its middle is `radius + offset` above the body's top, so an offset of 0 rests it
+/// on the top, a negative one sinks it into the body and a positive one leaves a gap that shots pass
+/// through. Body and head together are centred on the target's middle (`Target::body_middle` and
+/// `Target::head_middle` in the sim give the places), and a hit on the head does the weapon's headshot
+/// damage (`Weapon::headshot_multiplier`). Measured with test maps in KovaaK's 3.9.13 on 12 November
+/// 2026, for capsule and ball bodies. Where a target shrinks, the head and its offset shrink with it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Head {
+    /// Meters.
+    pub radius: f32,
+    /// Meters between the body's top and the head's bottom; negative when the head sinks into the body.
+    pub offset: f32,
+    pub color: String,
+    /// A hit on the body does nothing (KovaaK's `HeadshotOnly`): the shot counts as a miss.
+    pub headshots_only: bool,
+}
+
+impl Default for Head {
+    fn default() -> Self {
+        Head { radius: 0.2, offset: 0.0, color: "#ffd24e".into(), headshots_only: false }
+    }
+}
+
+impl Head {
+    /// What is wrong with the values, in plain words.
+    pub fn problems(&self) -> Vec<String> {
+        let mut p = Vec::new();
+        // Any size above 0: files give a bot a speck of a head where they want none worth hitting.
+        if !(self.radius > 0.0 && self.radius <= 10.0) {
+            p.push("head radius must be above 0 and at most 10 m".to_string());
+        }
+        if !(self.offset.is_finite() && self.offset.abs() <= 20.0) {
+            p.push("head offset must be within 20 m, up or down".to_string());
+        }
+        if parse_color(&self.color).is_none() {
+            p.push("head color must look like #ffd24e".to_string());
+        }
+        p
     }
 }
 
@@ -606,6 +682,13 @@ impl Scenario {
             "capsule and box height must be at least 2× radius",
         );
         check(t.health > 0.0, "target health must be above 0");
+        for m in t.head.iter().flat_map(Head::problems) {
+            check(false, &m);
+        }
+        check(
+            self.weapon.headshot_multiplier > 0.0 && self.weapon.headshot_multiplier <= 1000.0,
+            "headshot multiplier must be above 0 and at most 1000",
+        );
         check(t.regen_per_s.is_finite(), "regen must be a number");
         check(t.respawn_delay_s >= 0.0, "respawn delay can't be negative");
         check(t.lifetime_s >= 0.0, "lifetime can't be negative");
@@ -661,9 +744,8 @@ impl Scenario {
             "curve movement needs a turn rate of 0–720 °/s",
         );
         // Targets must fit between floor and ceiling too.
-        let half_height = if t.shape != Shape::Sphere { t.radius.max(t.height / 2.0) } else { t.radius };
         check(
-            2.0 * half_height < self.arena.size[1],
+            2.0 * t.half_height() < self.arena.size[1],
             "targets must fit between floor and ceiling (the room is lower than a target is tall)",
         );
         let resolved = self.adaptive.resolve(self);
@@ -1131,6 +1213,100 @@ mod tests {
             let problems = make(fuse.clone()).problems();
             assert!(problems.iter().any(|p| p.contains(what)), "{fuse:?}: {problems:?}");
         }
+    }
+
+    /// A scenario with a world of one spawn point, for the head tests.
+    fn with_spawn(kinds: Vec<crate::world::WorldKind>) -> Scenario {
+        let spawns = vec![crate::world::WorldSpawn { pos: [0.0, 0.0, -10.0], ..Default::default() }];
+        let slots = if kinds.is_empty() { Vec::new() } else { vec![vec![(0, 1.0)]] };
+        let world = crate::world::World { spawns, kinds, slots, ..Default::default() };
+        Scenario { world: Some(world), ..Scenario::default() }
+    }
+
+    /// The keys of one table of a scenario's file.
+    fn keys(s: &Scenario, table: &str) -> Vec<String> {
+        let doc: toml::Value = toml::from_str(&s.to_toml()).unwrap();
+        let mut keys: Vec<String> = doc[table].as_table().unwrap().keys().cloned().collect();
+        keys.sort();
+        keys
+    }
+
+    /// Plan K9: the head and the headshot multiplier are left out of a scenario's file when unused, so no
+    /// scenario that existed before has a new fingerprint. One that uses them stores them and reads them back.
+    #[test]
+    fn a_scenario_without_a_head_or_a_multiplier_is_stored_as_before() {
+        use crate::world::WorldKind;
+        let plain = with_spawn(vec![WorldKind::default()]);
+        let text = plain.to_toml();
+        assert!(!text.contains("head"), "{text}");
+        assert_eq!(keys(&plain, "weapon"), ["damage", "damage_per_s", "fire_rate", "kind", "trigger"]);
+        assert!(!keys(&plain, "targets").iter().any(|k| k == "head"));
+        assert_eq!(Scenario::default().fingerprint(), PINNED_FINGERPRINT);
+        // The same scenario with a head and a multiplier has them in its settings and a fingerprint of its own.
+        let mut headed = with_spawn(vec![WorldKind { head: Some(Head::default()), ..Default::default() }]);
+        headed.targets.head = Some(Head { radius: 0.3, offset: -0.1, color: "#102030".into(), headshots_only: true });
+        headed.weapon.headshot_multiplier = 4.0;
+        let text = headed.to_toml();
+        assert!(text.contains("headshot_multiplier = 4.0") && text.contains("headshots_only = true"), "{text}");
+        assert_ne!(headed.fingerprint(), plain.fingerprint());
+        assert_eq!(Scenario::from_toml(&text).unwrap(), headed);
+        // A head written by hand needs only what it changes.
+        let by_hand = Scenario::from_toml("name = \"x\"\n[targets.head]\nradius = 0.3").unwrap();
+        assert_eq!(by_hand.targets.head, Some(Head { radius: 0.3, ..Head::default() }));
+        assert_eq!(by_hand.weapon.headshot_multiplier, 1.0);
+    }
+
+    /// Plan K9: a head whose radius is 0, an offset that isn't a number and a multiplier of 0 are problems, as
+    /// are values far outside what a bot could have, on the scenario's targets and on a kind of bot.
+    #[test]
+    fn a_bad_head_or_multiplier_is_a_problem() {
+        use crate::world::WorldKind;
+        let sound = Head { radius: 0.3, offset: -0.1, ..Head::default() };
+        let mut s = with_spawn(Vec::new());
+        s.targets.head = Some(sound.clone());
+        assert!(s.problems().is_empty(), "{:?}", s.problems());
+        let cases = [
+            (Head { radius: 0.0, ..sound.clone() }, "head radius"),
+            (Head { radius: -0.3, ..sound.clone() }, "head radius"),
+            (Head { radius: f32::NAN, ..sound.clone() }, "head radius"),
+            (Head { radius: 11.0, ..sound.clone() }, "head radius"),
+            (Head { offset: f32::NAN, ..sound.clone() }, "head offset"),
+            (Head { offset: f32::INFINITY, ..sound.clone() }, "head offset"),
+            (Head { offset: -21.0, ..sound.clone() }, "head offset"),
+            (Head { color: "red".into(), ..sound.clone() }, "head color"),
+        ];
+        for (head, what) in cases {
+            let mut s = with_spawn(Vec::new());
+            s.targets.head = Some(head.clone());
+            assert!(s.problems().iter().any(|p| p.contains(what)), "{head:?}: {:?}", s.problems());
+            let kind = WorldKind { head: Some(head.clone()), ..Default::default() };
+            let s = with_spawn(vec![kind]);
+            assert!(s.problems().iter().any(|p| p.contains(what)), "kind {head:?}: {:?}", s.problems());
+        }
+        // Bug guard (found in the review of plan K9): a head far smaller than a target may be, a speck that
+        // files use where they want no head worth hitting, was a problem. Any radius above 0 is sound.
+        let mut s = with_spawn(Vec::new());
+        s.targets.head = Some(Head { radius: 0.0002, offset: 0.4, ..sound.clone() });
+        assert!(s.problems().is_empty(), "{:?}", s.problems());
+        for (m, ok) in [(0.0, false), (-1.0, false), (f32::NAN, false), (1001.0, false), (1000.0, true), (0.5, true)] {
+            let mut s = Scenario::default();
+            s.weapon.headshot_multiplier = m;
+            assert_eq!(s.problems().is_empty(), ok, "multiplier {m}: {:?}", s.problems());
+        }
+    }
+
+    /// Plan K9: a head makes a target taller, so it has to fit between the floor and the ceiling too.
+    #[test]
+    fn a_target_with_a_head_must_fit_the_room() {
+        let mut s = Scenario::default();
+        s.arena.size = [40.0, 4.0, 40.0];
+        s.arena.eye_height = 1.0;
+        s.targets.shape = Shape::Capsule;
+        s.targets.radius = 0.5;
+        s.targets.height = 3.0;
+        assert!(s.problems().is_empty(), "{:?}", s.problems());
+        s.targets.head = Some(Head { radius: 0.6, offset: 0.0, ..Head::default() });
+        assert!(s.problems().iter().any(|p| p.contains("floor and ceiling")), "{:?}", s.problems());
     }
 
     #[test]

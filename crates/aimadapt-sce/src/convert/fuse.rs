@@ -86,6 +86,10 @@ fn bot_refusal(scene: &Scene, c: &BotChoice, ch: &Section) -> Option<String> {
     if ch.f32_or("HealthRegenPerSec", 0.0) != 0.0 {
         return Some(format!("its character has {}", shown(ch, "HealthRegenPerSec")));
     }
+    // Plan K9: a fuse on a bot with a head wasn't measured.
+    if ch.is("MainBBHasHead") {
+        return Some("its character has a head".into());
+    }
     None
 }
 

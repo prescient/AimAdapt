@@ -81,6 +81,37 @@ fn import(text: &str) -> Result<Imported, Vec<Gap>> {
     convert(&Sce::parse(text), "helper.sce", "0")
 }
 
+/// Plan K9: a helper can't be shot, so its head is never read. Whatever head settings it has (here a head with
+/// no radius, and headshots only on a cuboid body), the scenario is the one the helper with no head gives.
+#[test]
+fn a_helper_with_a_head_imports_as_before() {
+    let bare = with("MainBBHasHead=true", "MainBBHasHead=false");
+    let headed = with(
+        "MainBBHasHead=true",
+        "MainBBHasHead=true
+HeadshotOnly=true
+MainBBHeadRadius=0.0",
+    );
+    assert_eq!(import(&headed).unwrap().scenario, import(&bare).unwrap().scenario);
+    assert_eq!(import(&headed).unwrap().notes, import(&bare).unwrap().notes);
+    assert_eq!(import(HELPER_SCE).unwrap().scenario.targets.head, None);
+}
+
+/// Guard (mutation check of plan K9): the refusal for a headshot multiplier of 0 looks only at heads on bots the
+/// player can shoot. Here the only head is the helper's, the weapon can headshot with a multiplier of 0, and the
+/// score doesn't use damage efficiency, so the multiplier isn't used and nothing is refused.
+#[test]
+fn a_helpers_head_doesnt_make_a_zero_headshot_multiplier_a_reason() {
+    let text = with(
+        "DamagePerShot=1.0",
+        "DamagePerShot=1.0
+HeadshotCapable=true
+HeadshotMultiplier=0.0",
+    );
+    let i = import(&text).unwrap_or_else(|e| panic!("{:?}", e.iter().map(ToString::to_string).collect::<Vec<_>>()));
+    assert_eq!(i.scenario.weapon.headshot_multiplier, 1.0);
+}
+
 fn reasons(text: &str) -> Vec<Gap> {
     import(text).err().unwrap_or_default()
 }

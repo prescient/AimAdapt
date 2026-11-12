@@ -71,6 +71,7 @@ per_miss = -30.0
 | `weapon.fire_rate` | `0.0` | Hitscan: most shots per second. Required for `hold`. 0 means no cap with `click`. |
 | `weapon.damage` | `100.0` | Hitscan damage per hit. |
 | `weapon.damage_per_s` | `100.0` | Beam damage per second on target. |
+| `weapon.headshot_multiplier` | `1.0` | What a hit on a target's head does, as a multiple of the damage (0–1000, above 0). Left out of the file at 1. A shot's possible damage, which damage efficiency divides by, is the damage times this whether or not any target has a head. Not in the editor. |
 
 ### `[targets]`
 
@@ -91,6 +92,17 @@ per_miss = -30.0
 | `targets.alternate_colors` | `true` | Targets that time out change color by wave: the first `count` targets use `color`, the next `count` use `alt_color`, and so on. With three targets up, the grid turns over from three of one color to three of the other, so a target's color says which wave it's from. |
 | `targets.alt_color` | `"#4da3ff"` | The second color. The default blue against the default orange-red stays distinct for common kinds of color blindness. |
 | `targets.health_bar` | `false` | Show each target's health in a bar above it. Useful with `regen_per_s`, so you can see a target healing. |
+
+### `[targets.head]`
+
+An optional head on each target: a ball stacked on its body. It is written by imported KovaaK's scenarios (a bot's `MainBBHasHead`) and by hand, is not in the editor, and is left out of the file when there is none. Body and head together are centred on the target's middle. A hit on the head does `weapon.headshot_multiplier` times the damage, and the first surface on the ray decides whether a shot hit the head or the body. A target that shrinks scales its head and offset with its radius.
+
+| Field | Default | Meaning |
+|---|---|---|
+| `targets.head.radius` | `0.2` | The head's radius in meters (above 0, at most 10). |
+| `targets.head.offset` | `0.0` | Meters between the body's top and the head's bottom: 0 rests the head on the body, a negative value sinks it in, a positive one leaves a gap that shots pass through (within 20 m either way). |
+| `targets.head.color` | `"#ffd24e"` | The head's color as `#rrggbb`. |
+| `targets.head.headshots_only` | `false` | A hit on the body does nothing and counts as a miss, in the stats, the pace and the events. |
 
 ### `[targets.spawn]`
 

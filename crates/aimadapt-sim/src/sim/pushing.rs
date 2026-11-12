@@ -106,10 +106,9 @@ fn kick_targets(targets: &mut [Target], walls: &Collider, pusher: &Pusher, flier
     // A chaser with a flight reaches along the line to its (nearest) target.
     let toward = flier.and_then(|f| nearest(targets, f.place).map(|to| (to - f.place).normalize_or_zero()));
     for t in targets {
+        let half = t.bump_half_segment();
         let Some(b) = &mut t.bot else { continue };
-        let height = t.height * t.radius / t.base_radius.max(1e-6);
         let Some(from) = origin(pusher, flier, t.pos) else { continue };
-        let half = half_segment(t.shape, t.radius, height);
         let reached = match toward {
             Some(dir) => {
                 pusher.reaches_along(from, dir.normalize_or(Vec3::from_array(pusher.facing)), t.pos, t.radius, half)

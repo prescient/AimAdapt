@@ -68,12 +68,19 @@ impl Sim {
         }
     }
 
+    /// One shot. Its possible damage, which damage efficiency divides by, is the damage times the weapon's
+    /// headshot multiplier whenever the weapon has one, whether or not any target has a head. A hit on a head
+    /// does the damage times the multiplier, and a hit on a body the plain damage. A hit on the body of a bot
+    /// that only takes headshots is a miss in every way: no damage, no hit counted, no restart of its regen
+    /// delay, no reaction; the stats, the pace and the event say miss. The target's own shots and misses go
+    /// up as they do for a near miss (plan K9; the rules were measured in KovaaK's 3.9.13).
     pub(super) fn fire_shot(&mut self, aim: Vec3, events: &mut Vec<Event>) {
-        let damage = self.scenario.weapon.damage;
+        let (damage, multiplier) = (self.scenario.weapon.damage, self.scenario.weapon.headshot_multiplier);
         self.stats.shots += 1;
-        self.stats.damage_possible += damage;
-        let hit = self.pick(aim);
-        if let Some(i) = hit.or_else(|| self.nearest_to(aim)) {
+        self.stats.damage_possible += damage * multiplier;
+        let picked = self.pick(aim);
+        let hit = picked.filter(|(i, part)| self.targets[*i].counts(*part));
+        if let Some(i) = picked.map(|(i, _)| i).or_else(|| self.nearest_to(aim)) {
             let t = &self.targets[i];
             let (dx, dy) = screen_offset(t.pos.normalize(), aim);
             let (fx, fy) = t.track.flick;
@@ -93,7 +100,7 @@ impl Sim {
             }
         }
         match hit {
-            Some(i) => self.damage(i, damage, events),
+            Some((i, part)) => self.damage(i, if part == Part::Head { damage * multiplier } else { damage }, events),
             None => {
                 self.stats.misses += 1;
                 self.pace.misses += 1;
@@ -110,7 +117,7 @@ impl Sim {
         let tick = 1.0 / BEAM_TICK_HZ;
         let per_tick = self.scenario.weapon.damage_per_s * tick;
         let now = self.elapsed();
-        let on = self.pick(aim);
+        let on = self.pick_counted(aim).map(|(i, _)| i);
         for (i, t) in self.targets.iter_mut().enumerate() {
             if t.regen.0 > 0.0 && (!firing || Some(i) != on) && now - t.last_hit_at >= t.regen.1 {
                 t.health = (t.health + t.regen.0 * dt).min(t.max_health);
@@ -119,7 +126,7 @@ impl Sim {
         self.beam_acc += dt;
         while self.beam_acc >= tick && self.phase == Phase::Running {
             self.beam_acc -= tick;
-            let on = self.pick(aim);
+            let on = self.pick_counted(aim);
             // Adaptive tracking judges aim, firing or not, so holding fire only when
             // on target can't game the level.
             let counts = !self.scenario.adaptive.engaged_only || self.targets.iter().any(Target::engaged);
@@ -129,12 +136,16 @@ impl Sim {
             if !firing {
                 continue;
             }
+            // A tick on a head does the tick's damage times the weapon's headshot multiplier, which the tick's
+            // possible damage includes whatever it was on; a tick on the body of a bot that only takes
+            // headshots is a missed tick.
+            let multiplier = self.scenario.weapon.headshot_multiplier;
             self.stats.shots += 1;
-            self.stats.damage_possible += per_tick;
+            self.stats.damage_possible += per_tick * multiplier;
             match on {
-                Some(i) => {
+                Some((i, part)) => {
                     self.targets[i].shots += 1;
-                    self.damage(i, per_tick, events);
+                    self.damage(i, if part == Part::Head { per_tick * multiplier } else { per_tick }, events);
                 }
                 None => self.stats.misses += 1,
             }
@@ -193,16 +204,22 @@ impl Sim {
         }
     }
 
-    /// Index of the nearest target the ray along `aim` passes through, unless a wall
-    /// is in the way.
-    pub(super) fn pick(&self, aim: Vec3) -> Option<usize> {
+    /// Index of the nearest target the ray along `aim` passes through and the part of it that is met
+    /// first, unless a wall is in the way.
+    pub(super) fn pick(&self, aim: Vec3) -> Option<(usize, Part)> {
         self.targets
             .iter()
             .enumerate()
-            .filter_map(|(i, t)| t.hit_by(aim).map(|d| (i, d)))
+            .filter_map(|(i, t)| t.hit_by(aim).map(|(d, part)| (i, d, part)))
             .min_by(|a, b| a.1.total_cmp(&b.1))
-            .filter(|(_, d)| !blocked(&self.walls, aim, *d))
-            .map(|(i, _)| i)
+            .filter(|(_, d, _)| !blocked(&self.walls, aim, *d))
+            .map(|(i, _, part)| (i, part))
+    }
+
+    /// [`Sim::pick`], but a body hit on a bot that only takes headshots is nothing. The nearest surface
+    /// decides, so such a body in front of another bot hides it.
+    pub(super) fn pick_counted(&self, aim: Vec3) -> Option<(usize, Part)> {
+        self.pick(aim).filter(|(i, part)| self.targets[*i].counts(*part))
     }
 
     pub(super) fn nearest_to(&self, aim: Vec3) -> Option<usize> {

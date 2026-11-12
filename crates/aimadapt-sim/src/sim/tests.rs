@@ -179,6 +179,32 @@ fn a_target_too_tall_for_the_room_is_placed_without_panicking() {
     assert!(sim.targets().iter().all(|t| t.pos.is_finite()));
 }
 
+/// Bug guard (found in the review of plan K9): placing a target in the room measured a ball by its radius
+/// alone once heads were added, where it had always kept the larger of the radius and half the height
+/// setting from the floor, the ceiling and the walls. The built-in ball scenarios (a radius of 0.3 with a
+/// height setting of 1.8) would have had targets placed up to 0.6 m nearer the room's sides. A ball with a
+/// head keeps at least half of body and head together.
+#[test]
+fn a_ball_keeps_its_old_distance_from_the_rooms_sides_when_it_is_placed() {
+    let s = no_countdown(Scenario::default());
+    assert_eq!((s.targets.shape, s.targets.head.is_none()), (Shape::Sphere, true));
+    let keep = s.targets.radius.max(s.targets.height / 2.0);
+    assert!(keep > s.targets.radius, "the default ball's height setting is the larger of the two");
+    let a = s.arena.clone();
+    let corner = |sim: &Sim, keep: f32| {
+        let high = sim.fit_in_room(Vec3::new(1000.0, 1000.0, -1000.0));
+        assert_eq!(high, Vec3::new(a.size[0] / 2.0 - keep, a.size[1] - a.eye_height - keep, keep - a.size[2] / 2.0));
+        let low = sim.fit_in_room(Vec3::new(-1000.0, -1000.0, 1000.0));
+        assert_eq!(low, Vec3::new(keep - a.size[0] / 2.0, keep - a.eye_height, a.size[2] / 2.0 - keep));
+    };
+    corner(&Sim::new(s.clone(), 1), keep);
+    // With a head 1.0 in radius resting on the ball, body and head are 2.6 tall: 1.3 is kept.
+    let mut headed = s.clone();
+    headed.targets.head = Some(a_head(1.0, 0.0));
+    assert!(headed.problems().is_empty(), "{:?}", headed.problems());
+    corner(&Sim::new(headed, 1), 1.3);
+}
+
 #[test]
 fn run_ends_on_time_and_kill_limit() {
     let mut s = no_countdown(Scenario::default());
@@ -3507,4 +3533,714 @@ fn a_fuse_bot_is_not_pushed_by_a_bot_of_another_kind() {
     }
     let apart = of(&sim, 1).distance(fuse_at);
     assert!(apart > 0.9, "the other bot was pushed clear of it: {apart} m apart");
+}
+
+// Plan K9: bots with heads. The numbers come from test maps in KovaaK's 3.9.13 (12 November 2026).
+
+fn a_head(radius: f32, offset: f32) -> crate::scenario::Head {
+    crate::scenario::Head { radius, offset, ..Default::default() }
+}
+
+fn only_head(radius: f32, offset: f32) -> crate::scenario::Head {
+    crate::scenario::Head { headshots_only: true, ..a_head(radius, offset) }
+}
+
+/// One still bot 100 m ahead in an imported scenario with this body and head, 100 health and a weapon
+/// that does 10 per shot. At that distance, aiming at a point on the plane through the bot's middle gives
+/// rays that are near enough parallel to read the geometry off.
+fn headed_bot(shape: Shape, radius: f32, height: f32, head: Option<crate::scenario::Head>) -> Sim {
+    let mut s = no_countdown(Scenario::default());
+    s.targets.count = 1;
+    s.targets.shape = shape;
+    s.targets.radius = radius;
+    s.targets.height = height;
+    s.targets.health = 100.0;
+    s.targets.head = head;
+    s.weapon.damage = 10.0;
+    s.world = Some(crate::world::World {
+        spawns: vec![crate::world::WorldSpawn { pos: [0.0, 0.0, -100.0], ..Default::default() }],
+        ..Default::default()
+    });
+    Sim::new(s, 1)
+}
+
+/// The ray from the eye to the point `x` right of and `h` above the bot's middle, on the plane through it.
+fn on_the_plane(sim: &Sim, x: f32, h: f32) -> Vec3 {
+    (sim.targets()[0].pos + Vec3::new(x, h, 0.0)).normalize()
+}
+
+/// The part of the bot a ray at (`x`, `h`) meets first, if it meets it at all.
+fn part_at(sim: &Sim, x: f32, h: f32) -> Option<Part> {
+    sim.targets()[0].hit_by(on_the_plane(sim, x, h)).map(|(_, part)| part)
+}
+
+/// Checks the part met at each height on the bot's centre line (x = 0).
+fn assert_centre_line(sim: &Sim, expected: &[(f32, Option<Part>)]) {
+    for &(h, part) in expected {
+        assert_eq!(part_at(sim, 0.0, h), part, "at {h} above the middle");
+    }
+}
+
+const BODY: Option<Part> = Some(Part::Body);
+const HEAD: Option<Part> = Some(Part::Head);
+
+/// A capsule of radius 1.0 and height 6.0 with a head of 0.6 resting on top (offset 0): the body runs
+/// from -3.6 to 2.4 above the character's middle and the head from 2.4 to 3.6 (measured).
+#[test]
+fn a_head_resting_on_a_capsule_is_its_own_part_above_the_bodys_top() {
+    let sim = headed_bot(Shape::Capsule, 1.0, 6.0, Some(a_head(0.6, 0.0)));
+    assert_centre_line(&sim, &[(-3.7, None), (-3.5, BODY), (2.3, BODY), (2.5, HEAD), (3.5, HEAD), (3.7, None)]);
+}
+
+/// The same with a head sunk 0.5 into the body (offset -0.5): the body runs from -3.35 to 2.65 and the
+/// head's middle is at 2.75. Where they overlap the nearer surface wins: on the centre line the body's cap
+/// is in front below about 2.49 and the head above it. At height 3.2 the head is 0.397 wide to each side.
+#[test]
+fn a_head_sunk_into_a_capsule_wins_where_its_surface_is_nearer() {
+    let sim = headed_bot(Shape::Capsule, 1.0, 6.0, Some(a_head(0.6, -0.5)));
+    assert_centre_line(&sim, &[(2.3, BODY), (2.6, HEAD), (3.3, HEAD), (3.4, None)]);
+    assert_eq!(part_at(&sim, 0.35, 3.2), HEAD);
+    assert_eq!(part_at(&sim, 0.45, 3.2), None);
+    // The switch from body to head is where the two surfaces are equally near: about 2.49. The rays from
+    // the eye are not quite parallel at 100 m (a point 0.5 m in front of the plane is 0.5% lower), so the
+    // heights tried keep 0.04 clear of it.
+    assert_eq!(part_at(&sim, 0.0, 2.45), BODY);
+    assert_eq!(part_at(&sim, 0.0, 2.53), HEAD);
+}
+
+/// A head 0.5 above the body's top (offset +0.5) leaves a gap that shots pass through: the body runs from
+/// -3.85 to 2.15 and the head from 2.65 to 3.85.
+#[test]
+fn a_gap_between_the_body_and_a_raised_head_lets_shots_through() {
+    let sim = headed_bot(Shape::Capsule, 1.0, 6.0, Some(a_head(0.6, 0.5)));
+    assert_centre_line(&sim, &[(2.1, BODY), (2.4, None), (2.7, HEAD), (3.8, HEAD), (3.9, None)]);
+}
+
+/// A ball of radius 1.5 with a 0.6 head on it: the ball runs from -2.1 to 0.9 and the head from 0.9 to 2.1.
+/// A spheroid measured the same whatever its height setting said, so the ball's size is its radius.
+#[test]
+fn a_ball_with_a_head_is_a_ball_of_its_radius_under_a_head() {
+    let sim = headed_bot(Shape::Sphere, 1.5, 6.0, Some(a_head(0.6, 0.0)));
+    assert_centre_line(&sim, &[(-2.2, None), (-2.0, BODY), (0.8, BODY), (1.0, HEAD), (2.0, HEAD), (2.2, None)]);
+    // The height setting of a ball plays no part: another one is the same.
+    let other = headed_bot(Shape::Sphere, 1.5, 1.0, Some(a_head(0.6, 0.0)));
+    for h in [-2.2, -2.0, 0.8, 1.0, 2.0, 2.2] {
+        assert_eq!(part_at(&sim, 0.0, h), part_at(&other, 0.0, h), "at {h}");
+    }
+}
+
+/// A head that lies inside its ball (R 1.5, head 1.2 at offset -2.4) is never in front of it: every hit
+/// is a body hit.
+#[test]
+fn a_head_inside_the_ball_is_never_a_head_hit() {
+    let sim = headed_bot(Shape::Sphere, 1.5, 3.0, Some(a_head(1.2, -2.4)));
+    assert_centre_line(&sim, &[(0.0, BODY), (1.0, BODY), (1.4, BODY)]);
+}
+
+/// A ball inside its head (R 0.5, head 1.5 at offset -2.9): the ball runs from -0.55 to 0.45 and the head
+/// from -2.45 to 0.55, and every hit is a head hit.
+#[test]
+fn a_ball_inside_a_big_head_is_always_a_head_hit() {
+    let sim = headed_bot(Shape::Sphere, 0.5, 1.0, Some(a_head(1.5, -2.9)));
+    assert_centre_line(&sim, &[(0.5, HEAD), (0.0, HEAD), (-2.4, HEAD), (0.6, None), (-2.5, None)]);
+}
+
+fn damage_bot(multiplier: f32, health: f32, head: crate::scenario::Head) -> Sim {
+    let mut sim = headed_bot(Shape::Capsule, 1.0, 6.0, Some(head));
+    sim.scenario.weapon.damage = 10.0;
+    sim.scenario.weapon.headshot_multiplier = multiplier;
+    sim.targets[0].health = health;
+    sim.targets[0].max_health = health;
+    sim
+}
+
+/// A head hit does the damage times the headshot multiplier; a hit on the body does the plain damage.
+#[test]
+fn a_head_hit_does_the_damage_times_the_multiplier_and_a_body_hit_the_plain_damage() {
+    let mut head = damage_bot(4.0, 100.0, a_head(0.6, 0.0));
+    head.step(FRAME, shoot(on_the_plane(&head, 0.0, 3.0)));
+    assert_eq!((head.targets()[0].health, head.stats().damage_done), (60.0, 40.0));
+    let mut body = damage_bot(4.0, 100.0, a_head(0.6, 0.0));
+    body.step(FRAME, shoot(on_the_plane(&body, 0.0, 0.0)));
+    assert_eq!((body.targets()[0].health, body.stats().damage_done), (90.0, 10.0));
+    // With the multiplier at its default a head hit does the plain damage.
+    let mut plain = damage_bot(1.0, 100.0, a_head(0.6, 0.0));
+    plain.step(FRAME, shoot(on_the_plane(&plain, 0.0, 3.0)));
+    assert_eq!(plain.targets()[0].health, 90.0);
+}
+
+/// What damage efficiency divides by is the damage times the multiplier for every shot of a weapon that can
+/// headshot, whether any bot has a head or not (three shots at a headless target: 120 possible). With the
+/// multiplier at its default it is the plain damage, 30, as before. One head kill of a 40-health target
+/// by a damage of 10 and a multiplier of 4 has done all the damage that was possible.
+#[test]
+fn possible_damage_is_the_damage_times_the_multiplier_with_or_without_a_head() {
+    let possible = |multiplier: f32| {
+        let mut sim = headed_bot(Shape::Capsule, 1.0, 6.0, None);
+        sim.scenario.weapon.headshot_multiplier = multiplier;
+        sim.targets[0].health = 1000.0;
+        sim.targets[0].max_health = 1000.0;
+        for _ in 0..3 {
+            sim.step(FRAME, shoot(on_the_plane(&sim, 0.0, 0.0)));
+        }
+        sim.stats().damage_possible
+    };
+    assert_eq!((possible(4.0), possible(1.0)), (120.0, 30.0));
+    let mut kill = damage_bot(4.0, 40.0, a_head(0.6, 0.0));
+    kill.step(FRAME, shoot(on_the_plane(&kill, 0.0, 3.0)));
+    assert_eq!(kill.stats().kills, 1);
+    assert_eq!(kill.stats().damage_efficiency(), Some(1.0));
+}
+
+/// A bot with a head that only takes headshots, with regen, in an imported scenario: 100 health, a weapon
+/// that does 10 times 4 on a head, regen 10 a second after a delay of 1 s. A capsule of radius 0.5 and
+/// height 2.0 with a head of 0.3 resting on it.
+fn headshot_only_bot() -> Sim {
+    let mut sim = headed_bot(Shape::Capsule, 0.5, 2.0, Some(only_head(0.3, 0.0)));
+    for s in [&mut sim.scenario, &mut sim.current] {
+        s.weapon.headshot_multiplier = 4.0;
+        s.targets.regen_per_s = 10.0;
+        s.targets.regen_delay_s = 1.0;
+    }
+    sim.targets[0].regen = (10.0, 1.0);
+    sim
+}
+
+/// A hit on the body of a bot that only takes headshots is a miss in every way: no damage and no hit, the
+/// stats and the pace count a miss, the event is a miss, the regen delay isn't restarted (the bot heals when
+/// the first hit's delay ends), and the target's own shots and misses go up. A hit on its head does the damage
+/// times the multiplier.
+#[test]
+fn a_body_hit_on_a_headshots_only_bot_is_a_miss_in_every_way() {
+    let mut sim = headshot_only_bot();
+    run_for(&mut sim, 0.3);
+    let head_at = sim.targets()[0].head_middle().unwrap();
+    let body_at = sim.targets()[0].body_middle();
+    let events = sim.step(FRAME, shoot(head_at));
+    assert!(events.contains(&Event::Hit { id: sim.targets()[0].id }), "{events:?}");
+    assert_eq!((sim.targets()[0].health, sim.stats().damage_done, sim.stats().hits), (60.0, 40.0, 1));
+    let (heal_at, last_hit_at) = (sim.targets()[0].heal_at, sim.targets()[0].last_hit_at);
+    run_for(&mut sim, 0.5);
+    let events = sim.step(FRAME, shoot(body_at));
+    assert_eq!(events, vec![Event::Miss]);
+    let t = &sim.targets()[0];
+    assert_eq!((t.health, t.hits, t.shots, t.misses), (60.0, 1, 2, 1));
+    let st = sim.stats();
+    assert_eq!((st.shots, st.hits, st.misses, st.damage_done), (2, 1, 1, 40.0));
+    assert_eq!(sim.pace.misses, 1);
+    assert_eq!((t.heal_at, t.last_hit_at), (heal_at, last_hit_at), "the regen delay was not restarted");
+    assert!(!sim.result().telemetry.shots.last().unwrap().hit);
+    // The first hit's delay ends at 1.3 s: by 1.45 s a lump of regen (10 a second for a tenth of a second)
+    // has landed. A body hit that restarted the delay would have pushed it past 1.8 s.
+    run_for(&mut sim, 0.6);
+    assert!(sim.targets()[0].health > 60.5, "a lump of regen landed on time: {}", sim.targets()[0].health);
+}
+
+/// A bot that stands still until it is hurt doesn't wake for a body hit on a bot that only takes headshots
+/// (no damage reaction), and does for a head hit.
+#[test]
+fn a_body_hit_on_a_headshots_only_bot_sets_off_no_damage_reaction() {
+    let strafing = crate::motion::Motion {
+        max_speed: 4.0,
+        accel: 40.0,
+        still_until_hurt: true,
+        dodges: vec![crate::motion::Dodge { strafe_s: [0.5, 0.5], ..Default::default() }],
+        ..Default::default()
+    };
+    let bot = || {
+        let mut s = on_a_floor(Vec::new(), Some(strafing.clone()));
+        s.world.as_mut().unwrap().spawns[0].pos = [0.0, 1.0, -10.0];
+        s.targets.health = 100.0;
+        s.weapon.damage = 1.0;
+        s.targets.shape = Shape::Capsule;
+        s.targets.radius = 0.5;
+        s.targets.height = 2.0;
+        s.targets.head = Some(only_head(0.3, 0.0));
+        Sim::new(s, 1)
+    };
+    let mut body = bot();
+    let start = body.targets()[0].pos;
+    let aim = body.targets()[0].body_middle();
+    body.step(FRAME, shoot(aim));
+    assert_eq!(body.stats().hits, 0);
+    run_for(&mut body, 1.0);
+    assert_eq!(body.targets()[0].pos, start, "a body hit woke it");
+    let mut head = bot();
+    let aim = head.targets()[0].head_middle().unwrap();
+    head.step(FRAME, shoot(aim));
+    run_for(&mut head, 1.0);
+    assert!(head.targets()[0].pos.distance(start) > 0.5, "a head hit woke it");
+}
+
+/// The sim doesn't pierce: the body of a bot that only takes headshots, in front of another bot's head,
+/// stops the shot. It is a miss, and the bot behind is unhurt.
+#[test]
+fn the_body_of_a_headshots_only_bot_blocks_a_shot_at_the_bot_behind_it() {
+    use crate::world::{WorldKind, WorldSpawn};
+    let kind = |only: bool, spawn: u32| WorldKind {
+        shape: Shape::Capsule,
+        radius: 0.5,
+        height: 2.0,
+        health: 100.0,
+        spawns: vec![spawn],
+        head: Some(crate::scenario::Head { headshots_only: only, ..a_head(0.3, 0.0) }),
+        ..Default::default()
+    };
+    let play = |front_only: bool| {
+        let mut s = no_countdown(Scenario::default());
+        s.targets.count = 2;
+        s.weapon.damage = 10.0;
+        s.weapon.headshot_multiplier = 4.0;
+        s.world = Some(crate::world::World {
+            spawns: vec![
+                WorldSpawn { pos: [0.0, 0.0, -10.0], ..Default::default() },
+                WorldSpawn { pos: [0.0, 0.0, -20.0], ..Default::default() },
+            ],
+            kinds: vec![kind(front_only, 0), kind(false, 1)],
+            slots: vec![vec![(0, 1.0)], vec![(1, 1.0)]],
+            ..Default::default()
+        });
+        let mut sim = Sim::new(s, 1);
+        // Aim at the back bot's head: the ray crosses the front bot's body on the way.
+        let back = sim.targets().iter().find(|t| t.kind() == Some(1)).unwrap().head_middle().unwrap();
+        let events = sim.step(FRAME, shoot(back));
+        (sim, events)
+    };
+    let (sim, events) = play(true);
+    assert_eq!(events, vec![Event::Miss]);
+    assert!(sim.targets().iter().all(|t| t.health == 100.0), "nobody was hurt");
+    assert_eq!((sim.stats().hits, sim.stats().misses), (0, 1));
+    // The same shot with a front bot that takes body hits hits that bot's body, and not the one behind.
+    let (sim, _) = play(false);
+    let hurt: Vec<u32> = sim.targets().iter().filter(|t| t.health < 100.0).filter_map(|t| t.kind()).collect();
+    assert_eq!(hurt, vec![0]);
+}
+
+/// A capsule with a head stands with its body's bottom on the floor, so it is `B + 2r + offset` tall: the
+/// middle of a capsule of radius 0.4 and height 1.8 with a head of 0.25 at offset -0.1 comes to rest 1.1
+/// above the floor (0.9 without the head), measured. A ball of radius 0.5 with the same head rests with its
+/// middle 0.7 above it (a decision: stood as the capsule was measured to).
+#[test]
+fn a_bot_with_a_head_stands_with_the_bottom_of_its_stack_on_the_floor() {
+    let stand = |shape: Shape, radius: f32, height: f32, head: Option<crate::scenario::Head>| {
+        let floor = crate::world::WorldMesh {
+            positions: vec![[-30.0, 0.0, -30.0], [30.0, 0.0, -30.0], [30.0, 0.0, 5.0], [-30.0, 0.0, 5.0]],
+            triangles: vec![[0, 1, 2], [0, 2, 3]],
+            ..Default::default()
+        };
+        let mut s = no_countdown(Scenario::default());
+        s.targets.count = 1;
+        s.targets.shape = shape;
+        s.targets.radius = radius;
+        s.targets.height = height;
+        s.targets.head = head;
+        s.world = Some(crate::world::World {
+            spawns: vec![crate::world::WorldSpawn { pos: [0.0, 3.0, -10.0], ..Default::default() }],
+            meshes: vec![floor],
+            motion: Some(crate::motion::Motion { gravity: 8.0, ..Default::default() }),
+            ..Default::default()
+        });
+        let mut sim = Sim::new(s, 1);
+        run_for(&mut sim, 2.0);
+        assert!(grounded(&sim), "it came to rest");
+        bot_y(&sim)
+    };
+    let head = Some(a_head(0.25, -0.1));
+    let (capsule, bare, ball) = (
+        stand(Shape::Capsule, 0.4, 1.8, head.clone()),
+        stand(Shape::Capsule, 0.4, 1.8, None),
+        stand(Shape::Sphere, 0.5, 1.0, head),
+    );
+    assert!((capsule - 1.1).abs() < 0.01, "{capsule}");
+    assert!((bare - 0.9).abs() < 0.01, "{bare}");
+    assert!((ball - 0.7).abs() < 0.01, "{ball}");
+}
+
+/// A target that shrinks scales its head and its offset with its radius, as its height does (a decision,
+/// not measured): at 0.5 of its size the head is 0.5 as wide and sits 0.5 as far in.
+#[test]
+fn a_shrinking_target_scales_its_head_and_offset() {
+    let mut s = no_countdown(Scenario::default());
+    s.targets.count = 1;
+    s.targets.shape = Shape::Capsule;
+    s.targets.radius = 1.0;
+    s.targets.height = 6.0;
+    s.targets.head = Some(a_head(0.6, -0.5));
+    s.targets.health = 100.0;
+    s.targets.lifetime_s = 10.0;
+    s.targets.shrink_to = 0.2;
+    s.world = Some(crate::world::World {
+        spawns: vec![crate::world::WorldSpawn { pos: [0.0, 0.0, -100.0], ..Default::default() }],
+        ..Default::default()
+    });
+    let mut sim = Sim::new(s, 1);
+    // 6.25 s of 10 takes it from 1.0 to 0.2 + 0.8 * (1 - 0.625) = 0.5 of its size.
+    sim.step(6.25, idle());
+    let t = &sim.targets()[0];
+    assert!((t.radius - 0.5).abs() < 1e-5, "{}", t.radius);
+    assert!((t.head_radius().unwrap() - 0.3).abs() < 1e-5);
+    assert!((t.stack_height() - (3.0 + 0.6 - 0.25)).abs() < 1e-5, "{}", t.stack_height());
+    // The part heights of the case with offset -0.5, halved: the body's top 1.325 and bottom -1.675, the head from
+    // 1.075 to 1.675, nothing above 1.675.
+    for (h, part) in [(1.15, BODY), (1.3, HEAD), (1.65, HEAD), (1.7, None), (-1.65, BODY), (-1.7, None)] {
+        assert_eq!(part_at(&sim, 0.0, h), part, "at {h}");
+    }
+    assert_eq!(part_at(&sim, 0.175, 1.6), HEAD);
+    assert_eq!(part_at(&sim, 0.225, 1.6), None);
+}
+
+/// A tick of a beam on a head does the tick's damage times the headshot multiplier, a tick on the body the
+/// plain damage, and every tick's possible damage includes the multiplier. On the body of a bot that only
+/// takes headshots a tick is a missed tick.
+#[test]
+fn a_beam_tick_on_a_head_does_the_damage_times_the_multiplier() {
+    let beam = |only: bool| {
+        let mut s = no_countdown(Scenario::default());
+        s.targets.count = 1;
+        s.targets.shape = Shape::Capsule;
+        s.targets.radius = 1.0;
+        s.targets.height = 6.0;
+        s.targets.health = 1e6;
+        s.targets.head = Some(crate::scenario::Head { headshots_only: only, ..a_head(0.6, 0.0) });
+        s.weapon.kind = WeaponKind::Beam;
+        s.weapon.trigger = Trigger::Always;
+        s.weapon.damage_per_s = 120.0;
+        s.weapon.headshot_multiplier = 4.0;
+        s.world = Some(crate::world::World {
+            spawns: vec![crate::world::WorldSpawn { pos: [0.0, 0.0, -100.0], ..Default::default() }],
+            ..Default::default()
+        });
+        Sim::new(s, 1)
+    };
+    let per_tick = 120.0 / BEAM_TICK_HZ;
+    let aim_for = |sim: &mut Sim, h: f32, secs: f32| {
+        let aim = on_the_plane(sim, 0.0, h);
+        for _ in 0..(secs * 240.0) as usize {
+            sim.step(FRAME, Input { aim, fire_pressed: false, fire_held: true });
+        }
+    };
+    let mut sim = beam(false);
+    aim_for(&mut sim, 3.0, 0.5);
+    let on_head = sim.stats().clone();
+    assert!(on_head.shots >= 29, "{on_head:?}");
+    assert!((on_head.damage_done - on_head.shots as f32 * per_tick * 4.0).abs() < 1e-2, "{on_head:?}");
+    assert!((on_head.damage_possible - on_head.damage_done).abs() < 1e-2, "{on_head:?}");
+    aim_for(&mut sim, 0.0, 0.5);
+    let st = sim.stats();
+    let body_ticks = (st.shots - on_head.shots) as f32;
+    assert!((st.damage_done - on_head.damage_done - body_ticks * per_tick).abs() < 1e-2, "{st:?}");
+    assert!((st.damage_possible - st.shots as f32 * per_tick * 4.0).abs() < 1e-2, "{st:?}");
+    // Headshots only: ticks on the body miss.
+    let mut only = beam(true);
+    aim_for(&mut only, 0.0, 0.5);
+    let st = only.stats();
+    assert!(st.shots >= 29, "{st:?}");
+    assert_eq!((st.hits, st.misses, st.damage_done), (0, st.shots, 0.0));
+    assert_eq!(only.targets()[0].health, 1e6);
+}
+
+/// "On target" in the tracking samples is the crosshair on a part that counts: for a bot that only takes
+/// headshots, the head alone.
+#[test]
+fn on_target_for_a_headshots_only_bot_means_on_its_head() {
+    let on_target = |h: f32| {
+        let mut s = no_countdown(Scenario::default());
+        s.targets.count = 1;
+        s.targets.shape = Shape::Capsule;
+        s.targets.radius = 1.0;
+        s.targets.height = 6.0;
+        s.targets.health = 1e6;
+        s.targets.head = Some(only_head(0.6, 0.0));
+        s.weapon.kind = WeaponKind::Beam;
+        s.weapon.trigger = Trigger::Always;
+        s.world = Some(crate::world::World {
+            spawns: vec![crate::world::WorldSpawn { pos: [0.0, 0.0, -100.0], ..Default::default() }],
+            ..Default::default()
+        });
+        let mut sim = Sim::new(s, 1);
+        let aim = on_the_plane(&sim, 0.0, h);
+        for _ in 0..120 {
+            sim.step(FRAME, Input { aim, fire_pressed: false, fire_held: true });
+        }
+        let samples = sim.result().telemetry.samples;
+        assert!(samples.len() >= 10, "{}", samples.len());
+        samples.iter().map(|s| s.on_target).collect::<Vec<bool>>()
+    };
+    assert!(on_target(3.0).iter().all(|on| *on), "on the head");
+    assert!(on_target(0.0).iter().all(|on| !*on), "on the body");
+}
+
+/// The part's geometry in one place: where the body and the head are, how tall the stack is and where to aim.
+#[test]
+fn a_targets_parts_are_where_the_stack_puts_them() {
+    let sim = headed_bot(Shape::Capsule, 1.0, 6.0, Some(a_head(0.6, -0.5)));
+    let t = &sim.targets()[0];
+    let up = |v: Vec3| v.y - t.pos.y;
+    assert!((up(t.body_middle()) + 0.35).abs() < 1e-5);
+    assert!((up(t.head_middle().unwrap()) - 2.75).abs() < 1e-5);
+    assert!((t.stack_height() - 6.7).abs() < 1e-5 && (t.top() - 3.35).abs() < 1e-5);
+    assert_eq!(t.aim_point(), t.body_middle());
+    let only = headed_bot(Shape::Capsule, 1.0, 6.0, Some(only_head(0.6, -0.5)));
+    assert_eq!(only.targets()[0].aim_point(), only.targets()[0].head_middle().unwrap());
+    assert!((only.targets()[0].aim_radius() - 0.6).abs() < 1e-6);
+    // A ball with a head stands and bumps as a capsule of the stack's height; one without a head as a ball.
+    let ball = headed_bot(Shape::Sphere, 0.5, 1.0, Some(a_head(0.25, -0.1)));
+    assert!((ball.targets()[0].bump_half_segment() - 0.2).abs() < 1e-5);
+    assert_eq!(headed_bot(Shape::Sphere, 0.5, 1.0, None).targets()[0].bump_half_segment(), 0.0);
+    // A head sunk deeper than twice its radius can't make the capsule smaller than the ball.
+    let deep = headed_bot(Shape::Sphere, 1.5, 3.0, Some(a_head(1.2, -4.0)));
+    assert_eq!(deep.targets()[0].bump_half_segment(), 0.0);
+}
+
+// Guards from the mutation check of plan K9: one test for each change of one line that the first tests let through.
+
+/// Guard (mutation check of plan K9): a head sunk deeper than its own diameter has its top below the body's,
+/// so the target's top is the body's. A capsule of radius 1 and height 6 with a head of 0.6 sunk 2.0 (the
+/// diameter is 1.2) has its body's top 3.4 above the middle and its head's top 2.6 above it.
+#[test]
+fn a_head_sunk_deeper_than_its_diameter_leaves_the_top_at_the_body() {
+    let sim = headed_bot(Shape::Capsule, 1.0, 6.0, Some(a_head(0.6, -2.0)));
+    let t = &sim.targets()[0];
+    assert!((t.top() - 3.4).abs() < 1e-5, "{}", t.top());
+    // A head sunk less deeply than its diameter tops the stack.
+    let shallow = headed_bot(Shape::Capsule, 1.0, 6.0, Some(a_head(0.6, -1.0)));
+    assert!((shallow.targets()[0].top() - 3.1).abs() < 1e-5, "{}", shallow.targets()[0].top());
+}
+
+/// Guard (mutation check of plan K9): a ball with a head is a ball of its radius in the stack, whatever its
+/// height setting says. Radius 0.5 and a height setting of 3.0 with a head of 0.25 sunk 0.1: the stack is
+/// 1.0 + 0.5 - 0.1 = 1.4 tall, so the middle segment of the capsule it bumps as has a half-length of 0.2.
+/// A free mover bounces at half the stack's height, 0.7, where a headless ball does at its radius.
+#[test]
+fn a_ball_with_a_head_stands_and_bumps_by_its_radius_and_not_its_height_setting() {
+    let sim = headed_bot(Shape::Sphere, 0.5, 3.0, Some(a_head(0.25, -0.1)));
+    let t = &sim.targets()[0];
+    assert!((t.bump_half_segment() - 0.2).abs() < 1e-5, "{}", t.bump_half_segment());
+    assert!((t.bump_half_height() - 0.7).abs() < 1e-5, "{}", t.bump_half_height());
+    assert!((t.stack_height() - 1.4).abs() < 1e-5, "{}", t.stack_height());
+    // The head's middle is (B + offset) / 2 above the position, with B = 2R.
+    let up = t.head_middle().unwrap().y - t.pos.y;
+    assert!((up - 0.45).abs() < 1e-5, "{up}");
+}
+
+/// Guard (mutation check of plan K9): a target that moves freely bounces off the floor and ceiling at half the
+/// stack's height when it has a head, and at its body's half height when it has none.
+#[test]
+fn a_free_mover_with_a_head_bounces_at_half_its_stacks_height() {
+    // Capsule of radius 1 and height 6 with a head of 0.6 resting on it: the stack is 7.2 tall.
+    let sim = headed_bot(Shape::Capsule, 1.0, 6.0, Some(a_head(0.6, 0.0)));
+    assert!((sim.targets()[0].bump_half_height() - 3.6).abs() < 1e-5);
+    let bare = headed_bot(Shape::Capsule, 1.0, 6.0, None);
+    assert!((bare.targets()[0].bump_half_height() - 3.0).abs() < 1e-5);
+    let ball = headed_bot(Shape::Sphere, 1.0, 6.0, None);
+    assert!((ball.targets()[0].bump_half_height() - 1.0).abs() < 1e-5);
+}
+
+/// Guard (mutation check of plan K9): a target made at a size other than the scenario's radius gets a head
+/// scaled in proportion, radius and offset. The scenario's capsule has radius 1.0 and a head of 0.6 sunk 0.5;
+/// a target made at half the radius has a head of 0.3 sunk 0.25 and its middle (3 - 0.25) / 2 above its
+/// position.
+#[test]
+fn a_target_made_smaller_than_the_scenarios_radius_gets_a_scaled_head() {
+    let mut sim = headed_bot(Shape::Capsule, 1.0, 6.0, Some(a_head(0.6, -0.5)));
+    sim.current.targets.radius = 0.5;
+    sim.targets.clear();
+    sim.spawn(&mut Vec::new());
+    let t = &sim.targets()[0];
+    assert!((t.radius - 0.5).abs() < 1e-6);
+    assert!((t.head_radius().unwrap() - 0.3).abs() < 1e-5, "{:?}", t.head_radius());
+    let head = t.head.unwrap();
+    assert!((head.radius - 0.3).abs() < 1e-5 && (head.offset + 0.25).abs() < 1e-5, "{head:?}");
+    let up = t.head_middle().unwrap().y - t.pos.y;
+    assert!((up - 1.375).abs() < 1e-4, "{up}");
+}
+
+/// Guard (mutation check of plan K9): a kind's own head setting replaces the scenario's `targets.head`, also
+/// when the kind has none.
+#[test]
+fn a_kind_without_a_head_has_none_whatever_the_scenario_says() {
+    use crate::world::{WorldKind, WorldSpawn};
+    let mut s = no_countdown(Scenario::default());
+    s.targets.count = 1;
+    s.targets.head = Some(a_head(0.3, 0.0));
+    s.world = Some(crate::world::World {
+        spawns: vec![WorldSpawn { pos: [0.0, 0.0, -10.0], ..Default::default() }],
+        kinds: vec![WorldKind { shape: Shape::Capsule, radius: 0.5, height: 2.0, health: 100.0, ..Default::default() }],
+        slots: vec![vec![(0, 1.0)]],
+        ..Default::default()
+    });
+    let sim = Sim::new(s, 1);
+    let t = &sim.targets()[0];
+    assert_eq!(t.kind(), Some(0));
+    assert!(t.head.is_none() && t.head_radius().is_none(), "{:?}", t.head);
+    assert_eq!(t.stack_height(), 2.0);
+}
+
+/// Guard (mutation check of plan K9): a bot with a head that is placed standing on a floor as it appears
+/// stands on the bottom of its stack at once, before any movement settles it. A capsule of radius 0.4 and
+/// height 1.8 with a head of 0.25 sunk 0.1 is 2.2 tall: appearing 0.2 above a floor, within a step-up of 0.3, its
+/// middle goes to 1.1. Judged as its body alone (feet 0.9 below the middle) the floor would be 1.3 down, out of
+/// reach.
+#[test]
+fn a_bot_with_a_head_that_appears_near_a_floor_stands_on_the_bottom_of_its_stack() {
+    let floor = crate::world::WorldMesh {
+        positions: vec![[-30.0, 0.0, -30.0], [30.0, 0.0, -30.0], [30.0, 0.0, 5.0], [-30.0, 0.0, 5.0]],
+        triangles: vec![[0, 1, 2], [0, 2, 3]],
+        ..Default::default()
+    };
+    let mut s = no_countdown(Scenario::default());
+    s.targets.count = 1;
+    s.targets.shape = Shape::Capsule;
+    s.targets.radius = 0.4;
+    s.targets.height = 1.8;
+    s.targets.head = Some(a_head(0.25, -0.1));
+    s.world = Some(crate::world::World {
+        spawns: vec![crate::world::WorldSpawn { pos: [0.0, 1.3, -10.0], ..Default::default() }],
+        meshes: vec![floor],
+        motion: Some(crate::motion::Motion { gravity: 8.0, step_up: 0.3, ..Default::default() }),
+        ..Default::default()
+    });
+    let sim = Sim::new(s, 1);
+    assert!((bot_y(&sim) - 1.1).abs() < 0.01 && grounded(&sim), "{}", bot_y(&sim));
+}
+
+/// Two still bots that bump into each other, 1.5 m apart in height and `apart` m apart sideways, each a capsule
+/// of radius 0.4 and height 1.0 (a half segment of 0.1 as a body, 0.6 with a head of 0.5 resting on it: a
+/// stack of 2.0). Returns how far apart they are sideways after a frame.
+fn bumping_pair(head: Option<crate::scenario::Head>, apart: f32) -> f32 {
+    let mut s = no_countdown(Scenario::default());
+    s.targets.count = 2;
+    s.targets.shape = Shape::Capsule;
+    s.targets.radius = 0.4;
+    s.targets.height = 1.0;
+    s.targets.head = head;
+    s.world = Some(crate::world::World {
+        spawns: vec![
+            crate::world::WorldSpawn { pos: [0.0, 0.0, -10.0], ..Default::default() },
+            crate::world::WorldSpawn { pos: [5.0, 0.0, -10.0], ..Default::default() },
+        ],
+        motion: Some(crate::motion::Motion { bump_bots: true, ..Default::default() }),
+        ..Default::default()
+    });
+    let mut sim = Sim::new(s, 1);
+    sim.targets[0].pos = Vec3::new(0.0, 0.0, -10.0);
+    sim.targets[1].pos = Vec3::new(apart, 1.5, -10.0);
+    sim.step(FRAME, idle());
+    let (a, b) = (sim.targets()[0].pos, sim.targets()[1].pos);
+    Vec3::new(b.x - a.x, 0.0, b.z - a.z).length()
+}
+
+/// Guard (mutation check of plan K9): bots with heads bump into each other as capsules of their stack's height.
+/// Two bots 1.5 m apart in height and 0.5 m apart sideways touch when each is 2.0 tall (they are pushed apart
+/// to 0.8, the sum of their radii) and don't as bodies alone (1.0 tall).
+#[test]
+fn bots_with_heads_bump_into_each_other_across_the_stacks_extra_height() {
+    let with_heads = bumping_pair(Some(a_head(0.5, 0.0)), 0.5);
+    assert!((with_heads - 0.8).abs() < 1e-4, "{with_heads}");
+    let bare = bumping_pair(None, 0.5);
+    assert!((bare - 0.5).abs() < 1e-4, "{bare}");
+}
+
+/// Guard (mutation check of plan K9): a pushing helper reaches a bot with a head as far as its stack goes. The
+/// pinned pusher's reach is a ball of radius 1 centred at (0, 0, -6); a ball of radius 0.5 with a head of 0.25
+/// resting on it has a half segment of 0.25, so a bot 1.65 above that centre is reached (1.65 - 0.25 is inside
+/// 1 + 0.5) and, as a ball alone, is not.
+#[test]
+fn a_pusher_reaches_a_bot_with_a_head_across_the_stacks_extra_height() {
+    let kicked = |head: bool| {
+        let mut sim = pushed([0.0, 1.65, -6.0], 0.0, Vec::new(), vec![pinned()]);
+        if head {
+            sim.targets[0].head = Some(crate::sim::geometry::HeadShape { radius: 0.25, offset: 0.0, only: false });
+        }
+        run_for(&mut sim, 0.125);
+        vel(&sim) != Vec3::ZERO
+    };
+    assert!(kicked(true), "a bot with a head is kicked");
+    assert!(!kicked(false), "a ball alone is out of reach");
+}
+
+/// Guard (mutation check of plan K9): a beam on the body of a bot that only takes headshots is a beam on
+/// nothing, so the bot heals as it would with the beam off it (regen 10 a second after a delay of 1 s that has
+/// long passed: it has never been hit). The bot of [`headshot_only_bot`] starts at half its health.
+#[test]
+fn a_beam_on_the_body_of_a_headshots_only_bot_doesnt_hold_back_its_regen() {
+    let mut sim = headshot_only_bot();
+    sim.scenario.weapon.kind = WeaponKind::Beam;
+    sim.scenario.weapon.trigger = Trigger::Always;
+    sim.scenario.weapon.damage_per_s = 120.0;
+    sim.targets[0].health = 50.0;
+    let aim = sim.targets()[0].body_middle().normalize();
+    for _ in 0..120 {
+        sim.step(FRAME, Input { aim, fire_pressed: false, fire_held: true });
+    }
+    let t = &sim.targets()[0];
+    assert!(t.health > 54.0 && t.health <= 55.1, "{}", t.health);
+    assert_eq!((sim.stats().hits, sim.stats().damage_done), (0, 0.0));
+}
+
+/// Guard (mutation check of plan K9): the body of a bot that only takes headshots hides the bot behind it from a
+/// beam as well as from a shot. A beam through the front bot's body at the head of a second bot behind it does
+/// the second bot nothing.
+#[test]
+fn the_body_of_a_headshots_only_bot_hides_the_bot_behind_it_from_a_beam() {
+    use crate::world::{WorldKind, WorldSpawn};
+    let kind = |only: bool, spawn: u32| WorldKind {
+        shape: Shape::Capsule,
+        radius: 0.5,
+        height: 2.0,
+        health: 1e6,
+        spawns: vec![spawn],
+        head: Some(crate::scenario::Head { headshots_only: only, ..a_head(0.3, 0.0) }),
+        ..Default::default()
+    };
+    let play = |front_only: bool| {
+        let mut s = no_countdown(Scenario::default());
+        s.targets.count = 2;
+        s.weapon.kind = WeaponKind::Beam;
+        s.weapon.trigger = Trigger::Always;
+        s.weapon.damage_per_s = 120.0;
+        s.weapon.headshot_multiplier = 4.0;
+        s.world = Some(crate::world::World {
+            spawns: vec![
+                WorldSpawn { pos: [0.0, 0.0, -10.0], ..Default::default() },
+                WorldSpawn { pos: [0.0, 0.0, -20.0], ..Default::default() },
+            ],
+            kinds: vec![kind(front_only, 0), kind(false, 1)],
+            slots: vec![vec![(0, 1.0)], vec![(1, 1.0)]],
+            ..Default::default()
+        });
+        let mut sim = Sim::new(s, 1);
+        // Aim at the back bot's head: the ray crosses the front bot's body on the way.
+        let aim = sim.targets().iter().find(|t| t.kind() == Some(1)).unwrap().head_middle().unwrap().normalize();
+        for _ in 0..60 {
+            sim.step(FRAME, Input { aim, fire_pressed: false, fire_held: true });
+        }
+        sim
+    };
+    let sim = play(true);
+    assert!(sim.targets().iter().all(|t| t.health == 1e6), "nobody was hurt");
+    assert_eq!(sim.stats().hits, 0);
+    assert!(sim.stats().misses > 0);
+    // With a front bot that takes body hits, the beam hurts that bot and not the one behind.
+    let sim = play(false);
+    let hurt: Vec<u32> = sim.targets().iter().filter(|t| t.health < 1e6).filter_map(|t| t.kind()).collect();
+    assert_eq!(hurt, vec![0]);
+}
+
+/// Guard (mutation check of plan K9): the aim resting on the body of a bot that only takes headshots is not
+/// "on target" for the bot's track: it never enters it and never reaches it. On its head it does.
+#[test]
+fn aim_on_the_body_of_a_headshots_only_bot_never_enters_its_track() {
+    let mut sim = headshot_only_bot();
+    let body = sim.targets()[0].body_middle().normalize();
+    for _ in 0..30 {
+        sim.step(FRAME, Input { aim: body, fire_pressed: false, fire_held: false });
+    }
+    let k = &sim.targets()[0].track;
+    assert_eq!((k.entries, k.reach_s, k.inside), (0, None, false));
+    let head = sim.targets()[0].head_middle().unwrap().normalize();
+    sim.step(FRAME, Input { aim: head, fire_pressed: false, fire_held: false });
+    let k = &sim.targets()[0].track;
+    assert_eq!((k.entries, k.inside), (1, true));
+    assert!(k.reach_s.is_some());
 }

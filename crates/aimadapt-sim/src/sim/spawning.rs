@@ -1,6 +1,7 @@
 //! Where new targets appear, and when.
 
 use super::firing::HEAL_STEP_S;
+use super::geometry::stack_half_segment;
 use super::*;
 
 /// What the abilities of a bot that left keep, with where it was and when it left.
@@ -86,6 +87,8 @@ impl Sim {
                 let (shape, radius, height) = chosen
                     .as_ref()
                     .map_or((self.scenario.targets.shape, tc.radius, tc.height), |k| (k.shape, k.radius, k.height));
+                // A bot with a head stands and bumps as the capsule of its body and head together.
+                let head = chosen.as_ref().map_or(tc.head.as_ref(), |k| k.head.as_ref());
                 let (pos, right) = w.spawn_point_in(&mut self.rng, &others, radius, self.last_aim, chosen.as_ref());
                 match w.motion_of(kind) {
                     // A bot that stays put (a fuse) starts exactly where its spawn point is.
@@ -93,7 +96,7 @@ impl Sim {
                     // A moving bot also leaves any other wall it starts in, and starts on a
                     // floor that is within its step-up height below its feet.
                     Some(m) => {
-                        let half = half_segment(shape, radius, height);
+                        let half = stack_half_segment(shape, radius, height, head.map(|h| (h.radius, h.offset)));
                         let pos = self.bot_walls.lift_out(pos, half, radius);
                         match m.spawn_floor(&self.bot_walls, pos, half, radius) {
                             Some(on_floor) => {
@@ -149,11 +152,15 @@ impl Sim {
         };
         let next_jump = if mv.jumps() { self.rng.range(mv.jump_every_s) } else { 0.0 };
         let turn = new_turn(&mut self.rng, mv);
-        let mut height = tc.height * radius / self.scenario.targets.radius.max(1e-6);
+        let scale = radius / self.scenario.targets.radius.max(1e-6);
+        let mut height = tc.height * scale;
+        // The scenario's head scales with the target's size, as its height does; a kind's own is as it is.
+        let mut head = tc.head.as_ref().map(|h| HeadShape::of(h, scale));
         let (mut health, mut shape) = (tc.health, self.scenario.targets.shape);
         let (mut regen, mut respawn_s) = ((tc.regen_per_s, tc.regen_delay_s), tc.respawn_delay_s);
         if let Some(k) = &chosen {
             (radius, height, health, shape) = (k.radius, k.height, k.health, k.shape);
+            head = k.head.as_ref().map(|h| HeadShape::of(h, 1.0));
             (regen, respawn_s) = ((k.regen_per_s, k.regen_delay_s), k.respawn_delay_s);
         }
         // The oldest brain left by a bot of this slot and kind goes to the bot that takes its place.
@@ -205,6 +212,7 @@ impl Sim {
             kind,
             slot,
             shape,
+            head,
             regen,
             // Healing timers go by the start of the frame (see `heal_in_steps`).
             heal_at: self.frame_began + if regen.1 > 0.0 { regen.1 } else { HEAL_STEP_S },
@@ -215,7 +223,11 @@ impl Sim {
 
     pub(super) fn fit_in_room(&self, p: Vec3) -> Vec3 {
         let a = &self.scenario.arena;
-        let r = self.current.targets.radius.max(self.current.targets.height / 2.0);
+        // The larger of the radius and half the height setting, whatever the shape (so a ball keeps half its
+        // height setting from the room's sides, as it always has), and with a head at least half of body
+        // and head together.
+        let t = &self.current.targets;
+        let r = t.radius.max(t.height / 2.0).max(t.half_height());
         let half = |v: f32| (v / 2.0 - r).max(0.0);
         // A target taller than the room (adaptive size can grow one) sits halfway
         // up; `clamp` panics when its limits cross.

@@ -9,7 +9,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::convert::fuse;
+use crate::convert::{fuse, heads};
 use crate::scenario::{BotChoice, Sce};
 use crate::settings::Section;
 
@@ -104,6 +104,12 @@ pub fn gaps(sce: &Sce) -> Vec<Gap> {
         None => gap("weapon", "the player has no weapon".into()),
         Some(w) => weapon_gaps(w, &mut gap),
     }
+    if let Some(w) = r.weapon {
+        let any_head = heads::any_head(r.bots.iter().filter(|s| !s.is_helper(crate::scenario::player_team(top))));
+        if let Some(detail) = heads::multiplier_refusal(w, any_head, top.is("ScoreMultDamageEfficiency")) {
+            gap("heads", detail);
+        }
+    }
     if let Some(p) = r.player {
         if p.f32_or("MaxSpeed", 0.0) > 0.0 {
             gap("player movement", format!("MaxSpeed={}", p.str("MaxSpeed")));
@@ -140,11 +146,11 @@ pub fn gaps(sce: &Sce) -> Vec<Gap> {
                 if !helper && !SHAPES.contains(&shape) {
                     gap("hitbox shape", shape.into());
                 }
-                if !helper && ch.is("MainBBHasHead") {
-                    gap("heads", ch.name().into());
-                }
-                if !helper && ch.is("HeadshotOnly") {
-                    gap("headshots only", ch.name().into());
+                // Heads play for capsules and balls (plan K9); what wasn't measured stays refused.
+                if !helper {
+                    for (feature, detail) in heads::refusals(ch, r.weapon) {
+                        gap(feature, detail);
+                    }
                 }
                 if !matches!(ch.str("MovementType"), "" | "Base") {
                     gap("movement type", ch.str("MovementType").into());
@@ -345,9 +351,83 @@ InvincibleBots=true",
 
     #[test]
     fn heads_player_movement_and_missing_profiles_are_gaps() {
-        assert_eq!(features(&BASE.replace("MainBBHasHead=false", "MainBBHasHead=true")), vec!["heads"]);
+        // Plan K9: a head plays on a ball when it has a radius. The base text gives it none, and says so.
+        let head = BASE.replace("MainBBHasHead=false", "MainBBHasHead=true");
+        assert_eq!(
+            gaps(&Sce::parse(&head)),
+            vec![Gap {
+                feature: "heads",
+                detail: "Orb: MainBBHeadRadius is 0, a head needs a radius above 0".into(),
+                beyond_plan: true
+            }]
+        );
+        let sized = head.replace(
+            "MainBBHasHead=true",
+            "MainBBHasHead=true
+MainBBHeadRadius=25.0",
+        );
+        assert_eq!(features(&sized), Vec::<&str>::new());
         assert_eq!(features(&BASE.replace("MaxSpeed=0.0", "MaxSpeed=600")), vec!["player movement"]);
         assert_eq!(features(&BASE.replace("CharacterProfile=Orb", "CharacterProfile=Nobody")), vec!["missing profile"]);
+    }
+
+    /// Plan K9: what stays a gap about heads, each with its own detail; the weapon decides whether a bot may be
+    /// headshot only, and its multiplier counts only where the file would set it.
+    #[test]
+    fn the_head_cases_nobody_measured_are_gaps_with_a_detail() {
+        let sized = BASE.replace(
+            "MainBBHasHead=false",
+            "MainBBHasHead=true
+MainBBHeadRadius=25.0",
+        );
+        let detail = |text: &str| gaps(&Sce::parse(text)).into_iter().map(|g| g.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            detail(&sized.replace("Spheroid", "Cuboid")),
+            ["heads (Orb: a head on a cuboid body wasn't measured)"]
+        );
+        let only = sized.replace(
+            "MainBBHasHead=true",
+            "MainBBHasHead=true
+HeadshotOnly=true",
+        );
+        assert_eq!(
+            detail(&only),
+            [
+                "headshots only (Orb: HeadshotOnly=true, and the player's weapon can't headshot (HeadshotCapable isn't true))"
+            ]
+        );
+        let capable = only.replace(
+            "Type=Hitscan",
+            "Type=Hitscan
+HeadshotCapable=true",
+        );
+        assert_eq!(features(&capable), Vec::<&str>::new());
+        let headless = BASE.replace(
+            "MainBBHasHead=false",
+            "MainBBHasHead=false
+HeadshotOnly=true",
+        );
+        assert_eq!(detail(&headless), ["headshots only (Orb: HeadshotOnly=true on a character with no head)"]);
+        // A multiplier of 0 is a gap where the file would set it (a head to hit), and not where it wouldn't.
+        let zero = capable.replace(
+            "HeadshotCapable=true",
+            "HeadshotCapable=true
+HeadshotMultiplier=0.0",
+        );
+        assert_eq!(detail(&zero), ["heads (Pin: HeadshotMultiplier is 0, it must be above 0)"]);
+        let unused = BASE.replace(
+            "Type=Hitscan",
+            "Type=Hitscan
+HeadshotCapable=true
+HeadshotMultiplier=0.0",
+        );
+        assert_eq!(features(&unused), Vec::<&str>::new());
+        let efficiency = unused.replace(
+            "InvinciblePlayer=true",
+            "InvinciblePlayer=true
+ScoreMultDamageEfficiency=true",
+        );
+        assert_eq!(detail(&efficiency), ["heads (Pin: HeadshotMultiplier is 0, it must be above 0)"]);
     }
 
     #[test]

@@ -26,9 +26,9 @@ A scenario is refused when it uses something the trainer doesn't model, so every
 | K15e The smaller refusals | 3ddc7f7 | 133 of 225 |
 | Fix: a bot comes back after its least respawn delay | f6b14a1 | 133 of 225 |
 | Fix: what a bot's abilities keep over a respawn | c118ce9 | 133 of 225 |
-| K8a Still bots that blow themselves up | | 139 of 225 |
+| K8a Still bots that blow themselves up | 1aa3a85 | 139 of 225 |
 | K8b The other weapon abilities, bots that fire | | |
-| K9 Heads | | |
+| K9 Heads | | 143 of 225 |
 | K10 Waypoint paths | | |
 | K11 Several pellets per shot | | |
 | K12 Teleporters, hurt volumes and jump pads | | |
@@ -73,6 +73,8 @@ Of the 118 files that don't play after K3, 58 wait on a single package, 30 on tw
 Recounted after K7, with 132 playing. K7 ran before the rest of K15 and made 16 files play. Of the 93 that don't play, 33 have one reason, 32 have two and 28 have three or more. Files each reason is on, and the files it blocks by itself: waypoint paths 28 and 4, player movement 25 and 5, heads 21 and 5, weapon abilities 19 and 6, map objects 17 and 1, a movement ability the rest of K15 covers 16 and 1, solid props 15 and 5, aim assist 11 and 1, aim down sights 9 and 1, several pellets per shot 8 and 3, player abilities 8 and none, bots that aim and fire 4 and none, `InvincibleBots` on the player's character 2 and none. K8 reaches 138 if it plays the six files that wait on weapon abilities alone.
 
 Recounted after K8a, with 139 playing. Of the 86 that don't play, 32 have one reason, 26 have two and 28 have three or more. Files each reason is on, and the files it blocks by itself: waypoint paths 28 and 5, player movement 25 and 5, heads 21 and 5, map objects 17 and 2, solid props 15 and 5, weapon abilities 13 and 4, aim assist 11 and 1, a movement ability that is still refused 9 and none, aim down sights 9 and 1, several pellets per shot 8 and 3, player abilities 8 and none, recoil 5 and none, KovaaK's own dynamic difficulty 4 and 1, bots that aim and fire 4 and none.
+
+Recounted after K9, with 143 playing. Of the 82 that don't play, 35 have one reason, 20 have two and 27 have three or more. Files each reason is on, and the files it blocks by itself: waypoint paths 28 and 5, player movement 25 and 6, map objects 17 and 2, solid props 15 and 5, weapon abilities 13 and 6, aim assist 11 and 2, a movement ability that is still refused 9 and 1, aim down sights 9 and 1, several pellets per shot 8 and 3, player abilities 8 and none, recoil 5 and 1, KovaaK's own dynamic difficulty 4 and 1, bots that aim and fire 4 and none, a bot size outside what the trainer allows 3 and 1, and one file whose still bots are all hidden behind walls.
 
 ## What is out of scope
 
@@ -623,9 +625,32 @@ K8b, what is left:
 
 ### K9. Heads
 
-- A bot can have a head: a sphere on top of the body, with its own radius and offset. A hit on the head does the weapon's headshot damage.
-- Headshots only: body hits do nothing.
-- The engine draws the head in the head colour.
+Of the 21 files with a head on a bot the player can shoot, five waited on it alone. Three of the 21 are headshots only.
+
+Measured in KovaaK's 3.9.13 on 12 November 2026 with 32 test maps: still bots placed around a ray straight ahead, and the HUD's hits, kills and damage read after each shot (100 uu is 1 m).
+
+- The body keeps its own size: a capsule of radius R and height H, or a ball of radius R whatever its height setting says.
+- The head is a ball of radius r. Its middle is r + offset above the body's top. Offset 0 rests the head on the top, a negative offset sinks it into the body, and a positive one leaves a gap that shots pass through.
+- Body and head together are centred on the character's middle, which is where a headless bot's middle is. With B the body's height in the stack (H for a capsule, 2R for a ball), the body's middle is (2r + offset) / 2 below the character's middle, the head's middle is (B + offset) / 2 above it, and the stack is B + 2r + offset tall.
+- A shot hits one bot, and the first surface on the ray decides between head and body.
+- A weapon with `HeadshotCapable=true` does damage times `HeadshotMultiplier` to a head. A weapon that can't headshot does its plain damage to a head, and its multiplier counts for nothing.
+- A shot's possible damage is damage times the multiplier whenever the weapon can headshot, whether or not any bot has a head.
+- `HeadshotOnly=true`: a body hit does no damage, and a shot that hits only bodies is a miss.
+- Under gravity a capsule with a head stands with its body's bottom on the floor, so it stands B + 2r + offset tall. Measured at offset 0 and at a negative offset.
+- `MainBBHide` changes nothing about what a shot hits.
+- A standing bot floats about 2 uu above the floor, with a head or without. The sim stands it on the floor.
+
+What K9 builds:
+
+- The sim: a target can have a head (`targets.head`, or `head` on a kind of bot in an imported world): a radius, an offset, a colour and whether only the head counts. Body and head are placed by the stacking rule above, a ray is tested against both and the nearer surface decides, and a target that shrinks scales its head and offset with it. The weapon has a `headshot_multiplier` (1 unless set). Both stay out of a scenario's file when unused, so no scenario that existed before has a new fingerprint.
+- Shots: a head hit does damage times the multiplier and a body hit the plain damage. Possible damage is damage times the multiplier. A body hit on a bot that only takes headshots is a miss in every way: no damage, a miss in the stats and the shot record, no restart of the bot's regen delay, no reaction. Beams follow the same rules tick by tick.
+- Standing and bumping: a bot with a head stands on the bottom of its body and bumps into walls and other bots as a capsule of its body's radius and the stack's height.
+- The importer reads `MainBBHasHead`, `MainBBHeadRadius`, `MainBBHeadOffset`, `EnemyHeadColor` and `HeadshotOnly` from a character and `HeadshotCapable` and `HeadshotMultiplier` from the weapon. It sets the multiplier only where the weapon can headshot, the multiplier isn't 1, and either a bot the player can shoot has a head or the score uses damage efficiency. Two characters that differ only in their heads are two kinds of bot.
+- Still refused, each with its own reason: a head on a cuboid, a head radius of 0 or less, headshots only without a head or with a weapon that can't headshot, a multiplier of 0 or less where it would be set, and a bot that blows itself up with a head. Three cases play with an import note: a head sunk more than twice its radius, a ball with a head that falls, and a head wider than its body.
+- The engine draws the head as a ball in the head's colour and starts the health bar above the stack. The `--smoke` bot aims at the head of a bot that only takes headshots.
+- A fixture, Top Knot: three still capsules with heads and a weapon that does four times its damage to a head, scored by damage efficiency.
+
+Result: all 21 files lost the head reason, and 143 of 225 play. Four of the five that waited on heads alone play. The fifth has still bots that the importer finds hidden behind walls from where it puts the player, a planned reason that the head refusal came before. The importer doesn't read the player's own older spawn offsets yet, which is the likely cause and the next small fix. The other 16 keep the reasons they had. No file that already played changed its fingerprint, its notes or its scenario.
 
 ### K10. Waypoint paths
 
@@ -760,3 +785,12 @@ These rows are filled in as packages land. A row leaves the table when a test ma
 | A bot that dies of its own blast, on a scenario with lives | It counts as a timeout and uses up no life | No: measured without lives, where it gave no kill, shot or damage |
 | A weapon with no `SelfDamageMultiplier` key | 1: the blast does its bot its full damage | No: every local fuse weapon has the key |
 | A fuse bot's projectile | Never drawn, and it hits nothing on its way: the importer takes only a blast that stays inside its own bot | No |
+| `MainBBHeadOffset` below minus twice the head's radius | Placed by the same stacking rule as a shallower head | Only at exactly minus twice the radius, where the head lay inside a ball and every hit was a body hit |
+| A ball with a head under gravity | Stands on the ball's bottom, as tall as the stacking rule says | No: measured on capsules |
+| A head much bigger than its body | Placed by the stacking rule | Partly: the bottom fit, the top came out 2 to 6 uu low |
+| What a bot with a head bumps into | A capsule of its body's radius and the stack's height, even when the head is wider than the body | No |
+| A headshots-only body in front of another bot | It blocks the shot, which is a miss | No: the sim's shots stop at the first surface |
+| Possible damage for a weapon that can headshot, in a file where no shootable bot has a head and the score doesn't use damage efficiency | Left at the plain damage, so the files that already played keep their fingerprints and bests | Measured, and left out on purpose: KovaaK's counts damage times the multiplier |
+| A head on a cuboid, a head radius of 0 or less, headshots only without a head or with a weapon that can't headshot, a headshot multiplier of 0 or less | Refused | No |
+| `EnemyHeadColor` | The head's colour. Unset or black gives AimAdapt's own head colour | No |
+| A head with a radius under 1 uu | Played at its size, a speck that can hardly be hit. Files use one where they want no head worth hitting | No |

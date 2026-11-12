@@ -61,7 +61,8 @@ impl Sim {
     pub(super) fn track_aim(&mut self, now: f32, aim: Vec3) {
         let walls = &self.walls;
         for t in &mut self.targets {
-            let on = t.hit_by(aim).is_some_and(|d| !blocked(walls, aim, d));
+            // On a part that counts: for a bot that only takes headshots, the head where it is the first surface.
+            let on = t.counted_hit(aim).is_some_and(|d| !blocked(walls, aim, d));
             let k = &mut t.track;
             let since = now - k.start_at;
             if k.reaction_s.is_none() {
@@ -109,7 +110,7 @@ impl Sim {
                 let lead = if speed > 1e-3 { (x * motion.0 + y * motion.1) / speed } else { 0.0 };
                 self.telemetry.samples.push(TrackSample {
                     t: now,
-                    on_target: t.hit_by(aim).is_some_and(|d| !blocked(&self.walls, aim, d)),
+                    on_target: t.counted_hit(aim).is_some_and(|d| !blocked(&self.walls, aim, d)),
                     error_deg: angle_deg(aim, t.pos),
                     target_speed_dps: speed,
                     lead_deg: lead,

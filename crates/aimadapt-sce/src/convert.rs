@@ -24,6 +24,7 @@ use aimadapt_sim::{Scenario, Vec3};
 
 mod abilities;
 pub(crate) mod fuse;
+pub(crate) mod heads;
 mod helpers;
 mod offsets;
 mod rules;
@@ -197,6 +198,7 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
         return Err(vec![Gap::planned("every place a bot appears is behind a wall", "")]);
     }
     abilities::fuse_notes(&kinds_motions(&kinds), kill_limit, &mut notes);
+    heads::notes(&kinds, &mut notes);
     if kinds.len() > 1 {
         // Several kinds: each with its own hitbox, health, look and movement, on the
         // spawn points its character may use.
@@ -223,6 +225,9 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
     }
 
     let mut scenario = Scenario { world: Some(world), ..base_scenario(sce, top, weapon) };
+    scenario.weapon.headshot_multiplier =
+        heads::multiplier(weapon, heads::any_head(targets.iter().copied()), top.is("ScoreMultDamageEfficiency"))
+            .unwrap_or(1.0);
     scenario.timing.kill_limit = kill_limit;
     let t = &mut scenario.targets;
     t.count = targets.len() as u32;
@@ -236,6 +241,10 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
         !top.is("BlockHealthbars") && characters.iter().any(|ch| ch.f32_or("MaxHealth", 100.0).max(0.001) > damage);
     if let Some(c) = body_color(bot) {
         t.color = c;
+    }
+    // With one kind of bot its head is the scenario's; with several, each kind has its own.
+    if kinds.len() == 1 {
+        t.head = heads::head(bot);
     }
     // Regen counts from the last hit. Negative regen drains the bot until it goes
     // (VT Aether's last 19 s).
@@ -395,6 +404,7 @@ fn add_kinds(
             spawns: if all { Vec::new() } else { spawns },
             rise,
             offsets,
+            head: heads::head(ch),
         });
     }
     Ok(())
@@ -800,10 +810,11 @@ fn same_hitbox(a: &Section, b: &Section) -> bool {
 }
 
 /// Whether two characters play the same: the same one, or alike in hitbox, health,
-/// regen, color, respawn time and spawn offsets.
+/// regen, color, respawn time, spawn offsets and head (as the importer reads it, see `heads::head`).
 fn same_kind(a: &Section, b: &Section) -> bool {
     a.name() == b.name()
         || same_hitbox(a, b)
+            && heads::head(a) == heads::head(b)
             && [
                 "EnemyBodyColor",
                 "HealthRegenPerSec",

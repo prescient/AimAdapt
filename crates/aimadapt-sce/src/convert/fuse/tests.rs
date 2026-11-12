@@ -113,6 +113,15 @@ fn a_bot_that_isnt_a_fuse_is_refused_with_the_reason() {
     assert_refused(&with("MaxSpeed=0.0\nMainBBType", "MaxSpeed=300.0\nMainBBType"), "its bot moves by itself");
     assert_refused(&with("MainBBHasHead=false", "MainBBHasHead=false\nGravity=1.0"), "its character has Gravity=1.0");
     assert_refused(&with("BlockSelfDamage=false", "BlockSelfDamage=true"), "its character has BlockSelfDamage=true");
+    // Plan K9: a head on a bot that blows itself up wasn't measured.
+    assert_refused(
+        &with(
+            "MainBBHasHead=false",
+            "MainBBHasHead=true
+MainBBHeadRadius=10.0",
+        ),
+        "its character has a head",
+    );
     assert_refused(
         &with("BlockSelfDamage=false", "BlockSelfDamage=false\nHealthRegenPerSec=5.0"),
         "its character has HealthRegenPerSec=5.0",

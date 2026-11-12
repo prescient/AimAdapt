@@ -23,7 +23,7 @@ fn read(name: &str) -> Sce {
 #[test]
 fn finds_every_fixture() {
     let files = find_files(&[fixtures()]);
-    assert_eq!(files.len(), 15);
+    assert_eq!(files.len(), 16);
     assert!(files.iter().all(|f| f.extension().unwrap() == "sce"));
 }
 
@@ -96,6 +96,9 @@ fn reflex_map_scenario_reads_and_lists_its_gaps() {
 
     let features: Vec<&str> = gaps(&sce).iter().map(|g| g.feature).collect();
     assert_eq!(features, vec!["map objects", "projectile weapon", "heads"]);
+    // Plan K9: its cuboid bot has a head, which wasn't measured, and says so.
+    let heads = gaps(&sce).into_iter().find(|g| g.feature == "heads").unwrap();
+    assert_eq!(heads.detail, "box target: a head on a cuboid body wasn't measured");
 }
 
 fn path(name: &str) -> PathBuf {
@@ -430,6 +433,9 @@ fn imported_fixtures_keep_their_fingerprints() {
     // pinned the way it was first taken; the others above kept theirs, because a motion leaves the fuse's two
     // fields out of the settings when it has none.
     assert_eq!(import(&path("Short Fuse")).unwrap().scenario.fingerprint(), "9a975eded30ef47a");
+    // Plan K9: bots with heads. Top Knot is the first file with one, so it is pinned the way it was first taken;
+    // the five above kept theirs, because a scenario with no head and a multiplier of 1 stores neither.
+    assert_eq!(import(&path("Top Knot")).unwrap().scenario.fingerprint(), "f4d50fab6176c804");
 }
 
 /// Regression test: CI failed on every push from plan K3 on. Git on Windows checked the
@@ -461,6 +467,7 @@ fn git_keeps_the_fixtures_bytes() {
         "High Blink",
         "Flinch Kite",
         "Short Fuse",
+        "Top Knot",
     ] {
         assert!(!crlf(name), "{name} was given CRLF line ends");
     }
@@ -862,4 +869,67 @@ fn a_ball_that_blows_itself_up_goes_away_by_itself_and_can_still_be_shot() {
         assert!(stats.kills >= at_least, "damage {damage}: {stats:?}");
         assert_eq!(sim.score(), 10.0 * stats.kills as f32, "damage {damage}: {stats:?}");
     }
+}
+
+/// Plan K9: capsules with heads (the made-up Top Knot fixture) import with the head in the sim's units and the
+/// weapon's multiplier, and play. A player who aims at each head and fires kills every bot with one shot (100 of
+/// 100 possible) and ends with a damage efficiency of 1.0; one who aims at each body's middle needs four shots a
+/// bot (a body shot is a quarter of a head shot) and ends at 0.25.
+#[test]
+fn capsules_with_heads_import_and_a_headshot_kills_where_a_body_shot_takes_a_quarter() {
+    let i = import(&path("Top Knot")).unwrap();
+    let s = &i.scenario;
+    assert_eq!((s.targets.count, s.targets.shape, s.targets.health), (3, Shape::Capsule, 100.0));
+    assert!((s.targets.radius - 0.4).abs() < 1e-6 && (s.targets.height - 1.8).abs() < 1e-6);
+    let head = s.targets.head.as_ref().unwrap();
+    assert_eq!((head.radius, head.offset, head.headshots_only), (0.25, -0.1, false));
+    assert_eq!(head.color, "#e6cc33");
+    assert_eq!((s.weapon.damage, s.weapon.headshot_multiplier), (25.0, 4.0));
+    assert!(s.world.as_ref().unwrap().damage_efficiency);
+    assert!(s.problems().is_empty(), "{:?}", s.problems());
+    assert!(gaps(&Sce::read(&path("Top Knot")).unwrap()).is_empty());
+
+    // The stack is 2.2 m tall: the body from -1.1 to 0.7 around the character's middle, the head's middle 0.85 up.
+    let sim = started(s.clone());
+    let t = &sim.targets()[0];
+    assert!((t.stack_height() - 2.2).abs() < 1e-5);
+    assert!((t.body_middle().y - t.pos.y + 0.2).abs() < 1e-5);
+    assert!((t.head_middle().unwrap().y - t.pos.y - 0.85).abs() < 1e-5);
+
+    // Aiming at each head: one shot a bot.
+    let mut sim = started(s.clone());
+    while sim.stats().kills < 3 {
+        let aim = sim.targets()[0].head_middle().unwrap().normalize();
+        sim.step(0.01, Input { aim, fire_pressed: true, fire_held: true });
+        sim.step(0.25, idle());
+    }
+    let st = sim.stats();
+    println!(
+        "K9 fixture, aiming at heads: {} shots, {} kills, efficiency {:?}",
+        st.shots,
+        st.kills,
+        st.damage_efficiency()
+    );
+    assert_eq!((st.shots, st.hits, st.kills), (3, 3, 3));
+    assert_eq!(st.damage_efficiency(), Some(1.0));
+    assert_eq!(sim.score(), 300.0);
+
+    // Aiming at each body's middle, at the bot with the least health left: four shots a bot.
+    let mut sim = started(s.clone());
+    while sim.stats().kills < 3 {
+        let t = sim.targets().iter().min_by(|a, b| a.health.total_cmp(&b.health)).unwrap();
+        let aim = t.body_middle().normalize();
+        sim.step(0.01, Input { aim, fire_pressed: true, fire_held: true });
+        sim.step(0.25, idle());
+    }
+    let st = sim.stats();
+    println!(
+        "K9 fixture, aiming at bodies: {} shots, {} kills, efficiency {:?}",
+        st.shots,
+        st.kills,
+        st.damage_efficiency()
+    );
+    assert_eq!((st.shots, st.hits, st.kills), (12, 12, 3));
+    assert_eq!(st.damage_efficiency(), Some(0.25));
+    assert_eq!(sim.score(), 75.0);
 }

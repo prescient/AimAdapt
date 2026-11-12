@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::motion::Motion;
 use crate::rng::Rng;
-use crate::scenario::Shape;
+use crate::scenario::{Head, Shape};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -317,6 +317,10 @@ pub struct WorldKind {
     /// `offset_max`, when they differ from the world's.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub offsets: Option<[[f32; 3]; 2]>,
+    /// This kind's head, if it has one (see [`Head`]); a world with one kind of bot keeps it on the
+    /// scenario's `targets` instead.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub head: Option<Head>,
 }
 
 impl Default for WorldKind {
@@ -335,6 +339,7 @@ impl Default for WorldKind {
             spawns: Vec::new(),
             rise: 0.0,
             offsets: None,
+            head: None,
         }
     }
 }
@@ -543,6 +548,11 @@ impl World {
             if k.spawns.iter().any(|s| *s >= spawns) {
                 p.push("a kind of bot refers to a spawn point the map doesn't have".into());
                 break;
+            }
+        }
+        for problem in self.kinds.iter().filter_map(|k| k.head.as_ref()).flat_map(Head::problems) {
+            if !p.contains(&problem) {
+                p.push(problem);
             }
         }
         for problem in self.pushers.iter().flat_map(Pusher::problems) {

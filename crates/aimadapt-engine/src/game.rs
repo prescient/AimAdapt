@@ -317,6 +317,13 @@ struct TargetView {
     material: Handle<StandardMaterial>,
 }
 
+/// The head of a target that has one: a ball of its own, made at radius 1 and scaled to the head's size.
+#[derive(Component)]
+struct HeadView {
+    id: u64,
+    material: Handle<StandardMaterial>,
+}
+
 #[derive(Resource)]
 struct TargetAssets {
     mesh: Handle<Mesh>,
@@ -324,6 +331,11 @@ struct TargetAssets {
     /// An imported scenario's kinds of bot: each one's mesh, the radius it was made
     /// at, and its color.
     kinds: Vec<(Handle<Mesh>, f32, Color)>,
+    /// A ball of radius 1, for the heads, and the head color of the scenario's targets and of each kind
+    /// (none for a bot with no head).
+    head_mesh: Handle<Mesh>,
+    head: Option<Color>,
+    kind_heads: Vec<Option<Color>>,
     /// The second color for timed targets, when colors alternate.
     alt: Option<Color>,
     /// Targets per wave: the scenario's target count.
@@ -566,10 +578,14 @@ fn rebuild_world(
         .map(|k| (body(k.shape, k.radius, k.height), k.radius, color(&k.color)))
         .collect();
     let flat = |c: Color| StandardMaterial { base_color: c, unlit: true, ..default() };
+    let head_color = |h: &Option<aimadapt_sim::scenario::Head>| h.as_ref().map(|h| color(&h.color));
     commands.insert_resource(TargetAssets {
         mesh,
         base: color(&tc.color),
         kinds,
+        head_mesh: meshes.add(Sphere::new(1.0).mesh().uv(32, 16)),
+        head: head_color(&tc.head),
+        kind_heads: s.world.iter().flat_map(|w| &w.kinds).map(|k| head_color(&k.head)).collect(),
         alt: tc.alternate_colors.then(|| color(&tc.alt_color)),
         wave: tc.count.max(1),
         radius: tc.radius,
@@ -979,7 +995,8 @@ fn sync_targets(
     game: Res<Game>,
     assets: Option<Res<TargetAssets>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut views: Query<(Entity, &TargetView, &mut Transform)>,
+    mut views: Query<(Entity, &TargetView, &mut Transform), Without<HeadView>>,
+    mut heads: Query<(Entity, &HeadView, &mut Transform), Without<TargetView>>,
 ) {
     let Some(assets) = assets else { return };
     if game.world_dirty {
@@ -987,35 +1004,77 @@ fn sync_targets(
     }
     let live: HashMap<u64, &aimadapt_sim::sim::Target> = game.sim.targets().iter().map(|t| (t.id, t)).collect();
     let mut shown = Vec::new();
+    let mut shown_heads = Vec::new();
     for (entity, view, mut tf) in &mut views {
         let Some(t) = live.get(&view.id) else {
             commands.entity(entity).despawn();
             continue;
         };
         shown.push(view.id);
-        tf.translation = t.pos;
-        tf.scale = Vec3::splat(t.radius / body_of(&assets, t).1);
+        *tf = body_pose(&assets, t);
         if let Some(mut m) = materials.get_mut(&view.material) {
             m.base_color =
                 target_color(base_color(&assets, t), t.health_fraction(), game.run.flashes.contains_key(&t.id));
         }
     }
-    for t in game.sim.targets() {
-        if shown.contains(&t.id) {
+    // A head goes when its target goes, and scales, dims and flashes with it.
+    for (entity, view, mut tf) in &mut heads {
+        let head = live.get(&view.id).and_then(|t| Some((*t, head_pose(t)?, head_color(&assets, t)?)));
+        let Some((t, pose, color)) = head else {
+            commands.entity(entity).despawn();
             continue;
+        };
+        shown_heads.push(view.id);
+        *tf = pose;
+        if let Some(mut m) = materials.get_mut(&view.material) {
+            m.base_color = target_color(color, t.health_fraction(), game.run.flashes.contains_key(&t.id));
         }
-        let material = materials.add(StandardMaterial {
-            base_color: base_color(&assets, t),
-            perceptual_roughness: 0.5,
-            ..default()
-        });
-        let (mesh, radius) = body_of(&assets, t);
-        commands.spawn((
-            TargetView { id: t.id, material: material.clone() },
-            Mesh3d(mesh.clone()),
-            MeshMaterial3d(material),
-            Transform::from_translation(t.pos).with_scale(Vec3::splat(t.radius / radius)),
-        ));
+    }
+    for t in game.sim.targets() {
+        if !shown.contains(&t.id) {
+            let material = materials.add(StandardMaterial {
+                base_color: base_color(&assets, t),
+                perceptual_roughness: 0.5,
+                ..default()
+            });
+            let (mesh, _) = body_of(&assets, t);
+            commands.spawn((
+                TargetView { id: t.id, material: material.clone() },
+                Mesh3d(mesh.clone()),
+                MeshMaterial3d(material),
+                body_pose(&assets, t),
+            ));
+        }
+        if let (false, Some(pose), Some(color)) = (shown_heads.contains(&t.id), head_pose(t), head_color(&assets, t)) {
+            let material =
+                materials.add(StandardMaterial { base_color: color, perceptual_roughness: 0.5, ..default() });
+            commands.spawn((
+                HeadView { id: t.id, material: material.clone() },
+                Mesh3d(assets.head_mesh.clone()),
+                MeshMaterial3d(material),
+                pose,
+            ));
+        }
+    }
+}
+
+/// Where and how big a target's body is drawn: at the sim's body middle (the target's middle when it has no
+/// head), scaled from the size its mesh was made at.
+fn body_pose(assets: &TargetAssets, t: &aimadapt_sim::sim::Target) -> Transform {
+    let (_, made_at) = body_of(assets, t);
+    Transform::from_translation(t.body_middle()).with_scale(Vec3::splat(t.radius / made_at))
+}
+
+/// Where and how big a target's head is drawn, if it has one: a ball at the sim's head middle with the head's radius.
+fn head_pose(t: &aimadapt_sim::sim::Target) -> Option<Transform> {
+    Some(Transform::from_translation(t.head_middle()?).with_scale(Vec3::splat(t.head_radius()?)))
+}
+
+/// A target's head color: its kind's, or the scenario's. None for a target with no head.
+fn head_color(assets: &TargetAssets, t: &aimadapt_sim::sim::Target) -> Option<Color> {
+    match t.kind() {
+        Some(k) => assets.kind_heads.get(k as usize).copied().flatten(),
+        None => assets.head,
     }
 }
 
@@ -1041,12 +1100,10 @@ fn base_color(assets: &TargetAssets, t: &aimadapt_sim::sim::Target) -> Color {
     }
 }
 
-/// How far above a target's center its bars start: the top of the sphere, capsule or box.
+/// How far above a target's center its bars start: the top of the sphere, capsule or box, or with a head the
+/// top of body and head together.
 fn bar_base(_s: &Scenario, t: &aimadapt_sim::sim::Target) -> f32 {
-    match t.shape() {
-        Shape::Capsule | Shape::Box => (t.height() / 2.0).max(t.radius),
-        Shape::Sphere => t.radius,
-    }
+    t.top()
 }
 
 /// The bars a target shows, top to bottom order from the target up, with how
@@ -1575,6 +1632,9 @@ mod tests {
             mesh: Handle::default(),
             base: color(&s.targets.color),
             kinds: Vec::new(),
+            head_mesh: Handle::default(),
+            head: s.targets.head.as_ref().map(|h| color(&h.color)),
+            kind_heads: Vec::new(),
             alt: s.targets.alternate_colors.then(|| color(&s.targets.alt_color)),
             wave: s.targets.count.max(1),
             radius: s.targets.radius,
@@ -1666,6 +1726,74 @@ mod tests {
                 bar_base(&s, t)
             );
         }
+    }
+
+    /// A scenario of capsules of radius 0.4 and height 1.8 with a head of 0.25 sunk 0.1 into the body: the stack is
+    /// 2.2 m tall, the body's middle 0.2 below the target's and the head's 0.85 above it.
+    fn capsule_with_a_head(only: bool) -> Scenario {
+        let mut s = builtin("builtin:static-grid");
+        s.targets.shape = Shape::Capsule;
+        s.targets.radius = 0.4;
+        s.targets.height = 1.8;
+        s.targets.health = 100.0;
+        s.targets.head = Some(aimadapt_sim::scenario::Head {
+            radius: 0.25,
+            offset: -0.1,
+            headshots_only: only,
+            ..Default::default()
+        });
+        s.weapon.damage = 25.0;
+        s.weapon.headshot_multiplier = 4.0;
+        s
+    }
+
+    /// Plan K9: a target with a head is drawn as the sim has it. The body goes at the sim's body middle and the head,
+    /// a ball, at the sim's head middle with the head's radius; bars start at the top of the stack. A target with
+    /// no head is drawn where it always was. (The window itself can't be tested here.)
+    #[test]
+    fn a_target_with_a_head_is_drawn_where_the_sim_puts_its_body_and_head() {
+        let s = capsule_with_a_head(false);
+        let a = assets(&s);
+        let sim = Sim::new(s.clone(), 1);
+        let t = &sim.targets()[0];
+        let body = body_pose(&a, t);
+        assert!((body.translation - (t.pos - Vec3::Y * 0.2)).length() < 1e-5, "{:?}", body.translation);
+        assert_eq!(body.translation, t.body_middle());
+        assert_eq!(body.scale, Vec3::ONE);
+        let head = head_pose(t).expect("it has a head");
+        assert!((head.translation - (t.pos + Vec3::Y * 0.85)).length() < 1e-5, "{:?}", head.translation);
+        assert_eq!(head.translation, t.head_middle().unwrap());
+        assert_eq!(head.scale, Vec3::splat(0.25));
+        assert!((bar_base(&s, t) - 1.1).abs() < 1e-5, "{}", bar_base(&s, t));
+        assert!((bar_base(&s, t) - t.stack_height() / 2.0).abs() < 1e-5);
+        assert_eq!(head_color(&a, t), Some(color(&s.targets.head.as_ref().unwrap().color)));
+        // No head: the body is at the target's middle, there is no head to draw, and the bars start where they did.
+        let plain = builtin("builtin:unbroken-strafes");
+        let sim = Sim::new(plain.clone(), 1);
+        let t = &sim.targets()[0];
+        assert_eq!(body_pose(&assets(&plain), t).translation, t.pos);
+        assert!(head_pose(t).is_none() && head_color(&assets(&plain), t).is_none());
+        assert!((bar_base(&plain, t) - (plain.targets.height / 2.0).max(plain.targets.radius)).abs() < 1e-5);
+    }
+
+    /// Plan K9: the `--smoke` bot aims at the head of a bot that only takes headshots, so it can finish such a
+    /// scenario: every hit it lands is a head hit worth a kill, and it kills several bots.
+    #[test]
+    fn the_smoke_bot_aims_at_the_head_of_a_headshots_only_bot() {
+        let mut s = capsule_with_a_head(true);
+        s.timing.duration_s = 30.0;
+        let mut sim = Sim::new(s, 1);
+        let mut bot = crate::bot::Bot::new(5);
+        let (mut yaw, mut pitch) = (0.0f64, 0.0f64);
+        let dt = 1.0 / 240.0;
+        while sim.phase() != Phase::Finished {
+            let input = bot.input(&sim, &mut yaw, &mut pitch, dt);
+            sim.step(dt, input);
+        }
+        let st = sim.stats();
+        assert!(st.kills >= 3, "{st:?}");
+        // A hit on a body does nothing here, so every hit counted was on a head, and each took 100 off.
+        assert_eq!(st.damage_done, st.hits as f32 * 100.0, "{st:?}");
     }
 
     #[test]

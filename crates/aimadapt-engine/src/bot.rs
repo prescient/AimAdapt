@@ -46,7 +46,7 @@ impl Bot {
             self.target = next.map(|t| t.id);
             self.since = 0.0;
             self.delay = 0.16 + self.rng.next_f32() * 0.14;
-            let r = next.map_or(0.5, |t| (t.radius / t.pos.length()).atan().to_degrees());
+            let r = next.map_or(0.5, |t| (t.aim_radius() / t.pos.length()).atan().to_degrees());
             self.offset = (self.noise() * r * 1.6, self.noise() * r * 1.2);
             self.miss_early = self.rng.next_f32() < 0.12;
         }
@@ -57,7 +57,8 @@ impl Bot {
         };
         let beam = sim.scenario().weapon.kind == WeaponKind::Beam;
         if self.since > self.delay || beam {
-            let (ty, tp) = angles(t.pos);
+            // At the head of a bot that only takes headshots, else at the middle of its body.
+            let (ty, tp) = angles(t.aim_point());
             let k = 1.0 - (-dt * if beam { 9.0 } else { 12.0 }).exp();
             *yaw += f64::from((ty + self.offset.0 - *yaw as f32) * k);
             *pitch += f64::from((tp + self.offset.1 - *pitch as f32) * k);
@@ -68,8 +69,8 @@ impl Bot {
             }
         }
         let aim = from_angles(*yaw as f32, *pitch as f32);
-        let r = (t.radius / t.pos.length()).atan().to_degrees();
-        let off = angle_deg(aim, t.pos);
+        let r = (t.aim_radius() / t.pos.length()).atan().to_degrees();
+        let off = angle_deg(aim, t.aim_point());
         let ready = self.since > self.delay + 0.05 && self.cooldown <= 0.0;
         let fire = !beam && ready && (off <= r * 0.9 || (self.miss_early && off <= r * 2.2));
         if fire {
