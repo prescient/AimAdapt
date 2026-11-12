@@ -53,7 +53,8 @@ pub struct Abilities {
     pub list: Vec<Ability>,
 }
 
-/// One movement ability.
+/// One ability: a movement ability (a dash, a blink or an ability jump), or a weapon ability when it has a
+/// [`fuse`](Ability::fuse).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Ability {
@@ -114,7 +115,62 @@ pub struct Ability {
     /// Uses the ability when the bot is hurt (`AIDamageReaction`), see [`Reaction`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reaction: Option<Reaction>,
+    /// Makes this a weapon ability: a use pulls the trigger of a weapon that hurts the bot itself, see
+    /// [`Fuse`]. Such an ability has no speed and no duration and doesn't touch the bot's velocity.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fuse: Option<Fuse>,
 }
+
+/// The weapon of a weapon ability that blows its own bot up, "the fuse" (plan K8a). The bot holds no weapon of
+/// its own, only this ability. Its weapon is a projectile that crawls out of the bot, goes off after a short
+/// delay while still inside the bot's body and takes health off the bot, so a target the player doesn't kill
+/// in time kills itself and a new one comes.
+///
+/// Measured in KovaaK's 3.9.13 on 12 November 2026 (seven maps of still balls in a row with nobody shooting,
+/// filmed at about 55 frames a second, so times are good to about 0.02 s; the base ball had health 3, a blast
+/// that takes 2, 0.6 s between shots, a charge timer of 0.09 s and a key that ticks every 0.1 s):
+///
+/// - A weapon ability is tried like a movement ability: it needs a charge, a tick of the bot's key more than
+///   `AIReuseTimer` after the last try, the start block over, a willing window and `UseWeapons=true`. A
+///   frequency of 0 or `UseWeapons=false` never fires, and `FullyAuto` changes nothing. A charge refills from
+///   the press (a charge timer of 2.0 s slowed the shots).
+/// - A try presses the trigger for 0.1 s ([`TRIGGER_S`]). The weapon fires at once if it is ready; if it isn't,
+///   it fires when its `TimeBetweenShots` is up, provided that comes within 0.1 s of the tick, else the press
+///   is lost. With a key that ticks every 0.5 s, weapons of 0.55, 0.58 and 0.60 s fired at 1.05, 1.08 and
+///   1.10 s after the press at 1.0 s, and weapons of 0.62 and 0.65 s lost it and fired at the tick at 1.5 s.
+///   With a tick of 0.1 s the presses join up and the weapon fires at its own pace.
+/// - The blast lands `DelayAfterSpawn` after the shot and takes the explosion's damage times
+///   `SelfDamageMultiplier` off the bot (a delay of 1.0 s gave blasts 1.0 s after each shot; that weapon's
+///   `MaxTravelTime` was 3.0 s, a delay longer than the travel time wasn't measured).
+/// - A bot that dies of its own blast is not a kill: after 40 s of such deaths the HUD showed a Kill Count of
+///   0 and no shot and no damage counted. The trainer plays it as the timeout a health cost already gives
+///   (a blast is health owed, see `BotState::take_owed_health`).
+/// - The weapon's cooldown outlives the bot: with 1.5 s between shots and a respawn delay of 1.0 s the shots
+///   were exactly 1.5 s apart through the bot's death and respawn (see [`Brain`]). The key's ticks and the
+///   charges start again with each life.
+/// - KovaaK's draws nothing for any of it; only the bot's health bar goes down. Burst keys on a
+///   semi-automatic weapon add no pause, and `GameVersion` made no difference.
+///
+/// Not measured, and played as follows (decisions): a press the weapon doesn't answer still uses the
+/// ability, spending the charge and counting as the last try; a blast still waiting when its bot leaves
+/// (killed by the player, or dead of an earlier blast) is dropped; a shot that was scheduled inside the
+/// trigger's 0.1 s but hadn't fired when the bot left counts as fired for the cooldown; the ability's charges,
+/// timers, gates and the shared cooldown work as a movement ability's do; the projectile is taken to start
+/// inside the bot's body, so a blast always hurts its own bot and nobody else.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Fuse {
+    /// The weapon's time between shots, in seconds (`TimeBetweenShots`).
+    pub shot_every_s: f32,
+    /// From the shot to the blast, in seconds (`DelayAfterSpawn`).
+    pub burn_s: f32,
+    /// What a blast takes off the bot, in health points: the explosion's damage times `SelfDamageMultiplier`.
+    pub damage: f32,
+}
+
+/// How long a try presses the trigger of a weapon ability, in seconds (measured in KovaaK's 3.9.13, see
+/// [`Fuse`]). A weapon that is ready within this long of the tick fires when it is ready.
+const TRIGGER_S: f32 = 0.1;
 
 impl Default for Ability {
     fn default() -> Self {
@@ -142,6 +198,7 @@ impl Default for Ability {
             max_angle_deg: 360.0,
             health_cost: 0.0,
             reaction: None,
+            fuse: None,
         }
     }
 }
@@ -174,6 +231,11 @@ impl Abilities {
             check(fine(a.min_distance, 0.0, 10_000.0) && fine(a.max_distance, 0.0, 10_000.0), "a distance");
             check(fine(a.max_angle_deg, 0.0, 360.0), "a view angle");
             check(fine(a.health_cost, 0.0, 1.0e6), "a health cost");
+            if let Some(f) = &a.fuse {
+                let time = |v: f32| v.is_finite() && v > 0.0 && v <= 3600.0;
+                check(time(f.shot_every_s) && time(f.burn_s), "a fuse time");
+                check(f.damage.is_finite() && f.damage > 0.0 && f.damage <= 1.0e6, "a fuse damage");
+            }
             if let Some(r) = &a.reaction {
                 check(fine(r.threshold, 0.0, 1.0e6) && fine(r.ignore_chance, 0.0, 1.0), "a damage reaction");
                 check(timers(&[r.reset_s, r.delay_s[0], r.delay_s[1]]), "a time");
@@ -211,6 +273,9 @@ pub(super) struct Slot {
     last_press: Option<f32>,
     /// The tick that was last a try for this ability, used or not.
     last_try: Option<f32>,
+    /// When a weapon ability's weapon last fired (see [`Fuse`]): the time it was scheduled for, which can be
+    /// up to [`TRIGGER_S`] after the tick that pressed the trigger. It carries over a respawn.
+    pub(super) last_shot: Option<f32>,
     /// What the bot's reaction to damage has counted and is waiting to do.
     pub(super) react: Pending,
 }
@@ -225,6 +290,7 @@ impl Slot {
             from_spawn: short,
             last_press: None,
             last_try: None,
+            last_shot: None,
             react: Pending::default(),
         }
     }
@@ -299,6 +365,10 @@ pub(super) struct AbilityState {
     uses: u32,
     /// Health its uses have cost that the sim hasn't taken off yet.
     owed: f32,
+    /// Blasts of a weapon ability's shots that are still to go off: when, on this bot's clock, and for how
+    /// much health. Each moves into `owed` when it is due, see [`BotState::use_abilities`]. Not carried over
+    /// a respawn.
+    pub(super) blasts: Vec<(f32, f32)>,
 }
 
 impl Default for AbilityState {
@@ -314,6 +384,7 @@ impl Default for AbilityState {
             willing: false,
             uses: 0,
             owed: 0.0,
+            blasts: Vec::new(),
         }
     }
 }
@@ -543,6 +614,22 @@ impl BotState {
             }
         }
         self.fire_reactions(m, view, pos, seen, Until::By(clock));
+        self.land_blasts();
+    }
+
+    /// Moves every blast that is due by the bot's clock (a tie counts as due) into the health the bot owes.
+    /// From there the sim does the rest: it takes the health off and, when it runs out, the bot leaves as a
+    /// timeout (see [`Fuse`]).
+    fn land_blasts(&mut self) {
+        let clock = self.ab.clock;
+        let owed = &mut self.ab.owed;
+        self.ab.blasts.retain(|&(at, damage)| {
+            let due = at <= clock + TIE_S;
+            if due {
+                *owed += damage;
+            }
+            !due
+        });
     }
 
     /// The tick at `at`: for each ability it is a try for, in list order, the first that
@@ -607,6 +694,10 @@ impl BotState {
         self.ab.last_end = Some(at + a.duration_s.max(0.0));
         self.ab.uses += 1;
         self.ab.owed += a.health_cost;
+        if let Some(fuse) = &a.fuse {
+            self.pull_trigger(i, fuse, at);
+            return;
+        }
         let dir = direction(m, ab, a, view, pos);
         if a.duration_s > 0.0 {
             // Held: the horizontal speed every substep. Without `no_gravity` the climb
@@ -631,6 +722,19 @@ impl BotState {
         }
         if self.vel.y > 0.0 {
             self.grounded = false;
+        }
+    }
+
+    /// A use of a weapon ability at the tick `at` presses the trigger for [`TRIGGER_S`]: the weapon fires when it
+    /// is ready (at `at` if it already is) if that is within the press, and the press is lost if not. A shot
+    /// makes the weapon wait its time between shots and queues the blast. The charge is spent either way (see
+    /// [`Fuse`]).
+    fn pull_trigger(&mut self, i: usize, fuse: &Fuse, at: f32) {
+        let slot = &mut self.ab.slots[i];
+        let ready = slot.last_shot.map_or(at, |t| (t + fuse.shot_every_s).max(at));
+        if ready - at <= TRIGGER_S + TIE_S {
+            slot.last_shot = Some(ready);
+            self.ab.blasts.push((ready + fuse.burn_s, fuse.damage));
         }
     }
 

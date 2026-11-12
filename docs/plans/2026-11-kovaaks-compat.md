@@ -25,8 +25,9 @@ A scenario is refused when it uses something the trainer doesn't model, so every
 | K15d Abilities used when hurt | 8ddb138 | 133 of 225 |
 | K15e The smaller refusals | 3ddc7f7 | 133 of 225 |
 | Fix: a bot comes back after its least respawn delay | f6b14a1 | 133 of 225 |
-| Fix: what a bot's abilities keep over a respawn | | 133 of 225 |
-| K8 Bots that destroy themselves | | |
+| Fix: what a bot's abilities keep over a respawn | c118ce9 | 133 of 225 |
+| K8a Still bots that blow themselves up | | 139 of 225 |
+| K8b The other weapon abilities, bots that fire | | |
 | K9 Heads | | |
 | K10 Waypoint paths | | |
 | K11 Several pellets per shot | | |
@@ -70,6 +71,8 @@ Recounted after K3, with 107 playing. That estimate took K2 and K3 to clear ever
 Of the 118 files that don't play after K3, 58 wait on a single package, 30 on two and 30 on three or more. Files each package is needed for, and the files it would unlock by itself: K7 and K8 44 and 22, K14 31 and 5, K10 28 and 3, K15 23 and 7, K9 21 and 5, K12 17 and 1, K13 15 and 5, K4 8 and 4, K11 8 and 3, K5 6 and none, the "Later" list 24 and 3.
 
 Recounted after K7, with 132 playing. K7 ran before the rest of K15 and made 16 files play. Of the 93 that don't play, 33 have one reason, 32 have two and 28 have three or more. Files each reason is on, and the files it blocks by itself: waypoint paths 28 and 4, player movement 25 and 5, heads 21 and 5, weapon abilities 19 and 6, map objects 17 and 1, a movement ability the rest of K15 covers 16 and 1, solid props 15 and 5, aim assist 11 and 1, aim down sights 9 and 1, several pellets per shot 8 and 3, player abilities 8 and none, bots that aim and fire 4 and none, `InvincibleBots` on the player's character 2 and none. K8 reaches 138 if it plays the six files that wait on weapon abilities alone.
+
+Recounted after K8a, with 139 playing. Of the 86 that don't play, 32 have one reason, 26 have two and 28 have three or more. Files each reason is on, and the files it blocks by itself: waypoint paths 28 and 5, player movement 25 and 5, heads 21 and 5, map objects 17 and 2, solid props 15 and 5, weapon abilities 13 and 4, aim assist 11 and 1, a movement ability that is still refused 9 and none, aim down sights 9 and 1, several pellets per shot 8 and 3, player abilities 8 and none, recoil 5 and none, KovaaK's own dynamic difficulty 4 and 1, bots that aim and fire 4 and none.
 
 ## What is out of scope
 
@@ -584,8 +587,37 @@ The nine were played in the sim without a window after the fix, idle and by a bo
 
 "Pressure" scenarios give each bot a weapon ability or a weapon that damages the bot itself after a delay, so a target that isn't shot in time goes away and counts against the player.
 
-- Read the 19 files: the delay, what starts it (a timer from spawn, or the first hit), and what the score does when a bot dies that way.
-- `aimadapt-sim`: a kind can have a fuse. The engine shows it only if KovaaK's does.
+Of the 19 files with a bot's weapon ability, six waited on it alone. In all six the bot stands still and has one weapon ability, whose weapon is a slow explosive projectile that goes off inside the bot's own body a set time after the shot. That shape is K8a. The other 13 are K8b.
+
+Measured in KovaaK's 3.9.13 on 12 November 2026 with seven test maps of still balls that come back where they were (films at about 55 frames a second, times good to about 0.02 s):
+
+- A weapon ability's try needs what a movement ability's needs: a charge, a tick of the key later than the reuse time after the last try, the start block over and a willing window. It also needs `UseWeapons=true` on the bot. With `UseWeapons=false` or a frequency of 0 the bot never fired. `FullyAuto=false` on the ability changed nothing, and burst keys on a semi-auto weapon added no pause.
+- A try presses the trigger for 0.1 s. The weapon fires at once if it is ready, or when its time between shots ends if that comes within the press. With a key every 0.5 s, weapons of 0.55, 0.58 and 0.60 s fired at 1.05, 1.08 and 1.10 s. Weapons of 0.62 and 0.65 s lost the press at 1.0 s and fired at 1.5 s. With a key every 0.1 s the presses join up, and a weapon of 0.65 s fired every 0.65 s.
+- The blast comes `DelayAfterSpawn` after the shot (1.0 gave blasts 1.0 s after each shot) and takes the explosion's damage times `SelfDamageMultiplier` off the bot.
+- A bot that dies of its own blast gives no kill, no shot and no damage on the HUD. After 40 s of such deaths the kill count was 0 and accuracy and damage were empty.
+- The weapon's time between shots runs on through a death and a respawn, like the timers in the fault above: with 1.5 s between shots and a respawn delay of 1.0 s the shots stayed 1.5 s apart.
+- A charge refills from the press. A test bot with a charge time of 2.0 s fired more slowly than its weapon alone would have.
+
+Not measured, and played as follows. A press the weapon doesn't answer still uses up the ability's charge. A charge that is back exactly at a try isn't there for that try, the rule measured for movement abilities. A blast still waiting when its bot goes, killed or not, is dropped. A bot that dies of its own blast uses up no bot life. A missing `SelfDamageMultiplier` reads as 1. The ability's distance and view rules, `DelayAfterUse` and `AbilityGlobalCooldown` are read as a movement ability's are.
+
+What K8a builds:
+
+- `aimadapt-sim`: an ability can carry a fuse, which is the weapon's time between shots, the delay from the shot to the blast and the blast's damage to the bot. A use presses the trigger for 0.1 s. A shot queues a blast, and a blast that comes due takes its damage off the bot's health the way an ability's health cost does: when the health runs out the bot leaves as a timeout, with no kill, hit, shot or damage counted. The weapon's cooldown is part of the bot's brain and carries over a respawn. A motion can be marked as staying put. Such a bot runs its abilities and nothing else, starts exactly on its spawn point and isn't pushed apart from other bots.
+- `aimadapt-sce`: a bot's weapon ability imports as a fuse when all of the following holds. Otherwise it is refused, with the ability's name and the first setting that fails.
+  - The bot uses weapons, aims, carries no weapon of its own and has this one ability.
+  - It doesn't move by itself, isn't pushed by helper bots, doesn't fall, can die, takes its own damage and doesn't regenerate.
+  - The ability has no reaction to damage and no health rules, and none of its four `AIUse` flags is off.
+  - Its weapon is in the file. It is a semi-auto explosive projectile with one shot a click, no burst, no wind-up, no magazine and no gravity, and it doesn't go off on contact or on the next attack.
+  - The delay from the shot to the blast is above 0 and below the projectile's travel time. The blast does the same damage at its middle and its edge, and that damage times `SelfDamageMultiplier` is above 0.
+  - The whole blast stays inside the bot's body: the projectile's travel in the delay, plus the weapon's origin offset, plus the blast's radius is no more than the body's radius (for a body that isn't a ball, the smaller of its radius and half its height). Then the blast always reaches its own bot and nothing else.
+- A scenario with a fuse gets an import note that names what wasn't checked, and a second note when it also has bot lives.
+- The made-up fixture `AimAdapt Test - Short Fuse.sce`.
+
+Result: 139 of 225, up from 133. All six files that waited on weapon abilities alone play. No playing file's fingerprint or notes changed, and none stopped. The six were played in the sim without a window. Idle, every target goes by itself, and the run ends with timeouts only and a score of 0. With a bot that aims perfectly and holds fire, every shot is a kill and no target times out. None was watched in the game window.
+
+K8b, what is left:
+
+- 13 files still have a weapon ability that is refused. Four wait on it alone: in each, a bot carries a weapon of its own and two weapon abilities. Most of the others are refused first because the bot moves by itself, and two because the bot doesn't aim. Each of those needs its own measurements: a blast that leaves a moving bot behind, a fuse on a bot that falls, is pushed or regenerates, an explosion that reaches the player or another bot, and a bot that fires a weapon of its own.
 - The four armed-bot files left over from K7 belong here: their bots aim and fire.
 - One file left over from K15e belongs here too. Its targets have a melee ability to use near the player, and bots too small to hit pay health on a timer until they die, which brings in a new kind of target a set time into the run. Measure in KovaaK's what a melee hit does to a player who can be hurt, what the run and the score do when the player dies, and whether a bot uses an ability that doesn't move it. Then the file needs a melee ability on a target, a health cost on an ability that doesn't move the bot, and a bot with a size of zero, which nobody can see or hit.
 
@@ -721,3 +753,10 @@ These rows are filled in as packages land. A row leaves the table when a test ma
 | `AIDamageReactionThreshold` above a million | Cut to a million | No: no local file comes near |
 | `AIDamageReactionCooldown` | Not read | Yes: it did nothing in any test |
 | A reaction on an ability with no duration, or on a melee ability | Refused | Partly: an impulse's reaction sometimes showed nothing, cause unknown. A melee ability wasn't tried |
+| A press of a weapon ability's key that the weapon doesn't answer | Still uses up the ability's charge and counts as a use | No |
+| A weapon ability's charge that is back exactly at a try | Not there for that try, as measured for movement abilities | No |
+| A weapon ability's distance and view rules, `DelayAfterUse` and `AbilityGlobalCooldown` | Read as a movement ability's are | No: the test maps had none |
+| A blast still waiting when its bot is killed or dies | Dropped | No |
+| A bot that dies of its own blast, on a scenario with lives | It counts as a timeout and uses up no life | No: measured without lives, where it gave no kill, shot or damage |
+| A weapon with no `SelfDamageMultiplier` key | 1: the blast does its bot its full damage | No: every local fuse weapon has the key |
+| A fuse bot's projectile | Never drawn, and it hits nothing on its way: the importer takes only a blast that stays inside its own bot | No |

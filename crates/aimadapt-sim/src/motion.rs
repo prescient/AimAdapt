@@ -20,6 +20,8 @@ mod ability;
 mod ability_tests;
 #[cfg(test)]
 mod brain_tests;
+#[cfg(test)]
+mod fuse_tests;
 mod jump;
 #[cfg(test)]
 mod jump_tests;
@@ -27,7 +29,7 @@ mod reaction;
 #[cfg(test)]
 mod reaction_tests;
 use ability::AbilityState;
-pub use ability::{Abilities, Ability, Brain};
+pub use ability::{Abilities, Ability, Brain, Fuse};
 use jump::Keys;
 pub use reaction::Reaction;
 
@@ -126,6 +128,12 @@ pub struct Motion {
     /// Movement abilities (dashes, blinks, ability jumps) and when it uses them.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub abilities: Option<Abilities>,
+    /// The bot stays exactly where it appeared and only uses its abilities (a bot whose one ability is a
+    /// weapon that blows it up, see [`Fuse`]). Nothing moves it: it isn't lifted out of walls or dropped onto
+    /// a floor at its spawn, has no physics, is pushed out of no wall and bumps into no other bot, and it
+    /// draws no random numbers beyond what its abilities draw. It never counts as on the ground.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub stays_put: bool,
 }
 
 impl Default for Motion {
@@ -158,6 +166,7 @@ impl Default for Motion {
             change_dodge_s: [0.0, 0.0],
             random_dodges: true,
             abilities: None,
+            stays_put: false,
         }
     }
 }
@@ -606,6 +615,14 @@ impl BotState {
         dt: f32,
         seen: bool,
     ) {
+        if m.stays_put {
+            // Only its abilities run: no thinking, no physics and no pushing out of walls.
+            let spawn_forward = Vec3::Y.cross(self.spawn_right).normalize_or(Vec3::Z);
+            let view = ability::View { wish: Vec3::ZERO, spawn_forward };
+            self.use_abilities(m, rng, &view, *pos, seen);
+            self.ability_tick(m, dt);
+            return;
+        }
         if m.still_until_hurt && !self.hurt {
             self.ability_wait(m, dt);
             return;

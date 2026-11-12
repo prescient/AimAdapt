@@ -9,10 +9,12 @@
 
 use std::collections::BTreeMap;
 
-use crate::scenario::Sce;
+use crate::convert::fuse;
+use crate::scenario::{BotChoice, Sce};
 use crate::settings::Section;
 
 const WEAPON_ABILITY: &str = crate::scenario::ABILITY_KINDS[0];
+const MELEE_ABILITY: &str = crate::scenario::ABILITY_KINDS[1];
 
 /// Hitbox shapes the world sim will have.
 const SHAPES: &[&str] = &["Spheroid", "Cylindrical", "Cuboid"];
@@ -123,6 +125,13 @@ pub fn gaps(sce: &Sce) -> Vec<Gap> {
     // The bots. A helper (on the player's team) can't be shot, so how it can be hit
     // doesn't matter.
     let player_team = crate::scenario::player_team(top);
+    let is_melee = |a: &&Section| a.kind.eq_ignore_ascii_case(MELEE_ABILITY);
+    let scene = fuse::Scene {
+        settings: &sce.settings,
+        invincible: top.is("InvincibleBots"),
+        pushed: (r.bots.iter().filter(|s| s.is_helper(player_team)))
+            .any(|s| s.choices.iter().any(|c| c.abilities.iter().any(is_melee))),
+    };
     for slot in &r.bots {
         let helper = slot.is_helper(player_team);
         for c in &slot.choices {
@@ -146,12 +155,8 @@ pub fn gaps(sce: &Sce) -> Vec<Gap> {
             }
             // Melee and movement abilities are how bots push each other apart and
             // dash (Pasu-style and ground benchmarks), so phase 3 covers them. Weapon
-            // abilities aren't planned.
-            let weapon_abilities: Vec<&str> =
-                c.abilities.iter().filter(|a| a.kind.eq_ignore_ascii_case(WEAPON_ABILITY)).map(|a| a.name()).collect();
-            if !weapon_abilities.is_empty() {
-                gap("weapon abilities", counted(weapon_abilities.into_iter()));
-            }
+            // abilities aren't planned, except the one shape that blows its own bot up.
+            weapon_ability_gaps(c, helper, &scene, &mut gap);
             for (d, _) in &c.dodges {
                 if !matches!(d.str("WaypointLogic"), "" | "Ignore") {
                     gap("waypoint paths", format!("WaypointLogic={}", d.str("WaypointLogic")));
@@ -163,6 +168,17 @@ pub fn gaps(sce: &Sce) -> Vec<Gap> {
         }
     }
     out
+}
+
+/// The weapon abilities of a bot that the trainer can't play, each with the first reason it can't: a helper's
+/// never plays, and a target's does only in the shape of the fuse (see [`fuse`]).
+fn weapon_ability_gaps(c: &BotChoice, helper: bool, scene: &fuse::Scene, gap: &mut impl FnMut(&'static str, String)) {
+    for a in c.abilities.iter().filter(|a| a.kind.eq_ignore_ascii_case(WEAPON_ABILITY)) {
+        let why = if helper { Some("a bot on the player's team".to_string()) } else { fuse::refusal(scene, c, a) };
+        if let Some(why) = why {
+            gap("weapon abilities", format!("{}: {why}", a.name()));
+        }
+    }
 }
 
 /// Whether a bot has a weapon it is set to use: `UseWeapons` is on and a weapon that
@@ -358,7 +374,11 @@ Name=Zap
         assert_eq!(features(&with("Push.abilmelee;Dash.abilmov;;")), Vec::<&str>::new());
         assert_eq!(
             gaps(&Sce::parse(&with("Push.abilmelee;Zap.abilwep;;"))),
-            vec![Gap { feature: "weapon abilities", detail: "Zap".into(), beyond_plan: true }]
+            vec![Gap {
+                feature: "weapon abilities",
+                detail: "Zap: its bot has UseWeapons=false".into(),
+                beyond_plan: true
+            }]
         );
     }
 

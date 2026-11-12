@@ -3242,3 +3242,269 @@ fn brains_are_handed_out_first_in_first_out_and_never_pile_up() {
     assert!(sim.stats().kills > 50, "{}", sim.stats().kills);
     assert!(most <= 2, "{most}");
 }
+
+// Plan K8a: bots that blow themselves up (a weapon ability with a fuse, see `Fuse`). All numbers are made up.
+
+/// The motion of a fuse bot: a key that ticks every 0.1 s with no block, and one weapon ability whose weapon
+/// fires every `shot_every` s, blows up `burn` s after a shot and takes `damage` health off the bot.
+fn fuse_motion(shot_every: f32, burn: f32, damage: f32) -> crate::motion::Motion {
+    use crate::motion::{Abilities, Ability, Fuse, Motion};
+    let fuse = Fuse { shot_every_s: shot_every, burn_s: burn, damage };
+    let ability = Ability { fuse: Some(fuse), ..Ability::default() };
+    let abilities = Abilities {
+        press_every_s: 0.1,
+        chance: 1.0,
+        window_s: [1.0, 1.0],
+        start_block_s: 0.0,
+        list: vec![ability],
+        ..Default::default()
+    };
+    Motion { stays_put: true, abilities: Some(abilities), ..Default::default() }
+}
+
+/// One fuse ball with `health`, coming back `respawn` s after it leaves. A kill pays 5 and a timeout nothing,
+/// and the player's shot kills it in one hit.
+fn fuse_scenario(health: f32, respawn: f32, motion: crate::motion::Motion) -> Scenario {
+    let mut s = on_a_floor(Vec::new(), Some(motion));
+    s.timing.duration_s = 60.0;
+    s.targets.health = health;
+    s.targets.respawn_delay_s = respawn;
+    s.scoring =
+        crate::scenario::Scoring { per_kill: 5.0, per_hit: 1.0, per_damage: 1.0, per_miss: 0.0, per_timeout: 0.0 };
+    s.weapon.damage = health;
+    s
+}
+
+/// What happened in a run and when, in seconds of play: "spawn", "hurt" (the bot up has less health than a
+/// frame ago), "timeout" and "kill".
+fn log_of(
+    sim: &mut Sim,
+    until: f32,
+    mut frame: impl FnMut() -> f32,
+    mut input: impl FnMut(&Sim) -> Input,
+) -> Vec<(&'static str, f32)> {
+    let mut log = Vec::new();
+    let mut health = sim.targets().first().map(|t| (t.id, t.health));
+    while sim.elapsed() < until {
+        let i = input(sim);
+        let events = sim.step(frame(), i);
+        for e in &events {
+            match e {
+                Event::Spawned { .. } => log.push(("spawn", sim.elapsed())),
+                Event::TimedOut { .. } => log.push(("timeout", sim.elapsed())),
+                Event::Killed { .. } => log.push(("kill", sim.elapsed())),
+                _ => {}
+            }
+        }
+        let now = sim.targets().first().map(|t| (t.id, t.health));
+        if let (Some((id, was)), Some((same, is))) = (health, now)
+            && id == same
+            && is < was
+        {
+            log.push(("hurt", sim.elapsed()));
+        }
+        health = now;
+    }
+    log
+}
+
+/// Frames of 1/240 s, or uneven ones between 1/240 and 1/60 s drawn with the seed.
+fn frames_of(seed: Option<u64>) -> Box<dyn FnMut() -> f32> {
+    match seed {
+        None => Box::new(|| FRAME),
+        Some(seed) => {
+            let mut rng = Rng::new(seed);
+            Box::new(move || 1.0 / (60.0 + 180.0 * rng.next_f32()))
+        }
+    }
+}
+
+const FUSE_FRAMES: [Option<u64>; 4] = [None, Some(1), Some(2), Some(3)];
+
+/// Checks a log against the events wanted, each at its time up to `frames` frames later (and a hair before).
+#[track_caller]
+fn assert_log(got: &[(&'static str, f32)], want: &[(&'static str, f32)], seed: Option<u64>, frames: f32) {
+    let late = frames * if seed.is_none() { FRAME } else { 1.0 / 60.0 } + 0.01;
+    let fits = got.len() == want.len()
+        && got.iter().zip(want).all(|((g, at), (w, t))| g == w && (-0.005..late).contains(&(at - t)));
+    assert!(fits, "frames {seed:?}: happened {got:?}, wanted {want:?}");
+}
+
+/// G: timeline A through a respawn of 1.0 s. Health 3, blasts of 2, 0.6 s between shots, 0.05 s from shot to
+/// blast, a tick of 0.1 s. The first bot is hurt at 0.15 and leaves as a timeout at 0.75; the next appears at
+/// 1.75, fires at once (the weapon was ready long ago), is hurt at 1.90 and leaves at 2.50. It counts as no
+/// kill, no shot, no hit and no damage, and no score.
+#[test]
+fn a_fuse_bot_blows_itself_up_and_comes_back_as_a_timeout() {
+    for seed in FUSE_FRAMES {
+        let mut sim = Sim::new(fuse_scenario(3.0, 1.0, fuse_motion(0.6, 0.05, 2.0)), 1);
+        let log = log_of(&mut sim, 2.6, frames_of(seed), |_| idle());
+        let want = [("hurt", 0.15), ("timeout", 0.75), ("spawn", 1.75), ("hurt", 1.90), ("timeout", 2.50)];
+        assert_log(&log, &want, seed, 3.0);
+        let st = sim.stats();
+        assert_eq!(st.timeouts, 2, "{st:?}");
+        assert_eq!((st.kills, st.hits, st.shots), (0, 0, 0));
+        assert_eq!((st.damage_done, st.damage_possible), (0.0, 0.0));
+        assert_eq!(sim.score(), 0.0);
+        assert!(sim.telemetry.targets.iter().all(|t| t.outcome == Outcome::TimedOut));
+    }
+}
+
+/// H: timeline E in the sim. A weapon of 1.5 s fires at 0.1 and 1.6 and the second blast, at 1.65, kills the
+/// bot of 3. It comes back at 2.65 with its weapon ready 0.45 s into its life, so its first blast is at 3.15.
+/// (Without the carried cooldown it would be at 2.80.)
+#[test]
+fn a_fuse_bots_cooldown_goes_on_through_its_death_and_respawn() {
+    for seed in FUSE_FRAMES {
+        let mut sim = Sim::new(fuse_scenario(3.0, 1.0, fuse_motion(1.5, 0.05, 2.0)), 1);
+        let log = log_of(&mut sim, 3.25, frames_of(seed), |_| idle());
+        let want = [("hurt", 0.15), ("timeout", 1.65), ("spawn", 2.65), ("hurt", 3.15)];
+        assert_log(&log, &want, seed, 5.0);
+    }
+}
+
+/// The player fires once, at the first ball up, at the first frame at or after `at` seconds.
+fn shot_at(at: f32) -> impl FnMut(&Sim) -> Input {
+    let mut fired = false;
+    move |sim: &Sim| match sim.targets().first() {
+        Some(t) if sim.elapsed() >= at && !fired => {
+            fired = true;
+            shoot(t.pos)
+        }
+        _ => idle(),
+    }
+}
+
+/// J: the player kills a fuse bot between its shot and its blast. Health 3, a weapon of 1.55 s whose blast
+/// comes 0.5 s after the shot; the bot fires at 0.1 and is shot dead at 0.3. That is a kill: the blast that
+/// was on its way is dropped, so no timeout follows. The bot that comes back at 1.3 keeps the weapon's
+/// cooldown, which counts straight through the time it was away: its weapon is ready at 1.65 and it is hurt at
+/// 2.15 (without the cooldown it fires at its first tick and is hurt at 1.9).
+#[test]
+fn a_kill_between_a_fuse_bots_shot_and_its_blast_is_a_kill_and_the_next_bot_keeps_the_cooldown() {
+    for seed in FUSE_FRAMES {
+        let mut sim = Sim::new(fuse_scenario(3.0, 1.0, fuse_motion(1.55, 0.5, 2.0)), 1);
+        let log = log_of(&mut sim, 2.3, frames_of(seed), shot_at(0.3));
+        // The kill and the respawn follow the player's shot, which is a frame or so after 0.3.
+        let late = if seed.is_none() { 0.03 } else { 0.07 };
+        let want = [("kill", 0.3), ("spawn", 1.3), ("hurt", 2.15)];
+        let fits = log.len() == want.len()
+            && log.iter().zip(want).all(|((g, at), (w, t))| *g == w && (-0.02..late).contains(&(at - t)));
+        assert!(fits, "frames {seed:?}: happened {log:?}, wanted {want:?}");
+        let st = sim.stats();
+        assert_eq!((st.kills, st.timeouts), (1, 0), "{st:?}");
+    }
+}
+
+/// K: a fuse bot that can't die isn't hurt (the rule for a health cost): the world's `invincible` keeps the
+/// ball at full health, and it never leaves.
+#[test]
+fn an_invincible_fuse_bot_is_not_hurt() {
+    let mut s = fuse_scenario(3.0, 1.0, fuse_motion(0.6, 0.05, 2.0));
+    s.world.as_mut().unwrap().invincible = true;
+    let mut sim = Sim::new(s, 1);
+    let log = log_of(&mut sim, 3.0, frames_of(None), |_| idle());
+    assert_eq!(log, vec![], "an invincible bot took nothing");
+    assert_eq!(sim.targets()[0].health, 3.0);
+    assert_eq!(sim.stats().timeouts, 0);
+    assert!(sim.targets()[0].bot.as_ref().unwrap().ability_uses() >= 5, "it did fire");
+}
+
+/// I: a fuse bot never moves. A spawn point that overlaps a wall and one with a floor just below the bot's
+/// feet (within a step-up height) both leave it where the spawn point is: the same place, every frame, as the
+/// same scenario with no motion at all gives. The same ability on a bot that doesn't stay put is lifted out
+/// of the wall and dropped onto the floor, so the test can tell.
+#[test]
+fn a_fuse_bot_stays_exactly_where_it_spawned() {
+    let wall = crate::world::WorldMesh {
+        positions: vec![[-2.0, -1.5, -10.0], [2.0, -1.5, -10.0], [2.0, 3.0, -10.0], [-2.0, 3.0, -10.0]],
+        triangles: vec![[0, 1, 2], [0, 2, 3]],
+        ..Default::default()
+    };
+    for (what, spawn_y, walls) in [("a wall", -1.0, vec![wall]), ("a floor just below", -0.9, vec![])] {
+        let motion = |stays_put: bool| crate::motion::Motion {
+            gravity: 8.0,
+            step_up: 0.3,
+            stays_put,
+            ..fuse_motion(0.6, 0.05, 0.001)
+        };
+        let make = |motion: Option<crate::motion::Motion>| {
+            let mut s = on_a_floor(walls.clone(), motion);
+            s.timing.duration_s = 60.0;
+            s.targets.health = 1000.0;
+            s.world.as_mut().unwrap().spawns[0].pos = [0.0, spawn_y, -10.0];
+            Sim::new(s, 1)
+        };
+        let mut plain = make(None);
+        let mut fuse = make(Some(motion(true)));
+        let mut loose = make(Some(motion(false)));
+        let start = plain.targets()[0].pos;
+        assert_eq!(fuse.targets()[0].pos, start, "{what}: at the spawn point");
+        for _ in 0..720 {
+            for sim in [&mut plain, &mut fuse, &mut loose] {
+                sim.step(FRAME, idle());
+            }
+            assert_eq!(fuse.targets()[0].pos, start, "{what}: moved");
+            assert_eq!(plain.targets()[0].pos, start);
+        }
+        assert_ne!(loose.targets()[0].pos, start, "{what}: a bot that doesn't stay put is moved by it");
+        assert!(!fuse.targets()[0].bot.as_ref().unwrap().grounded);
+    }
+}
+
+/// I, with others: fuse bots that overlap and bump into each other (the motion's default) don't push each
+/// other.
+#[test]
+fn fuse_bots_that_overlap_do_not_push_each_other() {
+    use crate::world::WorldSpawn;
+    let mut motion = fuse_motion(0.6, 0.05, 0.001);
+    motion.bump_bots = true;
+    let mut s = fuse_scenario(1000.0, 1.0, motion);
+    s.targets.count = 2;
+    s.world.as_mut().unwrap().spawns = vec![
+        WorldSpawn { pos: [-0.3, -1.0, -10.0], ..Default::default() },
+        WorldSpawn { pos: [0.3, -1.0, -10.0], ..Default::default() },
+    ];
+    let mut sim = Sim::new(s, 1);
+    let start: Vec<Vec3> = sim.targets().iter().map(|t| t.pos).collect();
+    assert_eq!(start.len(), 2);
+    assert!(start[0].distance(start[1]) < 1.0, "they overlap: {start:?}");
+    for _ in 0..480 {
+        sim.step(FRAME, idle());
+        let now: Vec<Vec3> = sim.targets().iter().map(|t| t.pos).collect();
+        assert_eq!(now, start);
+    }
+}
+
+/// I, in mixed company: a fuse bot beside a bot of another kind that bumps into bots. The other kind makes the
+/// world push its bots apart, and the fuse bot still stays exactly on its spawn point while the other one is
+/// pushed clear of it.
+#[test]
+fn a_fuse_bot_is_not_pushed_by_a_bot_of_another_kind() {
+    use crate::world::{WorldKind, WorldSpawn};
+    let mut fuse = fuse_motion(0.6, 0.05, 0.001);
+    fuse.bump_bots = true;
+    let bumper = crate::motion::Motion { bump_bots: true, ..Default::default() };
+    let mut s = fuse_scenario(1000.0, 1.0, fuse.clone());
+    s.targets.count = 2;
+    let w = s.world.as_mut().unwrap();
+    w.spawns = vec![
+        WorldSpawn { pos: [-0.3, -1.0, -10.0], ..Default::default() },
+        WorldSpawn { pos: [0.3, -1.0, -10.0], ..Default::default() },
+    ];
+    w.kinds = vec![
+        WorldKind { health: 1000.0, motion: Some(fuse), spawns: vec![0], ..Default::default() },
+        WorldKind { health: 1000.0, motion: Some(bumper), spawns: vec![1], ..Default::default() },
+    ];
+    w.slots = vec![vec![(0, 1.0)], vec![(1, 1.0)]];
+    let mut sim = Sim::new(s, 1);
+    let of = |sim: &Sim, kind: u32| sim.targets().iter().find(|t| t.kind() == Some(kind)).unwrap().pos;
+    let (fuse_at, other_at) = (of(&sim, 0), of(&sim, 1));
+    assert!(fuse_at.distance(other_at) < 0.7, "they overlap: {fuse_at:?} and {other_at:?}");
+    for _ in 0..480 {
+        sim.step(FRAME, idle());
+        assert_eq!(of(&sim, 0), fuse_at, "the fuse bot moved");
+    }
+    let apart = of(&sim, 1).distance(fuse_at);
+    assert!(apart > 0.9, "the other bot was pushed clear of it: {apart} m apart");
+}

@@ -88,6 +88,8 @@ impl Sim {
                     .map_or((self.scenario.targets.shape, tc.radius, tc.height), |k| (k.shape, k.radius, k.height));
                 let (pos, right) = w.spawn_point_in(&mut self.rng, &others, radius, self.last_aim, chosen.as_ref());
                 match w.motion_of(kind) {
+                    // A bot that stays put (a fuse) starts exactly where its spawn point is.
+                    Some(m) if m.stays_put => (pos, right),
                     // A moving bot also leaves any other wall it starts in, and starts on a
                     // floor that is within its step-up height below its feet.
                     Some(m) => {

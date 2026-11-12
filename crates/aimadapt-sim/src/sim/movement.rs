@@ -76,7 +76,11 @@ impl Sim {
                 .collect();
             separate(&mut bodies);
             for (t, (p, _, _)) in self.targets.iter_mut().zip(bodies) {
-                t.pos = p;
+                // A bot that stays put (a fuse) isn't pushed by the others.
+                let fixed = self.current.world.as_ref().and_then(|w| w.motion_of(t.kind)).is_some_and(|m| m.stays_put);
+                if !fixed {
+                    t.pos = p;
+                }
             }
         }
         if !timed_out.is_empty() {

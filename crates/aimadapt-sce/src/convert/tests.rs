@@ -446,7 +446,9 @@ fn weapon_abilities_are_refused_once_and_a_melee_one_beside_a_dash_still_is() {
     let weapon = VOLUME_SCE
         .replace("MainBBType=Spheroid", "MainBBType=Spheroid\nAbilityProfileNames=Zap.abilwep;;")
         .replace("[Map Data]", "[Weapon Ability Profile]\nName=Zap\n[Map Data]");
-    assert_eq!(reasons(&weapon), vec!["weapon abilities (Zap)".to_string()]);
+    // Plan K8a: the reason is the first one that keeps the ability from being a fuse. This bot doesn't use
+    // weapons, which comes before anything about the weapon ability itself.
+    assert_eq!(reasons(&weapon), vec!["weapon abilities (Zap: its bot doesn't set UseWeapons=true)".to_string()]);
     let both = dasher("MainVelocity=1800.0")
         .replace("AbilityProfileNames=Zip.abilmov;;", "AbilityProfileNames=Zip.abilmov;Shove.abilmelee;")
         .replace("[Map Data]", "[Melee Ability Profile]\nName=Shove\n[Map Data]");

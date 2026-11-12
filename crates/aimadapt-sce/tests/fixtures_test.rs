@@ -23,7 +23,7 @@ fn read(name: &str) -> Sce {
 #[test]
 fn finds_every_fixture() {
     let files = find_files(&[fixtures()]);
-    assert_eq!(files.len(), 14);
+    assert_eq!(files.len(), 15);
     assert!(files.iter().all(|f| f.extension().unwrap() == "sce"));
 }
 
@@ -426,6 +426,10 @@ fn imported_fixtures_keep_their_fingerprints() {
     // Plan K15d: a reaction to damage is left out of the file when an ability has none, so the others
     // above kept theirs. Flinch Kite is the first file with one.
     assert_eq!(import(&path("Flinch Kite")).unwrap().scenario.fingerprint(), "c88b00b69ff88cda");
+    // Plan K8a: a bot that stays put and blows itself up. Short Fuse is the first file with a fuse, so it is
+    // pinned the way it was first taken; the others above kept theirs, because a motion leaves the fuse's two
+    // fields out of the settings when it has none.
+    assert_eq!(import(&path("Short Fuse")).unwrap().scenario.fingerprint(), "9a975eded30ef47a");
 }
 
 /// Regression test: CI failed on every push from plan K3 on. Git on Windows checked the
@@ -456,6 +460,7 @@ fn git_keeps_the_fixtures_bytes() {
         "Quiet Guns",
         "High Blink",
         "Flinch Kite",
+        "Short Fuse",
     ] {
         assert!(!crlf(name), "{name} was given CRLF line ends");
     }
@@ -792,4 +797,69 @@ fn blinks_while(s: &aimadapt_sim::Scenario, seed: Option<u64>, fire: bool) -> (u
         last = p;
     }
     (blinks, sim.stats().hits)
+}
+
+/// Plan K8a on one made-up file: a still ball of 30 health carries a weapon ability whose weapon blows the ball
+/// up (two blasts of 20 kill it). It imports as a bot that stays put with a fuse, and with nobody shooting the
+/// balls go away by themselves, as timeouts with no kill and no score. By the rules the first ball (the block
+/// holds it for 1 s) fires at 1.0, is hit at 1.04, fires again at 1.7 and is gone at 1.74. Each next ball comes
+/// 1.5 s later, fires at its first tick (the weapon is long ready), again 0.7 s after that, and is gone 0.84 s
+/// into its life: a ball every 2.34 s, so 19 of them are gone in 45 s (the 20th would go at 46.2 s). A player
+/// who aims perfectly and fires still kills balls, and each kill pays.
+#[test]
+fn a_ball_that_blows_itself_up_goes_away_by_itself_and_can_still_be_shot() {
+    let i = import(&path("Short Fuse")).unwrap();
+    let s = i.scenario;
+    assert!(s.problems().is_empty(), "{:?}", s.problems());
+    assert_eq!(i.notes.iter().filter(|n| n.contains("blows itself up")).count(), 1, "{:?}", i.notes);
+    let m = s.world.as_ref().unwrap().motion.as_ref().unwrap();
+    assert!(m.stays_put);
+    let fuse = m.abilities.as_ref().unwrap().list[0].fuse.clone().unwrap();
+    assert_eq!((fuse.shot_every_s, fuse.burn_s, fuse.damage), (0.7, 0.04, 20.0));
+    assert_eq!((s.targets.health, s.timing.duration_s, s.scoring.per_kill), (30.0, 45.0, 10.0));
+
+    for seed in [None, Some(1), Some(2), Some(3)] {
+        let mut rng = seed.map(aimadapt_sim::rng::Rng::new);
+        let mut sim = started(s.clone());
+        let start = sim.targets()[0].pos;
+        let mut gone = Vec::new();
+        while sim.phase() != Phase::Finished {
+            let dt = rng.as_mut().map_or(1.0 / 120.0, |r| 1.0 / (60.0 + 180.0 * r.next_f32()));
+            let events = sim.step(dt, idle());
+            gone.extend(
+                events.iter().filter(|e| matches!(e, aimadapt_sim::Event::TimedOut { .. })).map(|_| sim.elapsed()),
+            );
+            assert!(sim.targets().iter().all(|t| t.pos == start), "seed {seed:?}: a ball moved");
+        }
+        assert!((gone[0] - 1.74).abs() < 0.03, "seed {seed:?}: the first ball went at {}", gone[0]);
+        assert!((gone[1] - 4.08).abs() < 0.08, "seed {seed:?}: the second ball went at {}", gone[1]);
+        assert_eq!(gone.len(), 19, "seed {seed:?}: balls went at {gone:?}");
+        let stats = sim.stats();
+        assert_eq!((stats.kills, stats.hits, stats.shots, stats.damage_done), (0, 0, 0, 0.0), "seed {seed:?}");
+        assert_eq!(stats.timeouts, 19);
+        assert_eq!(sim.score(), 0.0);
+    }
+
+    // A player that aims at the ball and fires every 0.1 s kills it. With the file's own shots of 15 only the
+    // first ball can be killed (the others fire at their first tick, and their blast follows 0.04 s later, before
+    // a second shot of the 5 a second the weapon allows); shots of 30 kill every ball that comes.
+    for (damage, at_least) in [(15.0, 1), (30.0, 15)] {
+        let mut strong = s.clone();
+        strong.weapon.damage = damage;
+        let mut sim = started(strong);
+        let dt = 1.0 / 120.0;
+        for step in 0..(45.0 / dt) as usize {
+            if sim.phase() == Phase::Finished {
+                break;
+            }
+            let input = match sim.targets().first() {
+                Some(t) => Input { aim: t.pos.normalize(), fire_pressed: step % 12 == 0, fire_held: step % 12 == 0 },
+                None => idle(),
+            };
+            sim.step(dt, input);
+        }
+        let stats = sim.stats();
+        assert!(stats.kills >= at_least, "damage {damage}: {stats:?}");
+        assert_eq!(sim.score(), 10.0 * stats.kills as f32, "damage {damage}: {stats:?}");
+    }
 }

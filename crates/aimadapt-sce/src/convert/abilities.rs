@@ -12,7 +12,7 @@
 //! [`reaction`]). That plays for abilities with a duration. One with no duration (an impulse) is
 //! refused: KovaaK's sometimes showed nothing for such a reaction, and why wasn't understood.
 
-use aimadapt_sim::motion::{Abilities, Ability, Reaction};
+use aimadapt_sim::motion::{Abilities, Ability, Fuse, Motion, Reaction};
 
 use super::{UU_PER_M, camera_offset, push_once};
 use crate::inventory::Gap;
@@ -84,7 +84,8 @@ fn aim_lift(ch: &Section, player: Option<&Section>) -> Option<f32> {
 
 /// Reasons a target's abilities can't be played yet. A target's melee ability (a
 /// knockback) isn't played: only helper bots push, see [`super::helpers`]. Weapon
-/// abilities are reported with the file's other gaps. `ch` is the bot's character,
+/// abilities are reported with the file's other gaps, the ones that play being the fuse
+/// (see [`super::fuse`]). `ch` is the bot's character,
 /// `top_invincible` whether the scenario's `InvincibleBots` is on and `player` the
 /// player's character.
 pub(super) fn reasons(
@@ -215,6 +216,28 @@ pub(super) fn cost_notes(slots: &[&BotSlot], kill_limit: u32, notes: &mut Vec<St
     }
 }
 
+/// Notes for bots that blow themselves up (see [`super::fuse`]), for the scenarios that have one. `motions` are
+/// those of the kinds of bot and `kill_limit` is the run's limit from bot lives, 0 for none. Unlike
+/// [`cost_notes`] this runs for every scenario, since a fuse bot isn't a moving one.
+pub(super) fn fuse_notes(motions: &[&Motion], kill_limit: u32, notes: &mut Vec<String>) {
+    if !motions.iter().any(|m| m.stays_put) {
+        return;
+    }
+    notes.push(
+        "a bot that blows itself up: a press of its ability's key that the weapon doesn't take is played as still \
+         using up the ability's charge, and a blast still waiting when its bot is killed is dropped; neither has \
+         been checked against KovaaK's"
+            .into(),
+    );
+    if kill_limit > 0 {
+        notes.push(
+            "a bot that blows itself up, with bot lives: a bot that dies of its own blast is played as a timeout \
+             that uses up no life; that hasn't been checked against KovaaK's"
+                .into(),
+        );
+    }
+}
+
 /// The longest time and distance the trainer allows. More than an hour or 10 km is
 /// never or everywhere in any run, so larger values in a file are cut to these.
 const LONGEST_S: f32 = 3600.0;
@@ -234,8 +257,21 @@ pub(super) fn abilities(c: &BotChoice, ch: &Section, player: Option<&Section>) -
     if list.is_empty() {
         return None;
     }
+    // Only a bot with a dash that goes up or down has an aim line to follow.
+    let aim_lift = if movement(c).any(goes_up_or_down) { aim_lift(ch, player).unwrap_or(0.0) } else { 0.0 };
+    Some(wrap(c, ch, list, aim_lift))
+}
+
+/// The abilities of a bot that blows itself up (see [`super::fuse`]): its weapon ability `a`, whose weapon is
+/// `w`, with the same settings for using it as a movement ability has.
+pub(super) fn fuse_abilities(c: &BotChoice, ch: &Section, a: &Section, w: &Section) -> Abilities {
+    wrap(c, ch, vec![fuse_ability(a, w)], 0.0)
+}
+
+/// The settings of a bot for using its abilities, around the `list` of them.
+fn wrap(c: &BotChoice, ch: &Section, list: Vec<Ability>, aim_lift: f32) -> Abilities {
     let secs = |s: &Section, key: &str| s.f32_or(key, 0.0).clamp(0.0, LONGEST_S);
-    Some(Abilities {
+    Abilities {
         // Measured in KovaaK's: a bot profile with no `AbilityUseTimer` key ticks every 0.1 s, and one with no
         // `UseAbilityFrequency` key always presses (a chance of 1). An explicit 0 stays 0 for both. The window
         // keys read as 0 when absent.
@@ -246,10 +282,40 @@ pub(super) fn abilities(c: &BotChoice, ch: &Section, player: Option<&Section>) -
         start_block_s: ch.f32_or("BlockAbilityOnStartDuration", 1.0).clamp(0.0, LONGEST_S),
         global_cooldown_s: secs(ch, "AbilityGlobalCooldown"),
         sees_through_walls: c.bot.is("SeeThroughWalls"),
-        // Only a bot with a dash that goes up or down has an aim line to follow.
-        aim_lift: if movement(c).any(goes_up_or_down) { aim_lift(ch, player).unwrap_or(0.0) } else { 0.0 },
+        aim_lift,
         list,
-    })
+    }
+}
+
+/// The highest damage a blast does the bot in the trainer. A file's higher one is cut to it.
+const HIGHEST_DAMAGE: f32 = 1.0e6;
+
+/// A weapon ability `a` with the weapon `w` that blows its own bot up, as an [`Ability`]: its charges, timers
+/// and gates are read as a movement ability's are, and it has no speed, duration, cost or reaction. Its fuse is
+/// the weapon's time between shots and delay after the shot, and a blast's damage times `SelfDamageMultiplier`
+/// (missing reads as 1), times cut to [`LONGEST_S`] like the others. (`super::fuse::refusal` has checked the
+/// weapon.)
+fn fuse_ability(a: &Section, w: &Section) -> Ability {
+    let secs = |key: &str| w.f32_or(key, 0.0).clamp(0.0, LONGEST_S);
+    let damage = w.f32_or("DamageAtCenter", 0.0) * w.f32_or("SelfDamageMultiplier", 1.0);
+    Ability {
+        duration_s: 0.0,
+        speed: 0.0,
+        up_speed: 0.0,
+        end_factor: 1.0,
+        along_input: false,
+        vertical: false,
+        no_gravity: false,
+        blocks_movement: false,
+        health_cost: 0.0,
+        reaction: None,
+        fuse: Some(Fuse {
+            shot_every_s: secs("TimeBetweenShots"),
+            burn_s: secs("DelayAfterSpawn"),
+            damage: damage.clamp(0.0, HIGHEST_DAMAGE),
+        }),
+        ..ability(a)
+    }
 }
 
 /// One movement ability profile.
@@ -287,6 +353,7 @@ fn ability(a: &Section) -> Ability {
         // In health points, like `MaxHealth`: a cost of 40 takes 40 off a bot of 100.
         health_cost: (-a.f32_or("HealthRestore", 0.0)).max(0.0),
         reaction: reaction(a),
+        fuse: None,
     }
 }
 

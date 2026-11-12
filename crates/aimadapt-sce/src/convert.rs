@@ -23,6 +23,7 @@ use aimadapt_sim::world::{AccuracyMult, PlayerBlock, World, WorldBox, WorldKind,
 use aimadapt_sim::{Scenario, Vec3};
 
 mod abilities;
+pub(crate) mod fuse;
 mod helpers;
 mod offsets;
 mod rules;
@@ -119,9 +120,12 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
     let helpers = helpers::plan(&r, player_team, turned, &mut reasons, &mut notes);
     let targets: Vec<&BotSlot> = r.bots.iter().filter(|s| !s.is_helper(player_team)).collect();
     let kill_limit = rules::kill_limit(top, &r.bots, player_team, &mut reasons);
-    let pushed = !helpers.helpers.is_empty();
-    let Bots { kinds, slots, rotations, teams, moving } =
-        bots(&targets, other_team, pushed, top.is("InvincibleBots"), r.player, &mut reasons);
+    let scene = fuse::Scene {
+        settings: &sce.settings,
+        invincible: top.is("InvincibleBots"),
+        pushed: !helpers.helpers.is_empty(),
+    };
+    let Bots { kinds, slots, rotations, teams, moving } = bots(&targets, other_team, &scene, r.player, &mut reasons);
     let kind = kinds.first().map(|(ch, _)| *ch);
     let motion = kinds.first().and_then(|(_, m)| m.clone());
     if targets.is_empty() {
@@ -192,6 +196,7 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
         // brings them out that isn't modelled (Skeet Tracking's, behind its walls).
         return Err(vec![Gap::planned("every place a bot appears is behind a wall", "")]);
     }
+    abilities::fuse_notes(&kinds_motions(&kinds), kill_limit, &mut notes);
     if kinds.len() > 1 {
         // Several kinds: each with its own hitbox, health, look and movement, on the
         // spawn points its character may use.
@@ -276,18 +281,19 @@ struct Bots<'a> {
     moving: bool,
 }
 
-/// The target slots' bots. With `pushed` (the file has helper bots) every bot gets a
+/// The target slots' bots. With `scene.pushed` (the file has helper bots) every bot gets a
 /// motion, since a bot has to have one to fall or be pushed. Without it, a bot that
-/// doesn't move gets one only if it falls (a walker's character with gravity). `player`
+/// doesn't move gets one only if it falls (a walker's character with gravity). A bot
+/// that blows itself up gets one that keeps it where it is (see [`fuse`]). `player`
 /// is the player's character, whose size a bot's dash that goes up or down needs.
 fn bots<'a>(
     target_slots: &[&BotSlot<'a>],
     other_team: u32,
-    pushed: bool,
-    invincible: bool,
+    scene: &fuse::Scene,
     player: Option<&Section>,
     reasons: &mut Vec<Gap>,
 ) -> Bots<'a> {
+    let pushed = scene.pushed;
     let mut kinds: Vec<(&Section, Option<Motion>)> = Vec::new();
     let mut slots: Vec<Vec<(u32, f32)>> = Vec::new();
     let mut rotations: Vec<Option<u32>> = Vec::new();
@@ -303,7 +309,7 @@ fn bots<'a>(
             let Some(ch) = c.character else { continue };
             // Movement abilities play. A target's melee ability doesn't: the knockbacks
             // that matter are the helper bots'.
-            abilities::reasons(c, ch, invincible, player, reasons);
+            abilities::reasons(c, ch, scene.invincible, player, reasons);
             let moves = moves(c, ch);
             moving |= moves;
             if pushed && !moves && ch.is("IsFlyer") {
@@ -313,11 +319,11 @@ fn bots<'a>(
             }
             // A bot that stays put still falls when its character has gravity (the key has
             // to be there: a character without it hangs where it appeared, as it always did).
-            let falls = !ch.is("IsFlyer") && ch.f32("Gravity").is_some_and(|g| g > 0.0);
-            let m = if moves {
-                Some(bot_motion(c, ch, player))
-            } else {
-                (pushed || falls).then(|| still_motion(c, ch, player))
+            let falls = falls(ch);
+            let m = match fuse::weapon_ability(scene, c) {
+                Some(a) => Some(fuse::motion(scene, c, ch, player, a)),
+                None if moves => Some(bot_motion(c, ch, player)),
+                None => (pushed || falls).then(|| still_motion(c, ch, player)),
             };
             let k = match kinds.iter().position(|(k, km)| same_kind(k, ch) && *km == m) {
                 Some(k) => k,
@@ -342,6 +348,11 @@ fn bots<'a>(
         }
     }
     Bots { kinds, slots, rotations, teams, moving }
+}
+
+/// The motions of the kinds of bot that have one.
+fn kinds_motions<'a>(kinds: &'a [(&Section, Option<Motion>)]) -> Vec<&'a Motion> {
+    kinds.iter().filter_map(|(_, m)| m.as_ref()).collect()
 }
 
 /// The kinds of bot, each on the spawn points its character may use (all of them
@@ -595,6 +606,12 @@ fn moves(c: &BotChoice, ch: &Section) -> bool {
     ch.f32_or("MaxSpeed", 0.0) > 0.0 || flies || jumps || jetpack || abilities::moves(c)
 }
 
+/// Whether a bot that doesn't move by itself falls: its character isn't a flier and has gravity (the key has
+/// to be there: a character without it hangs where it appeared, as it always did).
+fn falls(ch: &Section) -> bool {
+    !ch.is("IsFlyer") && ch.f32("Gravity").is_some_and(|g| g > 0.0)
+}
+
 /// A character's jump speed range in units a second, `[lowest, highest]`: from
 /// `JumpVelocityMin` and `JumpVelocityMax` when it has them, else `JumpVelocity` twice.
 /// None when the file sets neither form. An installed profile has one form, and a
@@ -695,6 +712,7 @@ fn bot_motion(c: &BotChoice, ch: &Section, player: Option<&Section>) -> Motion {
         ],
         random_dodges: c.bot.bool("RandomizeDodgeProfiles").unwrap_or(true),
         abilities: abilities::abilities(c, ch, player),
+        stays_put: false,
     }
 }
 

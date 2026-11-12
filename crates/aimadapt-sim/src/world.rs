@@ -601,9 +601,12 @@ impl World {
         }
     }
 
-    /// Whether any of the bots bump into each other.
+    /// Whether any of the bots bump into each other (one that stays put, see `Motion::stays_put`, never does).
     pub fn bots_bump(&self) -> bool {
-        self.motion.iter().chain(self.kinds.iter().filter_map(|k| k.motion.as_ref())).any(|m| m.bump_bots)
+        self.motion
+            .iter()
+            .chain(self.kinds.iter().filter_map(|k| k.motion.as_ref()))
+            .any(|m| m.bump_bots && !m.stays_put)
     }
 
     /// A spawn position for a target of `radius`: a weighted spawn point (or a

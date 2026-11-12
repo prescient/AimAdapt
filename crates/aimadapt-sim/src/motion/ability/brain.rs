@@ -7,6 +7,12 @@
 //! windows run on (no window starts at a respawn). Two things start again: the tick grid of the key
 //! (`AbilityUseTimer`, the first tick comes one interval after the bot appears) and the charges.
 //!
+//! A fourth thing carries over, measured on 12 November 2026 on balls with a weapon ability whose weapon blows
+//! the bot up (see [`Fuse`](super::Fuse)): the weapon's cooldown. With 1.5 s between shots and a respawn delay
+//! of 1.0 s the shots stayed exactly 1.5 s apart through a death and a respawn. A blast that hasn't gone off
+//! when its bot leaves is dropped, and a shot scheduled inside the trigger's 0.1 s that hadn't fired by then
+//! counts as fired (decisions, not measured).
+//!
 //! Not measured, and played as follows: `DelayAfterUse` and the shared cooldown start again with each life,
 //! an ability going on when its bot dies ends with it, a reaction to damage that is waiting and the damage
 //! counted toward one are dropped, and a bot that first appears later in a run has its block counted from
@@ -19,8 +25,7 @@ use super::{Abilities, AbilityState, Slot};
 use crate::motion::{BotState, Motion};
 
 /// What a bot's abilities keep from one life to the next. The sim saves it when a bot leaves and hands it
-/// to the bot that takes the place (see [`BotState::reborn`]). It is opaque; what it holds can grow (the
-/// next package adds a weapon's cooldown).
+/// to the bot that takes the place (see [`BotState::reborn`]). It is opaque; what it holds can grow.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Brain {
     /// The leaving bot's state. [`AbilityState::reborn`] picks from it what carries over.
@@ -42,13 +47,19 @@ impl Brain {
 
 impl AbilityState {
     /// What carries over to a new bot (see the module's notes), on the new bot's clock; the rest is as
-    /// [`Slot::new`] and [`AbilityState::default`] give it.
+    /// [`Slot::new`] and [`AbilityState::default`] give it. The blasts still to go off aren't carried.
     fn reborn(&self, ab: &Abilities, away_s: f32) -> AbilityState {
         let gone = self.clock + away_s;
         let slots = self.slots.iter().zip(&ab.list);
         AbilityState {
             began: self.began - gone,
-            slots: slots.map(|(old, a)| Slot { last_try: old.last_try.map(|t| t - gone), ..Slot::new(a) }).collect(),
+            slots: slots
+                .map(|(old, a)| Slot {
+                    last_try: old.last_try.map(|t| t - gone),
+                    last_shot: old.last_shot.map(|t| t - gone),
+                    ..Slot::new(a)
+                })
+                .collect(),
             window_end: self.window_end - gone,
             willing: self.willing,
             ..AbilityState::default()

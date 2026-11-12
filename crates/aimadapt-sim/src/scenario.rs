@@ -1066,6 +1066,73 @@ mod tests {
     }
     const PINNED_FINGERPRINT: &str = "2aab4223302f7e95";
 
+    /// A scenario whose one kind of bot has this motion.
+    fn with_motion(motion: crate::motion::Motion) -> Scenario {
+        let spawns = vec![crate::world::WorldSpawn { pos: [0.0, 0.0, -10.0], ..Default::default() }];
+        let world = crate::world::World { spawns, motion: Some(motion), ..Default::default() };
+        Scenario { world: Some(world), ..Scenario::default() }
+    }
+
+    fn a_movement_ability() -> crate::motion::Ability {
+        crate::motion::Ability { speed: 8.0, duration_s: 0.2, ..Default::default() }
+    }
+
+    fn abilities_of(list: Vec<crate::motion::Ability>) -> crate::motion::Abilities {
+        crate::motion::Abilities { press_every_s: 0.1, chance: 1.0, window_s: [1.0, 1.0], list, ..Default::default() }
+    }
+
+    /// Plan K8a: the fuse's fields (`fuse` on an ability, `stays_put` on a motion) are left out of the stored
+    /// settings when unused, so no scenario that existed before has a new fingerprint. A scenario that uses
+    /// them has them in its settings and a fingerprint of its own.
+    #[test]
+    fn a_scenario_without_a_fuse_stores_no_fuse_fields() {
+        use crate::motion::{Fuse, Motion};
+        let plain =
+            with_motion(Motion { abilities: Some(abilities_of(vec![a_movement_ability()])), ..Motion::default() });
+        let text = plain.settings_text();
+        assert!(text.contains("duration_s"), "the ability is stored: {text}");
+        assert!(!text.contains("fuse") && !text.contains("stays_put"), "{text}");
+        let bare = toml::to_string_pretty(&Motion::default()).unwrap();
+        assert!(!bare.contains("fuse") && !bare.contains("stays_put"), "{bare}");
+
+        let fuse = Fuse { shot_every_s: 0.7, burn_s: 0.04, damage: 20.0 };
+        let ability = crate::motion::Ability { fuse: Some(fuse), ..Default::default() };
+        let used =
+            with_motion(Motion { stays_put: true, abilities: Some(abilities_of(vec![ability])), ..Motion::default() });
+        let text = used.settings_text();
+        assert!(text.contains("stays_put") && text.contains("shot_every_s") && text.contains("burn_s"), "{text}");
+        assert_ne!(used.fingerprint(), plain.fingerprint());
+    }
+
+    /// Plan K8a: a fuse whose time or damage is zero, negative, infinite or not a number is a problem, and a
+    /// sound one is not.
+    #[test]
+    fn a_fuse_with_a_bad_time_or_damage_is_a_problem() {
+        use crate::motion::{Fuse, Motion};
+        let make = |fuse: Fuse| {
+            let ability = crate::motion::Ability { fuse: Some(fuse), ..Default::default() };
+            with_motion(Motion { stays_put: true, abilities: Some(abilities_of(vec![ability])), ..Motion::default() })
+        };
+        let sound = Fuse { shot_every_s: 0.7, burn_s: 0.04, damage: 20.0 };
+        assert!(make(sound.clone()).problems().is_empty(), "{:?}", make(sound.clone()).problems());
+        let bad = f32::NAN;
+        for (fuse, what) in [
+            (Fuse { shot_every_s: 0.0, ..sound.clone() }, "a fuse time"),
+            (Fuse { shot_every_s: -1.0, ..sound.clone() }, "a fuse time"),
+            (Fuse { burn_s: 0.0, ..sound.clone() }, "a fuse time"),
+            (Fuse { burn_s: -0.1, ..sound.clone() }, "a fuse time"),
+            (Fuse { burn_s: bad, ..sound.clone() }, "a fuse time"),
+            (Fuse { shot_every_s: f32::INFINITY, ..sound.clone() }, "a fuse time"),
+            (Fuse { shot_every_s: 7200.0, ..sound.clone() }, "a fuse time"),
+            (Fuse { damage: 0.0, ..sound.clone() }, "a fuse damage"),
+            (Fuse { damage: -5.0, ..sound.clone() }, "a fuse damage"),
+            (Fuse { damage: bad, ..sound.clone() }, "a fuse damage"),
+        ] {
+            let problems = make(fuse.clone()).problems();
+            assert!(problems.iter().any(|p| p.contains(what)), "{fuse:?}: {problems:?}");
+        }
+    }
+
     #[test]
     fn colors_parse() {
         assert_eq!(parse_color("#ff0000"), Some([1.0, 0.0, 0.0]));
