@@ -404,12 +404,14 @@ fn every_local_scenario_file_reads() {
 
 /// A scenario's fingerprint is what its saved ratings and best scores hang on, so a
 /// new world field that isn't left out of the file at its default would restart them
-/// all. These were taken before helper bots (plan K3) were added. A fingerprint also
+/// all. These were taken before helper bots (plan K3) were added; Dash Lane's bot dashes, so
+/// its pin was taken again when abilities were timed as measured (it had been b4157023853bb7c5;
+/// the file sets its start block, so only the new rule mark changed it). A fingerprint also
 /// covers a hash of the file's bytes, which is why git must not touch the fixtures
 /// (see `git_keeps_the_fixtures_bytes`).
 #[test]
 fn imported_fixtures_keep_their_fingerprints() {
-    assert_eq!(import(&path("Dash Lane")).unwrap().scenario.fingerprint(), "b4157023853bb7c5");
+    assert_eq!(import(&path("Dash Lane")).unwrap().scenario.fingerprint(), "7de71ff815020d9e");
     assert_eq!(import(&path("Still Wall")).unwrap().scenario.fingerprint(), "dae40cef9b1e60b7");
 }
 

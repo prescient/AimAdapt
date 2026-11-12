@@ -14,20 +14,24 @@ use crate::rng::Rng;
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Abilities {
-    /// Seconds between presses of the bot's ability key (`AbilityUseTimer`).
+    /// Seconds between ticks of the bot's ability key (`AbilityUseTimer`). The key ticks
+    /// at 1, 2, ... times this from the moment the bot appears. A tick is a try for an
+    /// ability only when more than its `reuse_s` has passed since its last try.
     pub press_every_s: f32,
     /// The chance that a window is one in which the bot presses its key
     /// (`UseAbilityFrequency`). Every window the bot rolls it again. In a window it's
-    /// willing in, it presses on every press; in any other it doesn't press at all.
+    /// willing in, it presses on every tick; in any other it doesn't press at all.
     pub chance: f32,
     /// A window lasts a random time between these two (`UseAbilityFreqMinTime` and
     /// `UseAbilityFreqMaxTime`). With a chance of 1 they make no difference.
     pub window_s: [f32; 2],
-    /// No ability for this long after the bot appears (`BlockAbilityOnStartDuration`).
-    /// Not measured in KovaaK's.
+    /// No ability until this long after the bot appears (`BlockAbilityOnStartDuration`).
+    /// A tick exactly at its end goes through; earlier ticks aren't tries. KovaaK's waits
+    /// 1 s for a character that has no such key (the importer writes that in).
     pub start_block_s: f32,
-    /// A pause after any ability ends, shared by all of them (`AbilityGlobalCooldown`).
-    /// Not measured in KovaaK's.
+    /// A pause after any ability ends, shared by all of them (`AbilityGlobalCooldown`),
+    /// counted from the end the use was scheduled for (its tick plus its duration); a
+    /// try exactly at its end goes through. Not measured in KovaaK's.
     pub global_cooldown_s: f32,
     /// Counts as in combat even with no line of sight (`SeeThroughWalls`).
     pub sees_through_walls: bool,
@@ -43,14 +47,21 @@ pub struct Ability {
     /// Charges it has when the bot appears.
     pub spawn_charges: u32,
     /// Seconds to regain one charge while below the maximum; 0 regains at once
-    /// (`ChargeTimer`). A charge doesn't refill while the ability is going on, so it
-    /// starts refilling when the ability ends.
+    /// (`ChargeTimer`). A missing charge starts to refill at the tick of the press that
+    /// spent it, whatever the ability's length, and several missing ones come back one
+    /// after another, each this long after the one before. One that comes back exactly at
+    /// a try isn't there for that try, except in a chain that began when the bot
+    /// appeared (it spawned with fewer charges than its maximum).
     pub charge_s: f32,
-    /// After a use ends it can't be used again for the larger of these two
-    /// (`DelayAfterUse`, not measured, and `AIReuseTimer`, measured).
+    /// A use can't be followed by another use of this ability until this long after its
+    /// press, and a try exactly then isn't used (`DelayAfterUse`).
     pub delay_s: f32,
+    /// A tick is a try for this ability only when more than this has passed since its
+    /// last try, used or not (`AIReuseTimer`, measured). It spaces the tries; it doesn't
+    /// hold a use back by itself.
     pub reuse_s: f32,
-    /// 0 for a single impulse.
+    /// 0 for a single impulse. No ability starts while one is going on, and a try exactly
+    /// when one ends (its tick plus this) isn't used.
     pub duration_s: f32,
     /// m/s; negative goes backwards.
     pub speed: f32,
@@ -145,49 +156,81 @@ impl Abilities {
     }
 }
 
-/// One ability's state for one bot.
+/// How far a time may be from a scheduled one and still be "exactly at" it, so that
+/// rounding in the clock or in a tick's time (a count times the interval) doesn't decide
+/// a tie.
+const TIE_S: f32 = 1e-3;
+
+/// The most ticks one frame tries; the rest are skipped (see [`AbilityState::skip_to`]).
+const MAX_TICKS_A_FRAME: u32 = 64;
+
+/// The most windows rolled at once to catch up with a tick.
+const MAX_WINDOWS_AT_ONCE: u32 = 64;
+
+/// One ability's state for one bot. Every time in it is on the bot's clock and comes from
+/// the key's ticks and the schedule of the uses, never from the lengths of frames.
 #[derive(Debug, Clone, PartialEq)]
 struct Slot {
+    /// Charges it has, as of the last time the refills were settled.
     have: u32,
-    /// Seconds toward the next charge.
-    regen: f32,
-    /// The bot's clock when its delay is over.
-    ready_at: f32,
-    /// The bot's clock when its last charge came back.
-    back_at: f32,
+    /// When the refill that is going on began: the next charge is back a charge time
+    /// after it, and each one after that a charge time after the one before. `None`
+    /// when every charge is there.
+    refill_from: Option<f32>,
+    /// Whether that refill began when the bot appeared (it spawned with fewer charges
+    /// than its maximum). Such a chain is used on a tie, until the slot is full again.
+    from_spawn: bool,
+    /// The tick at which the ability was last used.
+    last_press: Option<f32>,
+    /// The tick that was last a try for this ability, used or not.
+    last_try: Option<f32>,
 }
 
 impl Slot {
     fn new(a: &Ability) -> Slot {
-        Slot {
-            have: a.spawn_charges.min(a.max_charges),
-            regen: 0.0,
-            ready_at: f32::NEG_INFINITY,
-            back_at: f32::NEG_INFINITY,
+        let have = a.spawn_charges.min(a.max_charges);
+        let short = have < a.max_charges;
+        Slot { have, refill_from: short.then_some(0.0), from_spawn: short, last_press: None, last_try: None }
+    }
+
+    /// Whether a tick at `at` is a try for this ability: strictly more than the reuse time
+    /// after its last try.
+    fn is_try(&self, a: &Ability, at: f32) -> bool {
+        self.last_try.is_none_or(|last| at - last > a.reuse_s + TIE_S)
+    }
+
+    /// Brings the charges up to the try at `at`. A charge is there when it came back
+    /// strictly before `at`; one back exactly at `at` isn't, unless the refill chain it
+    /// belongs to began when the bot appeared. With a charge time of 0 a charge is back
+    /// at the next try. Ends when the slot is full.
+    fn settle(&mut self, a: &Ability, at: f32) {
+        while self.have < a.max_charges {
+            let Some(from) = self.refill_from else { break };
+            let back = from + a.charge_s.max(0.0);
+            let there = if a.charge_s <= 0.0 || self.from_spawn { back <= at + TIE_S } else { back + TIE_S < at };
+            if !there {
+                break;
+            }
+            self.have += 1;
+            self.refill_from = Some(back);
+        }
+        if self.have >= a.max_charges {
+            self.refill_from = None;
+            self.from_spawn = false;
         }
     }
 
-    /// `now` is the bot's clock at the end of the `dt` that is added.
-    fn recharge(&mut self, a: &Ability, dt: f32, now: f32) {
-        if self.have >= a.max_charges {
-            self.regen = 0.0;
-            return;
+    /// A use at the tick `at`: a charge is spent, and a missing one starts to refill at
+    /// once (or, if others were already coming back, queues behind them).
+    fn spend(&mut self, at: f32) {
+        self.have = self.have.saturating_sub(1);
+        if self.refill_from.is_none() {
+            self.refill_from = Some(at);
+            self.from_spawn = false;
         }
-        self.regen += dt;
-        while self.have < a.max_charges && self.regen >= a.charge_s {
-            self.regen -= a.charge_s;
-            self.have += 1;
-            self.back_at = now;
-        }
-        if self.have >= a.max_charges {
-            self.regen = 0.0;
-        }
+        self.last_press = Some(at);
     }
 }
-
-/// How far the bot's clock may be short of a press time and still press, so that
-/// rounding in the clock doesn't make a press a frame late.
-const TIE_S: f32 = 1e-3;
 
 /// The ability in use.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -203,12 +246,12 @@ pub(super) struct AbilityState {
     clock: f32,
     slots: Vec<Slot>,
     active: Option<Active>,
-    /// The ability that ended this frame. Its charge starts to refill next frame.
-    ended: Option<usize>,
+    /// When the latest use is scheduled to end: its tick plus its duration.
     last_end: Option<f32>,
-    /// The bot's clock when its next press is due.
-    press_at: f32,
-    /// The bot's clock when the current window is over.
+    /// The count of the next tick of the key to try: it ticks at that number times
+    /// `press_every_s`, the first at 1.
+    next_tick: u32,
+    /// When the current window is over, on the bot's clock. Windows run back to back.
     window_end: f32,
     /// Whether the current window is one in which it presses.
     willing: bool,
@@ -223,9 +266,8 @@ impl Default for AbilityState {
             clock: 0.0,
             slots: Vec::new(),
             active: None,
-            ended: None,
             last_end: None,
-            press_at: 0.0,
+            next_tick: 1,
             window_end: 0.0,
             willing: false,
             uses: 0,
@@ -236,65 +278,115 @@ impl Default for AbilityState {
 
 impl AbilityState {
     /// Draws random numbers only for a bot that has abilities. The first window is
-    /// rolled now. The first press comes one press interval after the bot appears;
-    /// KovaaK's was not measured for that.
+    /// rolled now. The first tick of the key comes one interval after the bot appears.
     pub(super) fn new(ab: &Abilities, rng: &mut Rng) -> AbilityState {
-        let mut state = AbilityState {
-            slots: ab.list.iter().map(Slot::new).collect(),
-            press_at: ab.press_every_s,
-            ..AbilityState::default()
-        };
+        let mut state = AbilityState { slots: ab.list.iter().map(Slot::new).collect(), ..AbilityState::default() };
         state.new_window(ab, rng);
         state
     }
 
+    /// The next window starts where the last one ended.
     fn new_window(&mut self, ab: &Abilities, rng: &mut Rng) {
-        self.window_end = self.clock + between(rng, ab.window_s).max(0.01);
+        self.window_end += between(rng, ab.window_s).max(0.01);
         self.willing = rng.next_f32() < ab.chance;
     }
 
-    /// Whether the bot presses its ability key this frame, as measured in KovaaK's:
+    /// Rolls the windows up to the tick at `at`, so that the windows and the number of
+    /// rolls follow the ticks and not the frames. With tiny windows and a long wait it
+    /// stops after a few and starts a window at `at`.
+    fn roll_windows(&mut self, ab: &Abilities, rng: &mut Rng, at: f32) {
+        let mut rolled = 0;
+        while at + TIE_S >= self.window_end {
+            if rolled == MAX_WINDOWS_AT_ONCE {
+                self.window_end = at;
+            }
+            self.new_window(ab, rng);
+            rolled += 1;
+        }
+    }
+
+    /// Whether the tick at `at` is one at which the bot tries, as measured in KovaaK's
+    /// (all times are on the bot's own clock, which starts when it appears):
     ///
-    /// - `AbilityUseTimer` is the time between presses of the key.
+    /// - Nothing is used until `BlockAbilityOnStartDuration` has passed. A tick exactly at
+    ///   the end of the block goes through; ticks before it aren't tries.
+    /// - `AbilityUseTimer` is the time between ticks of the key: it ticks at 1, 2, ...
+    ///   times that from the moment the bot appears, and the grid never shifts.
+    /// - A tick is a try for an ability only when it comes strictly more than that
+    ///   ability's `AIReuseTimer` after the ability's previous try (see [`Slot::is_try`]).
+    ///   A try that fails, for lack of a charge, a delay that isn't over, an ability going
+    ///   on or the ability's rules, still counts as a try and uses up the reuse time. So
+    ///   with a tick of 0.1 s and a reuse time of 0.1 s the tries are 0.2 s apart, and
+    ///   with a reuse time of 1.0 s they are 1.1 s apart.
     /// - Every window (a random time between `UseAbilityFreqMinTime` and
     ///   `UseAbilityFreqMaxTime`) the bot rolls `UseAbilityFrequency` as a chance. For
-    ///   that whole window it either presses on every press, or doesn't press at all.
-    ///   The window timer and the press timer are separate. With a frequency of 1 the
-    ///   window times make no difference.
-    /// - `FullyAuto` makes no difference to a bot: a press is one attempt to use an
-    ///   ability, so the first ready ability in the list goes.
-    /// - Nothing else starts an ability. A bot counts as in combat with a line of
-    ///   sight to the player, whether or not it shoots.
+    ///   that whole window it either presses on every tick, or doesn't press at all. With
+    ///   a frequency of 1 the window times make no difference.
+    /// - `FullyAuto` makes no difference to a bot: a tick is one attempt to use an
+    ///   ability.
+    /// - Nothing else starts an ability. A bot counts as in combat with a line of sight
+    ///   to the player, whether or not it shoots.
+    /// - A charge starts to refill at the tick of the press that spent it, whatever the
+    ///   ability's length. One that comes back exactly at a try isn't there for it, except
+    ///   in a chain of refills that began when the bot appeared (see [`Slot::settle`]).
+    /// - `DelayAfterUse` counts from the press, and a try exactly when it is over isn't
+    ///   used. No ability starts while one is going on, and a try exactly at the moment
+    ///   one ends (its tick plus `AbilityDuration`) isn't used either.
     ///
-    /// Not measured, and guessed: the pause after the bot appears
-    /// (`BlockAbilityOnStartDuration`), the shared cooldown (`AbilityGlobalCooldown`),
-    /// the first press (one interval after the bot appears) and `DelayAfterUse`.
-    /// KovaaK's also shows a dash now and then coming later than these rules say
-    /// (about one in four, 5.7 s once instead of 4.2 s). The trainer doesn't copy that.
-    fn decide(&mut self, ab: &Abilities, rng: &mut Rng) -> bool {
-        if self.clock >= self.window_end {
-            self.new_window(ab, rng);
-        }
-        if self.clock + TIE_S < self.press_at {
+    /// Not measured, and played as follows: a tick in a window in which the bot isn't
+    /// willing isn't a try. A tick is a try whether or not an ability's rules (combat,
+    /// ground and air, distance, view angle) allow the use. At a tick the abilities are
+    /// gone through in list order; each one for which the tick is a try has its last try
+    /// set, and the first of those that is ready is used, so those after it aren't tried
+    /// at that tick. The shared cooldown (`AbilityGlobalCooldown`) is a pause after the
+    /// scheduled end of any ability (its tick plus its duration); a tie counts as over.
+    /// The block, the clock and the windows start again with each bot. KovaaK's also shows
+    /// a dash now and then coming later than these rules say (about one in four, 5.7 s once
+    /// instead of 4.2 s). The trainer doesn't copy that.
+    ///
+    /// Frame lengths play no part. Only scheduled times are compared; a frame just decides
+    /// in which frame a tick that has come due is handled. This function answers the two
+    /// questions that belong to the bot's key as a whole (the block and the window); the
+    /// reuse time is [`Slot::is_try`] and whether an ability can go is
+    /// [`AbilityState::ready_at`].
+    fn decide(&mut self, ab: &Abilities, rng: &mut Rng, at: f32) -> bool {
+        if at + TIE_S < ab.start_block_s {
             return false;
         }
-        // At most one press a frame; a press interval shorter than a frame means a
-        // press every frame.
-        self.press_at = (self.press_at + ab.press_every_s).max(self.clock);
+        self.roll_windows(ab, rng, at);
         self.willing
     }
 
-    /// Time moves on by `dt`: charges refill, except one whose own ability is going on
-    /// or ended in this frame (measured: a charge starts to refill when its ability
-    /// has ended).
-    pub(super) fn advance(&mut self, ab: &Abilities, dt: f32) {
-        self.clock += dt;
-        let busy = [self.active.map(|a| a.idx), self.ended.take()];
-        for (i, (s, a)) in self.slots.iter_mut().zip(&ab.list).enumerate() {
-            if !busy.contains(&Some(i)) {
-                s.recharge(a, dt, self.clock);
-            }
+    /// Whether the ability in slot `i` is ready at the try at `at`: it has a charge, its
+    /// delay after the press that last used it is over, and nothing is going on. The
+    /// tick, the reuse time, the shared cooldown and the ability's rules aren't part of
+    /// it, so that a use that isn't the bot's key (a reaction to damage) can ask the same
+    /// question.
+    fn ready_at(&mut self, a: &Ability, i: usize, at: f32) -> bool {
+        let busy = self.active.is_some() || self.last_end.is_some_and(|end| at <= end + TIE_S);
+        let Some(s) = self.slots.get_mut(i) else { return false };
+        if busy {
+            return false;
         }
+        s.settle(a, at);
+        s.have > 0 && s.last_press.is_none_or(|press| at > press + a.delay_s + TIE_S)
+    }
+
+    /// Moves `next_tick` on to the first tick of the grid that is after `limit`, so the
+    /// ticks in between aren't tried.
+    fn skip_to(&mut self, press_every_s: f32, limit: f32) {
+        if press_every_s.is_nan() || press_every_s <= 0.0 {
+            return;
+        }
+        let at = |k: u32| k as f32 * press_every_s;
+        let mut k = ((limit / press_every_s).floor().max(0.0) as u32).saturating_add(1);
+        while k > self.next_tick && at(k - 1) > limit {
+            k -= 1;
+        }
+        while k < u32::MAX && at(k) <= limit {
+            k += 1;
+        }
+        self.next_tick = self.next_tick.max(k);
     }
 }
 
@@ -353,34 +445,55 @@ impl BotState {
         self.ab.active.is_some_and(|act| list.and_then(|l| l.get(act.idx)).is_some_and(|a| a.blocks_movement))
     }
 
-    /// Once a frame: when the bot presses its key, it starts the first ability that is
-    /// ready. `seen` is whether the bot has a line of sight to the player.
+    /// Once a frame: every tick of the bot's key that has come due (see
+    /// [`AbilityState::decide`]) is tried in order, and one that finds an ability ready
+    /// starts it. `seen` is whether the bot has a line of sight to the player. A key that
+    /// ticks every 0 s ticks once a frame, at the frame's clock. At most 64 ticks are
+    /// tried in a frame; if more came due, the rest are skipped, not tried.
     pub(super) fn use_abilities(&mut self, m: &Motion, rng: &mut Rng, view: &View, pos: Vec3, seen: bool) {
         let Some(ab) = &m.abilities else { return };
-        if !self.ab.decide(ab, rng) || self.ab.active.is_some() {
+        let clock = self.ab.clock;
+        if ab.press_every_s <= 0.0 {
+            self.try_at(m, rng, view, pos, seen, clock);
             return;
         }
-        for i in 0..ab.list.len() {
-            if self.ready(m, ab, i, view, pos, seen) {
-                self.start_ability(m, ab, i, view, pos);
-                return;
+        let mut tried = 0;
+        loop {
+            let at = self.ab.next_tick as f32 * ab.press_every_s;
+            if at.is_nan() || at > clock + TIE_S {
+                break;
             }
+            if tried == MAX_TICKS_A_FRAME {
+                self.ab.skip_to(ab.press_every_s, clock + TIE_S);
+                break;
+            }
+            self.ab.next_tick = self.ab.next_tick.saturating_add(1);
+            tried += 1;
+            self.try_at(m, rng, view, pos, seen, at);
         }
     }
 
-    fn ready(&self, m: &Motion, ab: &Abilities, i: usize, view: &View, pos: Vec3, seen: bool) -> bool {
-        let (Some(a), Some(s)) = (ab.list.get(i), self.ab.slots.get(i)) else { return false };
-        let clock = self.ab.clock;
-        // Measured: a charge that comes back at the very moment of a press isn't there
-        // for that press. A 4 s charge after a 0.1 s dash, pressed every 0.1 s, went
-        // every 4.2 s and never every 4.1 s.
-        let just_back = u32::from(clock <= s.back_at);
-        self.ab.active.is_none()
-            && s.have > just_back
-            && clock >= s.ready_at
-            && clock >= ab.start_block_s
-            && self.ab.last_end.is_none_or(|end| clock - end >= ab.global_cooldown_s)
-            && self.rules_allow(m, a, view, pos, seen || ab.sees_through_walls)
+    /// The tick at `at`: for each ability it is a try for, in list order, the first that
+    /// is ready is used and the rest aren't tried.
+    fn try_at(&mut self, m: &Motion, rng: &mut Rng, view: &View, pos: Vec3, seen: bool, at: f32) {
+        let Some(ab) = &m.abilities else { return };
+        if !self.ab.decide(ab, rng, at) {
+            return;
+        }
+        for (i, a) in ab.list.iter().enumerate() {
+            let Some(slot) = self.ab.slots.get_mut(i) else { return };
+            if !slot.is_try(a, at) {
+                continue;
+            }
+            slot.last_try = Some(at);
+            if self.ab.ready_at(a, i, at)
+                && self.ab.last_end.is_none_or(|end| at - end + TIE_S >= ab.global_cooldown_s)
+                && self.rules_allow(m, a, view, pos, seen || ab.sees_through_walls)
+            {
+                self.start_ability(m, ab, i, view, pos, at);
+                return;
+            }
+        }
     }
 
     /// The ability's own rules: combat, ground or air, distance, view angle.
@@ -405,11 +518,13 @@ impl BotState {
         true
     }
 
-    /// Spends a charge and begins the ability: an impulse ends at once, a longer one
-    /// is held by [`BotState::hold_ability`].
-    fn start_ability(&mut self, m: &Motion, ab: &Abilities, i: usize, view: &View, pos: Vec3) {
+    /// Spends a charge and begins the ability at the tick `at`: an impulse ends at once, a
+    /// longer one is held by [`BotState::hold_ability`]. It is scheduled to end at `at`
+    /// plus its duration, whenever the frames end it.
+    fn start_ability(&mut self, m: &Motion, ab: &Abilities, i: usize, view: &View, pos: Vec3, at: f32) {
         let a = &ab.list[i];
-        self.ab.slots[i].have -= 1;
+        self.ab.slots[i].spend(at);
+        self.ab.last_end = Some(at + a.duration_s.max(0.0));
         self.ab.uses += 1;
         self.ab.owed += a.health_cost;
         let dir = direction(m, a, view, pos);
@@ -432,26 +547,21 @@ impl BotState {
             if a.up_speed != 0.0 {
                 self.vel.y = a.up_speed;
             }
-            self.finish_ability(ab, i, self.ab.clock);
+            self.finish_ability(ab, i);
         }
         if self.vel.y > 0.0 {
             self.grounded = false;
         }
     }
 
-    /// Ends an ability at `at`: the velocity is scaled and the delays start.
-    fn finish_ability(&mut self, ab: &Abilities, i: usize, at: f32) {
-        let a = &ab.list[i];
-        self.vel *= a.end_factor;
-        self.ab.slots[i].ready_at = at + a.delay_s.max(a.reuse_s).max(0.0);
-        self.ab.last_end = Some(at);
+    /// Ends an ability: the velocity is scaled and nothing is going on.
+    fn finish_ability(&mut self, ab: &Abilities, i: usize) {
+        self.vel *= ab.list[i].end_factor;
         self.ab.active = None;
-        self.ab.ended = Some(i);
     }
 
-    /// One physics substep of `h` seconds, ending at the bot's time `at`: an ability
-    /// that lasts holds its speed.
-    pub(super) fn hold_ability(&mut self, m: &Motion, view: &View, pos: Vec3, h: f32, at: f32) {
+    /// One physics substep of `h` seconds: an ability that lasts holds its speed.
+    pub(super) fn hold_ability(&mut self, m: &Motion, view: &View, pos: Vec3, h: f32) {
         let (Some(ab), Some(act)) = (&m.abilities, self.ab.active) else { return };
         let Some(a) = ab.list.get(act.idx) else { return };
         let dir = if a.lock_direction { act.dir } else { direction(m, a, view, pos) };
@@ -463,21 +573,25 @@ impl BotState {
             self.vel.y = a.up_speed + dir.y * a.speed;
         }
         if act.left - h <= 0.0 {
-            self.finish_ability(ab, act.idx, at);
+            self.finish_ability(ab, act.idx);
         } else if let Some(now) = &mut self.ab.active {
             now.left = act.left - h;
         }
     }
 
-    /// The bot's ability clock: its time since it appeared, at the start of the frame.
-    pub(super) fn ability_clock(&self) -> f32 {
-        self.ab.clock
+    /// A frame is over: the bot's clock moves on.
+    pub(super) fn ability_tick(&mut self, m: &Motion, dt: f32) {
+        if m.abilities.is_some() {
+            self.ab.clock += dt;
+        }
     }
 
-    /// A frame is over: charges refill and the clock moves on.
-    pub(super) fn ability_tick(&mut self, m: &Motion, dt: f32) {
-        if let Some(ab) = &m.abilities {
-            self.ab.advance(ab, dt);
-        }
+    /// A frame of a bot that waits to be hurt: its clock moves on, and the ticks that
+    /// passed meanwhile are skipped, not tried, so it doesn't make up for them when it
+    /// wakes. The grid stays where it is.
+    pub(super) fn ability_wait(&mut self, m: &Motion, dt: f32) {
+        let Some(ab) = &m.abilities else { return };
+        self.ab.clock += dt;
+        self.ab.skip_to(ab.press_every_s, self.ab.clock - TIE_S);
     }
 }

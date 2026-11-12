@@ -533,6 +533,14 @@ impl Scenario {
         if heals {
             marks += "\n# rules: heals in steps";
         }
+        // Imported bots use their abilities at the ticks and tries measured in KovaaK's.
+        let abilities = self
+            .world
+            .as_ref()
+            .is_some_and(|w| w.motions().any(|m| m.abilities.as_ref().is_some_and(|a| !a.list.is_empty())));
+        if abilities {
+            marks += "\n# rules: ability tries";
+        }
         marks
     }
 
@@ -854,6 +862,43 @@ mod tests {
         assert_eq!(jumps.fingerprint(), fnv(&(jumps.settings_text() + "\n# rules: jump key")));
         let both = world(World { motion: Some(jumper), ..World::default() }, 10.0);
         assert_eq!(both.fingerprint(), fnv(&(both.settings_text() + "\n# rules: jump key\n# rules: heals in steps")));
+    }
+
+    /// Bug: imported bots used their abilities at the wrong times (every tick was a try, charges
+    /// and delays counted from the end of the ability). Scenarios whose world has a bot with an
+    /// ability restart their bests with a third mark; bots without abilities keep their fingerprints.
+    #[test]
+    fn ability_tries_mark_only_scenarios_with_a_bot_that_has_an_ability() {
+        use crate::motion::{Abilities, Ability, Dodge, Motion};
+        use crate::world::{World, WorldKind};
+        let of_settings = |s: &Scenario| fnv(&s.settings_text());
+        let with_world = |w: World| Scenario { world: Some(w), ..Scenario::default() };
+        let ability = Abilities { list: vec![Ability::default()], ..Abilities::default() };
+        let dasher = Motion { abilities: Some(ability), ..Motion::default() };
+        let s = with_world(World { motion: Some(dasher.clone()), ..World::default() });
+        assert_eq!(s.fingerprint(), fnv(&(s.settings_text() + "\n# rules: ability tries")));
+        // A second kind with an ability counts too.
+        let second = WorldKind { motion: Some(dasher.clone()), ..WorldKind::default() };
+        let s = with_world(World { kinds: vec![second], ..World::default() });
+        assert_eq!(s.fingerprint(), fnv(&(s.settings_text() + "\n# rules: ability tries")));
+        // No ability: an empty list, none at all, a bot that only walks, no world.
+        let empty = Motion { abilities: Some(Abilities::default()), ..Motion::default() };
+        let walker = Motion { max_speed: 3.0, dodges: vec![Dodge::default()], ..Motion::default() };
+        for s in [
+            with_world(World { motion: Some(empty), ..World::default() }),
+            with_world(World { motion: Some(walker), ..World::default() }),
+            with_world(World::default()),
+            Scenario::default(),
+        ] {
+            assert_eq!(s.fingerprint(), of_settings(&s));
+        }
+        // Next to the other marks, after them.
+        let mut both = with_world(World { motion: Some(dasher), ..World::default() });
+        both.targets.regen_per_s = 10.0;
+        assert_eq!(
+            both.fingerprint(),
+            fnv(&(both.settings_text() + "\n# rules: heals in steps\n# rules: ability tries"))
+        );
     }
 
     /// Bug: easy and hard were only compared when both were written, so a file that

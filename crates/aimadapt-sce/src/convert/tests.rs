@@ -339,6 +339,22 @@ fn a_movement_ability_comes_through_in_meters_and_seconds() {
     assert!(i.notes.iter().any(|n| n == note), "{:?}", i.notes);
 }
 
+/// Bug: a character without a `BlockAbilityOnStartDuration` key played as having no block;
+/// KovaaK's waits 1 s. An explicit 0 stays 0.
+#[test]
+fn a_character_without_a_start_block_key_waits_one_second_and_an_explicit_zero_stays_zero() {
+    let block = |text: &str| {
+        let m = convert(&Sce::parse(text), "box.sce", "0").unwrap().scenario.world.unwrap().motion.unwrap();
+        m.abilities.unwrap().start_block_s
+    };
+    let with_key = dasher(ZIP);
+    assert_eq!(block(&with_key), 1.5);
+    assert_eq!(block(&with_key.replace("BlockAbilityOnStartDuration=1.5", "BlockAbilityOnStartDuration=0.0")), 0.0);
+    let without = with_key.replace("\nBlockAbilityOnStartDuration=1.5", "");
+    assert!(!without.contains("BlockAbilityOnStartDuration"));
+    assert_eq!(block(&without), 1.0);
+}
+
 #[test]
 fn a_movement_ability_with_only_a_launch_takes_the_defaults() {
     let m = convert(&Sce::parse(&dasher("UpVelocity=400.0")), "box.sce", "0").unwrap().scenario.world.unwrap().motion;

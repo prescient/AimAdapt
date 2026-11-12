@@ -581,7 +581,7 @@ impl BotState {
         seen: bool,
     ) {
         if m.still_until_hurt && !self.hurt {
-            self.ability_tick(m, dt);
+            self.ability_wait(m, dt);
             return;
         }
         self.think(m, rng, *pos, now, dt);
@@ -599,14 +599,13 @@ impl BotState {
         let view = self.ability_view(m, dir, spawn_forward);
         self.use_abilities(m, rng, &view, *pos, seen);
         let (dir, cap) = if self.ability_blocks_input(m) { (Vec3::ZERO, 0.0) } else { (dir, cap) };
-        let clock = self.ability_clock();
 
         let steps = (dt / SUBSTEP).ceil().clamp(1.0, 64.0) as usize;
         let h = dt / steps as f32;
         let mut touched_wall = false;
-        for i in 0..steps {
+        for _ in 0..steps {
             self.physics(m, dir, cap, h);
-            self.hold_ability(m, &view, *pos, h, clock + (i + 1) as f32 * h);
+            self.hold_ability(m, &view, *pos, h);
             let was = *pos;
             let on_floor = self.grounded;
             *pos += self.vel * h;

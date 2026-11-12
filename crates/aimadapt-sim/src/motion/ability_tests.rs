@@ -96,19 +96,26 @@ fn the_block_after_spawning_holds_a_use_back() {
     assert!((0.7..0.85).contains(&t[0]), "{t:?}");
 }
 
+/// The delay counts from the press (not the end of the ability) and a try exactly when it
+/// is over isn't used; the reuse time doesn't hold a use back, it spaces the tries. (This
+/// pinned "the larger of the two, from the end" before the timing was measured again.)
 #[test]
-fn the_delay_or_the_reuse_timer_after_a_use_holds_the_next_one_off() {
-    // Charges to spare, so only the delay counts: the larger of the two, from the end.
+fn the_delay_after_a_use_holds_the_next_one_off_and_the_reuse_time_spaces_the_tries() {
+    // Charges to spare, so only the delay and the tries count. Ticks come every 0.05 s.
     let many =
         Ability { max_charges: 9, spawn_charges: 9, charge_s: 0.05, duration_s: 0.1, speed: 3.0, ..Ability::default() };
-    for (delay_s, reuse_s, least) in [(0.5, 0.3, 0.6), (0.2, 0.8, 0.9)] {
+    // A delay of 0.5 from the press is over at 0.5 (a tie), so the next tick, 0.55 s on,
+    // is used. A reuse time of 0.8 puts the tries 0.85 s apart, and the delay is over by then.
+    // With a reuse time of 0.3 the tries are 0.35 s apart. The second try finds the delay
+    // (over at 0.55 s) still on and uses up the reuse time, so the use is at the third, 0.7 s on.
+    for (delay_s, reuse_s, gap) in [(0.5, 0.0, 0.55), (0.2, 0.8, 0.85), (0.5, 0.3, 0.7)] {
         let t = use_times(&with(Ability { delay_s, reuse_s, ..many.clone() }), 4.0);
         assert!(t.len() >= 4, "{t:?}");
         for g in gaps(&t) {
-            assert!(g >= least - 0.02 && g < least + 0.2, "delay {delay_s}, reuse {reuse_s}: {t:?}");
+            assert!((g - gap).abs() < 0.02, "delay {delay_s}, reuse {reuse_s}, gaps of {gap}: {t:?}");
         }
     }
-    // The shared cooldown counts from the end of any ability.
+    // The shared cooldown counts from the scheduled end of any ability (the tick plus 0.1 s).
     let m = Motion {
         abilities: Some(Abilities { global_cooldown_s: 0.7, ..abilities(vec![Ability { duration_s: 0.1, ..many }]) }),
         ..strafer()
@@ -465,45 +472,20 @@ fn the_charge_timer_holds_a_jump_back_until_the_next_press_after_it() {
     assert!(gaps(&t).iter().all(|g| (g - 1.6).abs() < 0.03), "{t:?}");
 }
 
-/// Measured: a dash with a charge timer of 4.0, a duration of 0.1 s and a press every
-/// 0.1 s came every 4.20 s, so a charge starts to refill when the ability ends.
+/// A charge starts to refill at the press, whatever the length of the dash. A 4.0 s charge,
+/// a tick of 0.1 s and no reuse time: it is back at 4.1 s after the press, which is a tie,
+/// so the use comes at the next tick, 4.1 s after the one before, for a dash of 0.1 s and of
+/// 1.0 s alike. (This was pinned as "4.2 s, starting when the dash ends", the timing the
+/// refill rule explained wrongly.)
 #[test]
-fn a_charge_starts_refilling_when_its_dash_ends() {
-    let dash =
-        Ability { max_charges: 1, spawn_charges: 1, charge_s: 4.0, duration_s: 0.1, speed: 3.0, ..Ability::default() };
-    let t = use_times(&pressing(0.1, 1.0, [1.0, 1.0], vec![dash]), 20.0);
-    assert!(t.len() >= 4, "{t:?}");
-    for g in gaps(&t) {
-        assert!((4.17..=4.23).contains(&g), "4.0 s of charging after the 0.1 s dash: {t:?}");
-    }
-}
-
-/// The same measurement with frames of uneven length, as in a real run: still every
-/// 4.2 s, never 4.1 s. The charge is back at the frame after the press at 4.1 s at the
-/// earliest, whatever the frames are.
-#[test]
-fn the_dash_interval_doesnt_depend_on_the_frame_times() {
-    let dash =
-        Ability { max_charges: 1, spawn_charges: 1, charge_s: 4.0, duration_s: 0.1, speed: 3.0, ..Ability::default() };
-    let m = pressing(0.1, 1.0, [1.0, 1.0], vec![dash]);
-    for seed in 1..=8 {
-        let walls = arena();
-        let (mut rng, mut frames) = (Rng::new(7), Rng::new(seed));
-        let mut s = BotState::new(&m, &mut rng, START, Vec3::X);
-        let (mut p, mut t, mut last, mut times) = (START, 0.0f32, 0, Vec::new());
-        while t < 30.0 {
-            // Between 60 and 240 frames a second.
-            let dt = 1.0 / (60.0 + 180.0 * frames.next_f32());
-            s.step_seen(&m, &mut rng, &walls, &mut p, 0.5, 0.0, t, dt, true);
-            if s.ability_uses() != last {
-                last = s.ability_uses();
-                times.push(t);
-            }
-            t += dt;
-        }
-        assert!(times.len() >= 6, "{times:?}");
-        for g in gaps(&times) {
-            assert!((4.17..=4.23).contains(&g), "seed {seed}: {times:?}");
+fn a_charge_starts_refilling_at_the_press_not_when_its_dash_ends() {
+    for duration_s in [0.1, 1.0] {
+        let dash =
+            Ability { max_charges: 1, spawn_charges: 1, charge_s: 4.0, duration_s, speed: 3.0, ..Ability::default() };
+        let t = use_times(&pressing(0.1, 1.0, [1.0, 1.0], vec![dash]), 20.0);
+        assert!(t.len() >= 4, "{t:?}");
+        for g in gaps(&t) {
+            assert!((4.07..=4.13).contains(&g), "a {duration_s} s dash, 4.0 s charge and a tie: {t:?}");
         }
     }
 }
@@ -600,4 +582,313 @@ fn each_use_adds_its_cost_to_what_the_bot_owes() {
         assert!(seen.len() >= 2 && seen.iter().all(|c| *c == per_use), "{seen:?}");
         assert_eq!(owed, per_use * s.ability_uses() as f32);
     }
+}
+
+// When a bot uses an ability, as measured in KovaaK's on made-up test maps (120 frames
+// a second): the key ticks on a grid, a tick is a try only when more than the reuse time
+// has passed since the ability's last try, and charges, delays and the ability itself
+// are on the bot's scheduled times, never on the frame lengths.
+
+/// A bot whose key ticks every `tick` seconds, always willing, with one ability and a
+/// start block of `block` seconds.
+fn ticking(tick: f32, block: f32, a: Ability) -> Motion {
+    Motion {
+        abilities: Some(Abilities {
+            press_every_s: tick,
+            chance: 1.0,
+            window_s: [1.0, 1.0],
+            start_block_s: block,
+            list: vec![a],
+            ..Abilities::default()
+        }),
+        ..strafer()
+    }
+}
+
+/// A dash that goes nowhere much: `max` charges (`spawn` of them at the start) of
+/// `charge_s` seconds each.
+fn dashing(duration_s: f32, charge_s: f32, max: u32, spawn: u32, delay_s: f32, reuse_s: f32) -> Ability {
+    Ability {
+        max_charges: max,
+        spawn_charges: spawn,
+        charge_s,
+        delay_s,
+        reuse_s,
+        duration_s,
+        speed: 2.0,
+        ..Ability::default()
+    }
+}
+
+/// A dash with 99 charges that come back at once, so only the ticks and the reuse time
+/// count.
+fn plenty(duration_s: f32, reuse_s: f32) -> Ability {
+    dashing(duration_s, 0.0, 99, 99, 0.0, reuse_s)
+}
+
+/// The bot's clock at the start of the frame in which each use begins, on frames of the
+/// lengths `frame` gives, until `seconds`. (The clock runs as the frames add up, as the
+/// bot's own does.)
+fn use_clocks(m: &Motion, seconds: f32, mut frame: impl FnMut() -> f32) -> Vec<f32> {
+    let walls = arena();
+    let mut rng = Rng::new(7);
+    let mut s = BotState::new(m, &mut rng, START, Vec3::X);
+    let (mut p, mut t, mut last, mut times) = (START, 0.0f32, 0, Vec::new());
+    while t < seconds {
+        let dt = frame();
+        s.step_seen(m, &mut rng, &walls, &mut p, 0.5, 0.0, t, dt, true);
+        while last < s.ability_uses() {
+            last += 1;
+            times.push(t);
+        }
+        t += dt;
+    }
+    times
+}
+
+/// The uses come at `expect`, each within one frame after its time: on frames of 1/120 s
+/// and on frames between 1/240 and 1/60 s for 8 seeds, with the same number of uses every
+/// time. Nothing is used in the 0.05 s after the last one listed (less than a tick).
+#[track_caller]
+fn assert_timeline(name: &str, m: &Motion, expect: &[f32]) {
+    let until = expect.last().unwrap() + 0.05;
+    let check = |what: String, times: &[f32], frame: f32| {
+        assert_eq!(times.len(), expect.len(), "{name}, {what}: {times:?}, wanted {expect:?}");
+        for (got, want) in times.iter().zip(expect) {
+            let late = got - want;
+            assert!((-0.002..=frame + 0.002).contains(&late), "{name}, {what}: {times:?}, wanted {expect:?}");
+        }
+    };
+    check("even frames".into(), &use_clocks(m, until, || DT), DT);
+    for seed in 1..=8 {
+        let mut frames = Rng::new(seed);
+        let times = use_clocks(m, until, || 1.0 / (60.0 + 180.0 * frames.next_f32()));
+        check(format!("seed {seed}"), &times, 1.0 / 60.0);
+    }
+}
+
+/// Bug: every tick of the key was a try, so the reuse time was a hold counted from the
+/// end of the ability. Now a tick is a try only when strictly more than the reuse time
+/// has passed since the last try: tries are 0.2 s apart for tick 0.1 and reuse 0.1, 0.3
+/// for 0.25, 1.1 for 1.0; a reuse time shorter than the tick makes no difference.
+#[test]
+fn the_reuse_time_spaces_the_tries_of_the_key() {
+    let cases: [(f32, f32, &[f32]); 4] = [
+        (0.1, 0.1, &[0.1, 0.3, 0.5, 0.7]),
+        (0.1, 0.25, &[0.1, 0.4, 0.7, 1.0]),
+        (0.1, 1.0, &[0.1, 1.2, 2.3]),
+        (0.25, 0.1, &[0.25, 0.5, 0.75, 1.0]),
+    ];
+    for (tick, reuse, want) in cases {
+        let m = ticking(tick, 0.0, plenty(0.0, reuse));
+        assert_timeline(&format!("tick {tick}, reuse {reuse}"), &m, want);
+    }
+}
+
+/// Bug: a charge only started to refill when its dash had ended, so a 1 s dash with a 3 s
+/// charge came back 4 s after the press. It refills from the press.
+#[test]
+fn a_charge_refills_from_the_press_whatever_the_length_of_the_dash() {
+    let long = |delay_s, reuse_s| ticking(0.1, 1.0, dashing(1.0, 3.0, 1, 0, delay_s, reuse_s));
+    assert_timeline("1 s dash, 3 s charge", &long(0.1, 0.1), &[3.0, 6.2, 9.4]);
+    assert_timeline("the same, reuse 1.0", &long(0.1, 1.0), &[3.2, 6.5, 9.8]);
+}
+
+/// Bug: the delay after a use counted from the end of the ability. It counts from the
+/// press, and a try exactly when it is over isn't used.
+#[test]
+fn the_delay_counts_from_the_press_not_from_the_end_of_the_dash() {
+    let long = |delay_s| ticking(0.1, 1.0, dashing(1.0, 0.1, 1, 0, delay_s, 0.1));
+    assert_timeline("1 s dash, delay 0.1", &long(0.1), &[1.0, 2.2, 3.4]);
+    // From the end the 0.6 s would put the second use at 2.6.
+    assert_timeline("1 s dash, delay 0.6", &long(0.6), &[1.0, 2.2, 3.4]);
+    let slow = ticking(0.1, 1.0, dashing(1.0, 3.0, 1, 0, 0.6, 0.1));
+    assert_timeline("1 s dash, 3 s charge, delay 0.6", &slow, &[3.0, 6.2, 9.4]);
+    // A short dash with a long delay: over 0.5 s after the press, and a try then isn't used.
+    let late = ticking(0.1, 0.0, dashing(0.1, 0.0, 99, 99, 0.5, 0.0));
+    assert_timeline("0.1 s dash, delay 0.5", &late, &[0.1, 0.7, 1.3]);
+}
+
+/// Bug: a bot with no `BlockAbilityOnStartDuration` key used abilities at once (the
+/// importer's side is tested there). The block ends at the key's time, and a tick exactly
+/// there is a try that goes through; the ticks before aren't tries, so they use up no
+/// reuse time.
+#[test]
+fn a_try_exactly_at_the_end_of_the_start_block_goes_through_and_earlier_ticks_dont_count() {
+    assert_timeline("block 0.7", &ticking(0.1, 0.7, plenty(0.0, 0.0)), &[0.7, 0.8, 0.9]);
+    // Ticks at 0.1 to 0.5 would have used up the reuse time of 0.5 if they were tries.
+    assert_timeline("block 0.55", &ticking(0.1, 0.55, plenty(0.0, 0.5)), &[0.6, 1.2]);
+    assert_timeline("block 1.0", &ticking(0.1, 1.0, plenty(0.0, 0.0)), &[1.0, 1.1, 1.2]);
+}
+
+/// Bug: a charge that came back exactly at a try was used at it. It isn't there for that
+/// try, only for the next. Three charges of 2.0 s from 3 at the start: back at 3.0, 5.0
+/// and 7.0, which are tries, so the uses are at 3.2, 5.2 and 7.2.
+#[test]
+fn a_charge_back_exactly_at_a_try_isnt_there_for_it() {
+    let m = ticking(0.1, 1.0, dashing(0.1, 2.0, 3, 3, 0.1, 0.1));
+    assert_timeline("3 charges of 2.0 s", &m, &[1.0, 1.2, 1.4, 3.2, 5.2, 7.2]);
+}
+
+/// The exception: a refill that began when the bot appeared, because it has fewer charges
+/// than its maximum, is used on a tie, and so is every charge of that chain until the
+/// slot is full. A refill that a press started is not.
+#[test]
+fn a_refill_chain_from_the_spawn_is_used_on_a_tie_and_one_from_a_press_isnt() {
+    // 0 of 1 at the start: back at 2.0, a try. The next, from the press at 2.0, is back
+    // at 4.0, a try too, and isn't used then.
+    let one = ticking(0.1, 1.0, dashing(0.1, 2.0, 1, 0, 0.1, 0.1));
+    assert_timeline("0 of 1", &one, &[2.0, 4.2, 6.4]);
+    // 1 of 3: used at 1.0; the chain from the spawn comes back at 2.0, 4.0 and 6.0, each
+    // used as it comes, and the chain goes on while the bot keeps spending them.
+    let three = ticking(0.1, 1.0, dashing(0.1, 2.0, 3, 1, 0.1, 0.1));
+    assert_timeline("1 of 3", &three, &[1.0, 2.0, 4.0, 6.0]);
+}
+
+/// Bug: a try at the very moment a dash ends was used. A try then isn't used: with a 1 s
+/// dash from 0.1 the next use is at 1.2, not 1.1.
+#[test]
+fn a_try_at_the_moment_a_dash_ends_isnt_used() {
+    let m = ticking(0.1, 0.0, plenty(1.0, 0.0));
+    assert_timeline("1 s dash, tick 0.1", &m, &[0.1, 1.2, 2.3]);
+    let half = ticking(0.1, 1.0, dashing(0.5, 0.1, 1, 0, 0.1, 1.0));
+    assert_timeline("0.5 s dash", &half, &[1.0, 2.1, 3.2]);
+}
+
+/// Bug: charges that were missing together were refilled from the end of each dash. They
+/// come back one after another, each a charge time after the one before, starting at the
+/// press that spent the first.
+#[test]
+fn missing_charges_come_back_one_after_another_from_the_first_press() {
+    let m = ticking(0.1, 1.0, dashing(1.0, 3.0, 3, 3, 0.1, 0.1));
+    assert_timeline("1 s dash, 3 charges of 3 s", &m, &[1.0, 2.2, 3.4, 4.6, 7.2, 10.2]);
+}
+
+/// The measured rows that have no bug of their own.
+#[test]
+fn the_other_measured_timelines_hold_on_any_frame_times() {
+    assert_timeline("tick 0.25", &ticking(0.25, 1.0, dashing(0.1, 0.1, 1, 0, 0.1, 0.1)), &[1.0, 1.25, 1.5]);
+    assert_timeline("reuse 0.25", &ticking(0.1, 0.0, dashing(0.1, 0.1, 1, 1, 0.1, 0.25)), &[0.1, 0.4, 0.7]);
+    assert_timeline("block 2.5", &ticking(0.1, 2.5, dashing(0.1, 2.0, 1, 1, 0.1, 0.1)), &[2.5, 4.7, 6.9]);
+}
+
+/// Measured: a dash with a 4.0 s charge, 0.1 s long, a tick of 0.1 and reuse 0.1 came
+/// every 4.20 s, never 4.10 s. Tries are 0.2 s apart, and the one at 4.1 is the moment
+/// the charge comes back, so the dash comes at the try at 4.3. (The old rule got this
+/// by starting the charge at the end of the dash.) Frames of uneven length, as in a real
+/// run, make no difference.
+#[test]
+fn a_dash_every_4_2_s_is_the_tie_at_4_1_then_the_try_at_4_3_on_any_frames() {
+    let m = ticking(0.1, 0.0, dashing(0.1, 4.0, 1, 1, 0.0, 0.1));
+    assert_timeline("4.0 s charge", &m, &[0.1, 4.3, 8.5, 12.7]);
+}
+
+/// At a tick the abilities are gone through in list order; each one for which the tick
+/// is a try gets its last try set, and the first ready one is used; those after it aren't
+/// tried at that tick. A has one charge that never comes back and B has a reuse time of
+/// 0.5: A is used at 0.1, B is first tried at 0.2 and used, and its next try is at 0.8.
+#[test]
+fn abilities_after_the_one_used_arent_tried_at_that_tick() {
+    let a = Ability { max_charges: 1, spawn_charges: 1, charge_s: 100.0, speed: 2.0, ..Ability::default() };
+    let m = Motion {
+        abilities: Some(Abilities {
+            press_every_s: 0.1,
+            chance: 1.0,
+            window_s: [1.0, 1.0],
+            list: vec![a, plenty(0.0, 0.5)],
+            ..Abilities::default()
+        }),
+        ..strafer()
+    };
+    assert_timeline("two abilities", &m, &[0.1, 0.2, 0.8]);
+}
+
+/// A tick is a try whether or not the ability's rules allow the use: it uses up the
+/// reuse time. In sight (in combat), an ability for out of combat only fails at 0.1 and
+/// that was a try, so at 0.2, out of sight, it isn't one and the use is at 0.7.
+#[test]
+fn a_try_the_rules_turn_down_still_uses_up_the_reuse_time() {
+    let hidden_only = Ability { in_combat: false, ..plenty(0.0, 0.5) };
+    let m = ticking(0.1, 0.0, hidden_only);
+    let walls = arena();
+    let mut rng = Rng::new(7);
+    let mut s = BotState::new(&m, &mut rng, START, Vec3::X);
+    let (mut p, mut t, mut first) = (START, 0.0f32, None);
+    while t < 1.0 {
+        let seen = t < 0.15;
+        s.step_seen(&m, &mut rng, &walls, &mut p, 0.5, 0.0, t, DT, seen);
+        if s.ability_uses() == 1 && first.is_none() {
+            first = Some(t);
+        }
+        t += DT;
+    }
+    let first = first.expect("used");
+    assert!((0.69..0.72).contains(&first), "{first}");
+}
+
+/// A bot that waits to be hurt uses nothing, and the ticks that pass meanwhile aren't
+/// tries: when it wakes it doesn't make up for the ones it missed. At 20 ticks a second
+/// over 3 s it would have 60 to catch up on.
+#[test]
+fn a_bot_that_waits_to_be_hurt_doesnt_burst_through_the_ticks_it_missed() {
+    let m = Motion { still_until_hurt: true, ..ticking(0.05, 0.0, plenty(0.0, 0.0)) };
+    let walls = arena();
+    let mut rng = Rng::new(3);
+    let mut s = BotState::new(&m, &mut rng, START, Vec3::X);
+    let mut p = START;
+    for i in 0..360 {
+        s.step(&m, &mut rng, &walls, &mut p, 0.5, 0.0, i as f32 * DT, DT);
+    }
+    assert_eq!(s.ability_uses(), 0);
+    s.on_hit(&m, &mut rng, 1.0, 3.0);
+    s.step(&m, &mut rng, &walls, &mut p, 0.5, 0.0, 3.0, DT);
+    assert!(s.ability_uses() <= 1, "{}", s.ability_uses());
+    // And on from there it goes at the ticks: 0.2 s more is 4 ticks or so, not a burst.
+    for i in 361..385 {
+        s.step(&m, &mut rng, &walls, &mut p, 0.5, 0.0, i as f32 * DT, DT);
+    }
+    assert!((3..=5).contains(&s.ability_uses()), "{}", s.ability_uses());
+}
+
+/// A key that ticks every 0 s ticks once a frame, at the frame's clock, and doesn't hang
+/// or divide by zero. With a reuse time of 0.25 the tries are more than 0.25 s apart.
+#[test]
+fn a_tick_of_zero_is_one_try_a_frame() {
+    let frames = 120;
+    let t = use_clocks(&ticking(0.0, 0.0, plenty(0.0, 0.0)), (frames as f32 - 0.5) * DT, || DT);
+    assert_eq!(t.len(), frames, "one use a frame");
+    let t = use_clocks(&ticking(0.0, 0.0, plenty(0.0, 0.25)), 3.0, || DT);
+    assert!(t.len() >= 8, "{t:?}");
+    assert!(gaps(&t).iter().all(|g| (0.2505..0.27).contains(g)), "{t:?}");
+}
+
+/// Every tick that came due in a frame is a try, in order: a frame of a second with a
+/// tick of 0.1 s has ten of them. Past 64 ticks in a frame the bot skips to the first
+/// tick after the clock without trying the skipped ones, and stays on the grid.
+#[test]
+fn a_long_frame_tries_each_tick_that_came_due_up_to_64_then_skips_to_the_grid() {
+    let m = ticking(0.1, 0.0, plenty(0.0, 0.0));
+    let walls = arena();
+    let go = |gap: f32| {
+        let mut rng = Rng::new(7);
+        let mut s = BotState::new(&m, &mut rng, START, Vec3::X);
+        let mut p = START;
+        s.ability_tick(&m, gap);
+        s.step_seen(&m, &mut rng, &walls, &mut p, 0.5, 0.0, gap, 0.01, true);
+        (s, rng, p)
+    };
+    let (s, ..) = go(1.0);
+    assert_eq!(s.ability_uses(), 10);
+    let (mut s, mut rng, mut p) = go(100.0);
+    assert_eq!(s.ability_uses(), 64, "no more than 64 ticks in a frame");
+    // The next tick after 100.0 is at 100.1: nothing until then, one use then.
+    let mut t = 100.01;
+    while t < 100.095 {
+        s.step_seen(&m, &mut rng, &walls, &mut p, 0.5, 0.0, t, 0.01, true);
+        t += 0.01;
+    }
+    assert_eq!(s.ability_uses(), 64, "the skipped ticks weren't tries");
+    s.step_seen(&m, &mut rng, &walls, &mut p, 0.5, 0.0, t, 0.01, true);
+    s.step_seen(&m, &mut rng, &walls, &mut p, 0.5, 0.0, t + 0.01, 0.01, true);
+    assert_eq!(s.ability_uses(), 65, "on the grid, one tick");
 }

@@ -141,7 +141,8 @@ pub(super) fn abilities(c: &BotChoice, ch: &Section) -> Option<Abilities> {
         press_every_s: secs(c.bot, "AbilityUseTimer"),
         chance: c.bot.f32_or("UseAbilityFrequency", 0.0).clamp(0.0, 1.0),
         window_s: [secs(c.bot, "UseAbilityFreqMinTime"), secs(c.bot, "UseAbilityFreqMaxTime")],
-        start_block_s: secs(ch, "BlockAbilityOnStartDuration"),
+        // KovaaK's waits 1 s for a character with no such key; an explicit 0 is no wait.
+        start_block_s: ch.f32_or("BlockAbilityOnStartDuration", 1.0).clamp(0.0, LONGEST_S),
         global_cooldown_s: secs(ch, "AbilityGlobalCooldown"),
         sees_through_walls: c.bot.is("SeeThroughWalls"),
         list,

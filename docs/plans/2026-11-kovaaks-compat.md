@@ -19,7 +19,8 @@ A scenario is refused when it uses something the trainer doesn't model, so every
 | K15b Chasers that take time to arrive | 19f0673 | 116 of 225 |
 | K7 Armed bots that never fire, invincible characters | 399d081 | 132 of 225 |
 | Fix: spawn offsets follow the map's axes | 4e0c441 | 132 of 225 |
-| Fix: regeneration between shots | | 132 of 225 |
+| Fix: regeneration between shots | cf9d8ca | 132 of 225 |
+| Fix: when a bot uses an ability | | 132 of 225 |
 | K15 The rest: vertical dashes, damage reactions | | |
 | K8 Bots that destroy themselves | | |
 | K9 Heads | | |
@@ -117,7 +118,7 @@ Done. The timing was measured in KovaaK's first, on four `AimAdapt - Use Test` m
 - `AbilityUseTimer` is the time between presses of the ability key.
 - `UseAbilityFrequency` is a chance rolled once per window of `UseAbilityFreqMinTime` to `UseAbilityFreqMaxTime` seconds. For that whole window the bot presses every time or not at all. With a frequency of 1 the window times change nothing.
 - `FullyAuto` changes nothing for a bot.
-- `AIReuseTimer` and `ChargeTimer` hold a use back until the first press after them. A charge starts to refill when the ability ends, and a charge that comes back at the moment of a press isn't used for that press: a 4 s charge after a 0.1 s dash, pressed every 0.1 s, went every 4.2 s.
+- `AIReuseTimer` and `ChargeTimer` hold a use back until the first press after them. A charge starts to refill when the ability ends, and a charge that comes back at the moment of a press isn't used for that press: a 4 s charge after a 0.1 s dash, pressed every 0.1 s, went every 4.2 s. (K15 measured this again and found two of these wrong: the charge refills from the press, and the reuse timer spaces the tries. See "When a bot uses an ability" under K15.)
 - A dash with `MainVelocitySetToMovementKeys` goes along the bot's movement input and stays on the ground. It covers its speed times its duration, and the bot then carries on at about its usual speed.
 - A line of sight to the player counts as in combat. Nobody has to shoot.
 - A dash with `MainVelocityCanGoVertical` and a main velocity throws the bot high into the air.
@@ -339,6 +340,63 @@ The regression test was run against K15a's code, where it fails: the instant cha
 
 The six local files with chasers were played in the sim without a window: a target is up in every frame and the ball keeps moving. No imported scenario with a chaser was watched in the game window, here or next to KovaaK's. Two things from the films aren't modelled: the chaser's aim being a little late, and the frame rate entering when the top speed binds.
 
+The rest of K15 was measured on 11 and 12 November 2026 in KovaaK's 3.9.13 at 120 frames a second, with made-up test maps (`AimAdapt - Vert Test …` and `AimAdapt - React Test …`). Films of the game window at about 59 frames a second gave every bot's place in each frame, so times are good to about 0.02 s. Eighteen files that don't play still have a K15 refusal, and two of them need nothing else. The work comes in four commits: a fix to when a bot uses an ability, the dashes that go up or down (K15c), the abilities used when hurt (K15d) and the smaller refusals (K15e).
+
+**When a bot uses an ability (the fix).** Flying bots that dash level and sideways under different timers (`Vert Test T1` and `T2`) showed that K2 had part of this wrong.
+
+- Nothing is used until `BlockAbilityOnStartDuration` has passed since the bot appeared. A character without the key waits 1.0 s. A try that falls exactly on the end of the block goes through.
+- The bot's key ticks every `AbilityUseTimer` from the moment the bot appears. A tick is a try only when it comes more than `AIReuseTimer` after the try before. So tries come at the smallest multiple of the use timer that is greater than the reuse timer: every 0.2 s for 0.1 and 0.1, every 1.1 s for 0.1 and 1.0, every 0.25 s for 0.25 and 0.1, every 0.3 s for 0.1 and 0.25. A try that finds the ability not ready still counts as one, and so does a try made during a dash. Ticks before the block ends don't count.
+- A charge starts to refill at the press, whatever the ability's length. With several charges missing they come back one after another, each a `ChargeTimer` after the one before.
+- A charge that comes back at the very moment of a try isn't there for it. Charges that are missing when the bot appears are the exception: they count from that moment and are there on a tie.
+- `DelayAfterUse` counts from the press.
+- No ability starts while one is going on, and a try at the very moment a dash ends isn't used.
+
+So a bot with one charge uses it at the first try that is later than the charge timer, the delay and the ability's length, all counted from the press. K2 saw a dash every 4.2 s from a 4.0 s charge, a 0.1 s dash and a tick every 0.1 s, and took the charge to refill from the end of the dash. The films show the other cause: that bot's reuse timer was 0.1 s, so its tries were 0.2 s apart, and the try at 4.0 s was a tie.
+
+Not measured: `AbilityGlobalCooldown`, two abilities on one bot (each is played with its own reuse timer, and a tick uses the first one that is ready), and whether the block starts again when a bot respawns (it is played as starting again with each bot). K3's rule for the time between a helper's hits was measured on helpers and doesn't follow these rules. It wasn't measured again and stays as it is. So does a helper whose character has no `BlockAbilityOnStartDuration`: it still starts at once.
+
+What gets built in the fix:
+
+- `aimadapt-sim`: tries, charges, the delay and the block follow the rules above, counted on the bot's own tick times so that the frame rate plays no part. A scenario whose bots have abilities carries a new rule mark in its fingerprint, so bests on those scenarios start again.
+- `aimadapt-sce`: a target's character without `BlockAbilityOnStartDuration` gets a block of 1.0 s.
+- Tests: one failing-first test for each rule the trainer had wrong (every tick a try, a charge that refills from the end of its ability, a delay counted from the end, no block without the key), the two tie rules, the same on frames of uneven length, the rule mark, and the fixtures' fingerprints.
+- Expected: no file starts or stops playing. Every playing file whose bots have abilities changes.
+
+The fix is done. No file starts or stops playing: 132 of 225. Eight of the playing files have a bot with an ability. They carry the new mark, so their bests start again, and one of them had no `BlockAbilityOnStartDuration` and now waits a second. No other file's scenario or fingerprint changed.
+
+Sixteen tests failed on the old code: the importer's default, the rule mark and fourteen on the timing. One timing test passed there, the dash every 4.2 s that K2 had measured, which the old rules reached for the wrong reason. Seven changes were then made to the new code one at a time (a tie that counts as a try, a press that restarts the refill chain, only a use counting as a try, the delay counted from the end of the dash, a tick during the block counting as a try, no rule mark, the mark on a bot with an empty ability list), and each fails a test.
+
+The eight files were played in the sim without a window on the code before and after. The runs without a shot fired score the same. Under held fire five are the same and three score differently, by 7% at most. None was watched in the game window. One edge is left as it is: a dash starts on the first frame at or after its tick, so below about 10 frames a second a frame can be longer than the gap between a dash's end and the next try, and that try is then lost.
+
+**Dashes that go up or down (K15c)**, measured with `Vert Test K1` to `K5`, `A1` and `A2`: flying and walking bots above and below the player's eye that blink or dash under each combination of the settings.
+
+- A dash set to the movement keys that negates gravity goes over the ground where the keys point: across the line to the player for a sideways key, along it for forward, away for back, and forward when no key is down. Its pitch is the pitch of the bot's aim line whichever key is down, and its speed along that slanted line is the whole `MainVelocity`. A flier's up and down key plays no part. A bot that doesn't aim (`NoAiming`) blinks level, along its own facing.
+- A dash that isn't set to the movement keys goes along the aim line at `MainVelocity`, toward the player for a positive velocity and away for a negative one. An impulse (no duration) does the same.
+- The aim line doesn't run from the bot's middle to the player's eye. It runs from one body height above the bot's middle to one body height above the middle of the player's character. A body height is twice the radius for a sphere or a spheroid, whatever its `MainBBHeight`, and `MainBBHeight` for a capsule. `CameraOffset` plays no part at either end. Flying bots of six sizes and shapes that blinked to and fro each settled at the height where that line is level. A cuboid wasn't measured.
+- A walking bot with no gravity that is off the ground keeps the velocity a dash leaves it with (`EndVelocityFactor` 1.0) or an impulse gives it, whatever its drag and braking.
+- A dash set to the movement keys on a walking bot with gravity, without `NegateGravityForDuration`, throws the bot upward by an amount no rule explained. No local file has that combination, and it stays refused.
+- Two things in the films aren't copied. A blink goes about a tenth farther than its speed times its duration. Some bots' headings are off by about 3 degrees, which is their own aim error.
+
+Fourteen of the eighteen files have such a dash. Nine have a long dash along the aim line that keeps its speed, four have blinks along the movement keys, and one has an impulse. None of them plays with the dash alone.
+
+**Abilities used when hurt (K15d)**, measured with `React Test R1` to `R14`, `R17` and `R18`: a tall capsule that hops, or a flying ball that blinks to and fro, as its reaction to damage, under a held automatic weapon or single shots.
+
+- A hit is a trigger when the damage taken since the last trigger reaches `AIDamageReactionThreshold`. With a threshold of 0 every hit is one. The sum starts again at the trigger. A threshold of 50 under shots of 10 gave a trigger at every fifth hit, and under 1 damage 100 times a second a trigger every half second.
+- The sum carried over 1.2 s of hits 0.3 s apart with an `AIDamageReactionResetTimer` of 1.0 s, so that timer starts again at each hit. That it clears the sum when it runs out is taken from its name.
+- Hits on a bot that can't be hurt (`InvincibleBots`) count, with the weapon's damage.
+- Each trigger is ignored with the chance `AIDamageReactionIgnoreChance`, by itself. At 0.5, 99 of 184 triggers were ignored, with up to five ignored in a row.
+- A trigger that isn't ignored starts a delay drawn evenly between `AIDamageReactionMinDelay` and `AIDamageReactionMaxDelay` (21 delays between 0.1 and 0.9 s came out from 0.12 to 0.89 s, spread evenly). The ability is used when it runs out. A new trigger while one is waiting starts the delay again. A hit below the threshold doesn't.
+- When the delay runs out the ability needs a charge, and `DelayAfterUse` must be over (a tie isn't enough). A reaction that fails either is dropped. It doesn't wait for the charge.
+- `AIReuseTimer` and the ticks of the bot's key play no part in a reaction.
+- `AIDamageReactionCooldown` did nothing in any test. Reactions came 0.25 s apart with a cooldown of 1.0 s, and the share of ignored triggers was the same at 0, 0.7 and 1.8 s. It isn't played.
+- With a `UseAbilityFrequency` of 0 the bot uses the ability only as a reaction. Above 0 it also presses its key as before, and both draw on the same charges.
+- The direction of a reaction's blink follows the rules for that ability.
+- One case isn't understood. An ability that is a single upward impulse sometimes shows nothing when the hit lands while the bot is in the air: with half the triggers ignored and shots 0.25 s apart, hops never followed two shots in a row. A flying bot's blink doesn't have it. A reaction on an impulse stays refused.
+
+Not measured: whether an ability's rules for combat, distance and view angle hold a reaction back (they are played as holding it back), and a reaction that comes due while another ability is going on (played as dropped). Four of the eighteen files have such a reaction on a movement ability. In two it is a blink with a duration, which is what K15d builds. The others are impulses and one dash with rules nobody measured, and they stay refused, as does a reaction on a melee ability. Each of those files is refused for something else as well.
+
+**The smaller refusals (K15e).** What is left after those three: a bot with a size of zero (3 files), a melee ability on a target (2), a health cost on an ability that doesn't move the bot (2), `AIMaxSelfHealth` (1), `AIMaxTargHealth` (1), an ability on a bot that doesn't dodge (1) and a hurtbox on a movement ability (1). One of the two files that K15 alone can start needs the first three. Each is read in the local files and measured before it is built. A setting that only files with other refusals use stays refused, with its reason.
+
 ## Wave 2: beyond the backlog's plan
 
 Ordered by files unlocked for the work involved. Each starts by reading how the local files use the feature, so the package builds what scenarios need and leaves out what none of them use.
@@ -490,10 +548,12 @@ These rows are filled in as packages land. A row leaves the table when a test ma
 |---|---|---|
 | The countdown before a run, on a scenario with a time scale | Not scaled: it takes the same real time at any time scale | No |
 | The timer on screen, on a scenario with a time scale | Shows game seconds left, so it counts down at the time scale per real second | No |
-| The first press of the ability key after a bot appears | One press interval after it appears | No |
-| `BlockAbilityOnStartDuration` (character) | No ability for that long after the bot appears | No |
 | `AbilityGlobalCooldown` (character) | After any ability, none of the bot's abilities for that long | No |
-| `DelayAfterUse` (ability) | That ability can't be used again for that long after a use | No |
+| A bot with two abilities | Each has its own reuse timer. A tick uses the first one in the list that is ready, and the ones after it aren't tried at that tick | No |
+| A try that the ability's own rules turn down (distance, view angle, ground or air) | Counts as a try, so the reuse timer runs from it | No |
+| A tick of the key while the bot isn't willing to use abilities (`UseAbilityFrequency`) | Not a try | No |
+| `BlockAbilityOnStartDuration` on a bot that respawns | Starts again with each new bot | No |
+| A helper whose character has no `BlockAbilityOnStartDuration` | No wait before its first hit (a target waits 1 s) | No |
 | `EndVelocityFactor` | The share of the dash speed the bot keeps when the dash ends | No |
 | `LockDirectionForDuration`, `NegateGravityForDuration`, `AbilityBlocksMovement` | As named, for the ability's duration | No |
 | `AIMinTargDist`, `AIMaxTargDist`, `AIMaxTargFOV`, `AIUseOnGround`, `AIUseInAir` | Rules that stop a use: distance to the player, the player within the view angle, on the ground or in the air | No |
