@@ -121,7 +121,7 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
     let kill_limit = rules::kill_limit(top, &r.bots, player_team, &mut reasons);
     let pushed = !helpers.helpers.is_empty();
     let Bots { kinds, slots, rotations, teams, moving } =
-        bots(&targets, other_team, pushed, top.is("InvincibleBots"), &mut reasons);
+        bots(&targets, other_team, pushed, top.is("InvincibleBots"), r.player, &mut reasons);
     let kind = kinds.first().map(|(ch, _)| *ch);
     let motion = kinds.first().and_then(|(_, m)| m.clone());
     if targets.is_empty() {
@@ -278,12 +278,14 @@ struct Bots<'a> {
 
 /// The target slots' bots. With `pushed` (the file has helper bots) every bot gets a
 /// motion, since a bot has to have one to fall or be pushed. Without it, a bot that
-/// doesn't move gets one only if it falls (a walker's character with gravity).
+/// doesn't move gets one only if it falls (a walker's character with gravity). `player`
+/// is the player's character, whose size a bot's dash that goes up or down needs.
 fn bots<'a>(
     target_slots: &[&BotSlot<'a>],
     other_team: u32,
     pushed: bool,
     invincible: bool,
+    player: Option<&Section>,
     reasons: &mut Vec<Gap>,
 ) -> Bots<'a> {
     let mut kinds: Vec<(&Section, Option<Motion>)> = Vec::new();
@@ -301,7 +303,7 @@ fn bots<'a>(
             let Some(ch) = c.character else { continue };
             // Movement abilities play. A target's melee ability doesn't: the knockbacks
             // that matter are the helper bots'.
-            abilities::reasons(c, ch, invincible, reasons);
+            abilities::reasons(c, ch, invincible, player, reasons);
             let moves = moves(c, ch);
             moving |= moves;
             if pushed && !moves && ch.is("IsFlyer") {
@@ -312,7 +314,11 @@ fn bots<'a>(
             // A bot that stays put still falls when its character has gravity (the key has
             // to be there: a character without it hangs where it appeared, as it always did).
             let falls = !ch.is("IsFlyer") && ch.f32("Gravity").is_some_and(|g| g > 0.0);
-            let m = if moves { Some(bot_motion(c, ch)) } else { (pushed || falls).then(|| still_motion(c, ch)) };
+            let m = if moves {
+                Some(bot_motion(c, ch, player))
+            } else {
+                (pushed || falls).then(|| still_motion(c, ch, player))
+            };
             let k = match kinds.iter().position(|(k, km)| same_kind(k, ch) && *km == m) {
                 Some(k) => k,
                 None => {
@@ -556,12 +562,22 @@ fn player_eye(player: Option<&Section>, start: Vec3, meshes: &[WorldMesh]) -> Ve
         if radius > 0.0 {
             body = aimadapt_sim::collide::Collider::for_bots(meshes).stand(body, half - radius, radius, step_up);
         }
-        camera = axes(p.vec3("CameraOffset").unwrap_or_default()) / UU_PER_M;
-        if head {
-            camera.y += height / 2.0 + p.f32_or("MainBBHeadOffset", 0.0) / 2.0 / UU_PER_M;
-        }
+        camera = camera_offset(p);
     }
     body + camera
+}
+
+/// How far the player's eye is above the middle of its body, in the sim's axes: the camera
+/// offset, or with a head, that above the top of the body (and half the head's offset
+/// higher: one measurement). A bot's dash that goes up or down needs the vertical part of
+/// it (see `abilities::aim_lift`), so both read it here.
+fn camera_offset(p: &Section) -> Vec3 {
+    let mut camera = axes(p.vec3("CameraOffset").unwrap_or_default()) / UU_PER_M;
+    if p.is("MainBBHasHead") {
+        let height = p.f32_or("MainBBHeight", 0.0).max(0.0) / UU_PER_M;
+        camera.y += height / 2.0 + p.f32_or("MainBBHeadOffset", 0.0) / 2.0 / UU_PER_M;
+    }
+    camera
 }
 
 /// Whether a bot moves, unless `NoDodging` keeps it still: it runs (`MaxSpeed`),
@@ -617,8 +633,9 @@ fn crouches(slots: &[&BotSlot]) -> bool {
     })
 }
 
-/// A moving bot's character physics and dodge profiles, in meters and seconds.
-fn bot_motion(c: &BotChoice, ch: &Section) -> Motion {
+/// A moving bot's character physics and dodge profiles, in meters and seconds. `player` is the
+/// player's character.
+fn bot_motion(c: &BotChoice, ch: &Section, player: Option<&Section>) -> Motion {
     let cm = |k: &str, default: f32| ch.f32_or(k, default).max(0.0) / UU_PER_M;
     let jump = jump_range(ch).unwrap_or([420.0; 2]);
     let flies = flies(ch);
@@ -677,7 +694,7 @@ fn bot_motion(c: &BotChoice, ch: &Section) -> Motion {
             c.bot.f32_or("DodgeProfileMaxChangeTime", 0.0).max(0.0),
         ],
         random_dodges: c.bot.bool("RandomizeDodgeProfiles").unwrap_or(true),
-        abilities: abilities::abilities(c, ch),
+        abilities: abilities::abilities(c, ch, player),
     }
 }
 
@@ -685,7 +702,7 @@ fn bot_motion(c: &BotChoice, ch: &Section) -> Motion {
 /// slides to a stop. It has no dodge profile, ability, jetpack or flight, and nothing
 /// that makes it jump or wait until it is hurt. A bot gets this in a scenario with
 /// helper bots when it wouldn't move on its own (a flier that wouldn't is refused).
-fn still_motion(c: &BotChoice, ch: &Section) -> Motion {
+fn still_motion(c: &BotChoice, ch: &Section, player: Option<&Section>) -> Motion {
     Motion {
         max_speed: 0.0,
         dodges: Vec::new(),
@@ -693,7 +710,7 @@ fn still_motion(c: &BotChoice, ch: &Section) -> Motion {
         jetpack: None,
         flight: None,
         still_until_hurt: false,
-        ..bot_motion(c, ch)
+        ..bot_motion(c, ch, player)
     }
 }
 

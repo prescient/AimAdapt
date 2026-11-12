@@ -2,8 +2,10 @@
 
 use glam::Vec3;
 
+use super::ability::{View, direction};
 use super::tests::{DT, arena, strafer};
 use super::*;
+use crate::collide::Collider;
 use crate::rng::Rng;
 
 /// A bot that presses its key every 0.05 s and is always willing to.
@@ -891,4 +893,348 @@ fn a_long_frame_tries_each_tick_that_came_due_up_to_64_then_skips_to_the_grid() 
     s.step_seen(&m, &mut rng, &walls, &mut p, 0.5, 0.0, t, 0.01, true);
     s.step_seen(&m, &mut rng, &walls, &mut p, 0.5, 0.0, t + 0.01, 0.01, true);
     assert_eq!(s.ability_uses(), 65, "on the grid, one tick");
+}
+
+// Plan K15c: dashes and blinks that can go up or down (`MainVelocityCanGoVertical`). In KovaaK's
+// such a dash follows the bot's aim line, which runs from one body height above the bot's middle to
+// one body height above the middle of the player's character. `Abilities::aim_lift` is how much
+// higher than the line from the bot's middle to the eye that line is.
+
+/// A bot 20 m ahead of the player and 4.5 m below the eye.
+const BELOW: Vec3 = Vec3::new(0.0, -4.5, -20.0);
+
+/// What `direction` is asked: the bot's view with this movement input (spawn forward +X).
+fn view(wish: Vec3) -> View {
+    View { wish, spawn_forward: Vec3::X }
+}
+
+fn vertical(along_input: bool) -> Ability {
+    Ability { vertical: true, along_input, speed: 30.0, ..Ability::default() }
+}
+
+/// `direction` for a bot at `pos` whose abilities have this `aim_lift`.
+fn aimed(m: &Motion, lift: f32, a: &Ability, wish: Vec3, pos: Vec3) -> Vec3 {
+    let ab = Abilities { aim_lift: lift, ..abilities(vec![a.clone()]) };
+    direction(m, &ab, a, &view(wish), pos)
+}
+
+#[track_caller]
+fn assert_dir(got: Vec3, want: [f32; 3], what: &str) {
+    let want = Vec3::from_array(want);
+    assert!((got - want).length() < 1e-4, "{what}: got {got}, wanted {want}");
+}
+
+/// Bug: an imported bot's dash that can go up or down went level along its keys, plus straight up
+/// or down with a flier's key. Measured: with the keys on and the dash negating gravity it goes where
+/// the keys point over the ground, and its pitch is the pitch of the aim line whichever key is down.
+/// Here the aim line (from `(0, 0.5, 0)` to the player's point) is `(0, 5, 20)` from the bot.
+#[test]
+fn a_dash_along_the_keys_that_can_go_up_or_down_is_pitched_like_the_aim_line() {
+    let m = strafer();
+    let on = vertical(true);
+    // run / length = 20 / sqrt(425), rise / length = 5 / sqrt(425).
+    let (run, rise) = (0.970_142_5, 0.242_535_6);
+    assert_dir(aimed(&m, 0.5, &on, Vec3::NEG_X, BELOW), [-run, rise, 0.0], "a key across the line to the player");
+    assert_dir(aimed(&m, 0.5, &on, Vec3::X, BELOW), [run, rise, 0.0], "the other key across");
+    assert_dir(aimed(&m, 0.5, &on, Vec3::Z, BELOW), [0.0, rise, run], "forward, along the line to the player");
+    assert_dir(aimed(&m, 0.5, &on, Vec3::NEG_Z, BELOW), [0.0, rise, -run], "back, away, and it still rises");
+    assert_dir(aimed(&m, 0.5, &on, Vec3::ZERO, BELOW), [0.0, rise, run], "no key: forward");
+    // Bug: with no key it aimed from the bot's middle at the eye, (0, 0.2195, 0.9756).
+}
+
+/// A bot above the eye: the aim line is `(0, -5.5, 20)` and slopes down.
+#[test]
+fn a_dash_along_the_keys_from_above_the_eye_pitches_down() {
+    let m = strafer();
+    let got = aimed(&m, 0.5, &vertical(true), Vec3::NEG_X, Vec3::new(0.0, 6.0, -20.0));
+    assert_dir(got, [-0.964_20, -0.265_16, 0.0], "keys on, sideways");
+}
+
+/// A bot that doesn't face the player has no aim line: its dash along the keys goes level along them,
+/// and along its spawn's forward with no key.
+#[test]
+fn a_bot_that_does_not_aim_blinks_level() {
+    let m = Motion { faces_player: false, ..strafer() };
+    let on = vertical(true);
+    assert_dir(aimed(&m, 0.5, &on, Vec3::NEG_X, BELOW), [-1.0, 0.0, 0.0], "along the key");
+    assert_dir(aimed(&m, 0.5, &on, Vec3::Z, BELOW), [0.0, 0.0, 1.0], "along a forward key");
+    assert_dir(aimed(&m, 0.5, &on, Vec3::ZERO, BELOW), [1.0, 0.0, 0.0], "no key: the spawn's forward (+X here)");
+}
+
+/// Bug: a dash not set to the keys aimed from the bot's middle at the eye, so its pitch missed by the
+/// lift. Measured: it goes along the aim line, toward the player for a positive speed.
+#[test]
+fn a_dash_not_set_to_the_keys_goes_along_the_aim_line() {
+    let m = strafer();
+    let off = vertical(false);
+    let (run, rise) = (0.970_142_5, 0.242_535_6);
+    assert_dir(aimed(&m, 0.5, &off, Vec3::NEG_X, BELOW), [0.0, rise, run], "keys down but not followed");
+    assert_dir(aimed(&m, 0.5, &off, Vec3::ZERO, BELOW), [0.0, rise, run], "no key");
+    // Without a lift it is the line from the middle to the eye, as before.
+    assert_dir(aimed(&m, 0.0, &off, Vec3::ZERO, BELOW), [0.0, 0.219_5, 0.975_6], "no lift");
+}
+
+/// A line of length 0 (the bot is where its aim line starts) has no pitch: no NaN, and the dash goes
+/// level along the heading or the facing.
+#[test]
+fn an_aim_line_of_no_length_gives_a_level_dash() {
+    let m = strafer();
+    let at = Vec3::new(0.0, 0.5, 0.0);
+    let on = aimed(&m, 0.5, &vertical(true), Vec3::NEG_X, at);
+    assert_dir(on, [-1.0, 0.0, 0.0], "keys on: the heading");
+    let idle = aimed(&m, 0.5, &vertical(true), Vec3::ZERO, at);
+    assert_dir(idle, [1.0, 0.0, 0.0], "keys on, no key: the facing");
+    let off = aimed(&m, 0.5, &vertical(false), Vec3::NEG_X, at);
+    assert_dir(off, [1.0, 0.0, 0.0], "keys off: the facing (the spawn's forward, +X here)");
+    assert!(on.is_finite() && off.is_finite() && idle.is_finite());
+}
+
+/// A dash that stays level gives the same level direction whatever the lift is.
+#[test]
+fn a_level_dash_ignores_the_aim_lift() {
+    let m = strafer();
+    for along in [true, false] {
+        let a = Ability { vertical: false, along_input: along, ..vertical(along) };
+        let base = aimed(&m, 0.0, &a, Vec3::NEG_X, BELOW);
+        for lift in [0.5, 3.0, -2.0] {
+            assert_eq!(aimed(&m, lift, &a, Vec3::NEG_X, BELOW), base, "along input {along}, lift {lift}");
+        }
+        assert_eq!(base.y, 0.0);
+    }
+}
+
+/// A bot in open space (no floor, no walls), stepped by hand.
+struct Air {
+    m: Motion,
+    walls: Collider,
+    rng: Rng,
+    s: BotState,
+    p: Vec3,
+    t: f32,
+}
+
+impl Air {
+    fn new(m: Motion, start: Vec3) -> Air {
+        let mut rng = Rng::new(7);
+        let mut s = BotState::new(&m, &mut rng, start, Vec3::X);
+        s.grounded = false;
+        Air { m, walls: Collider::new(&[]), rng, s, p: start, t: 0.0 }
+    }
+
+    fn step(&mut self, dt: f32) {
+        self.s.step_seen(&self.m, &mut self.rng, &self.walls, &mut self.p, 0.5, 0.0, self.t, dt, true);
+        self.t += dt;
+    }
+}
+
+/// Frames of 1/120 s with `None`, or of lengths between 1/240 and 1/60 s drawn with the seed: the
+/// engine steps the sim with the real frame lengths.
+fn frame_lengths(seed: Option<u64>) -> Box<dyn FnMut() -> f32> {
+    match seed {
+        None => Box::new(|| DT),
+        Some(seed) => {
+            let mut rng = Rng::new(seed);
+            Box::new(move || 1.0 / (60.0 + 180.0 * rng.next_f32()))
+        }
+    }
+}
+
+const FRAME_KINDS: [Option<u64>; 4] = [None, Some(1), Some(2), Some(3)];
+
+/// A flier with no gravity that hovers when no key is down and strafes, with one ability and an aim
+/// lift of 0.5. Its up key is the test's to press (`s.keys.held`).
+fn blinker(a: Ability, press_every_s: f32) -> Motion {
+    let hold =
+        Dodge { fly_by_keys: true, jump_chance: 1e-9, jump_s: [1e6, 1e6], strafe_s: [1.0, 1.0], ..Dodge::default() };
+    Motion {
+        gravity: 0.0,
+        flight: Some(Flight { up_speed: 2.0, down_speed: 3.0, up_accel: 50.0, down_accel: 100.0, up_on_both: false }),
+        dodges: vec![hold],
+        abilities: Some(Abilities {
+            press_every_s,
+            chance: 1.0,
+            window_s: [1.0, 1.0],
+            list: vec![a],
+            aim_lift: 0.5,
+            ..Abilities::default()
+        }),
+        ..strafer()
+    }
+}
+
+/// One 0.1 s blink along the keys at 30 m/s with no gravity, held to its first direction.
+fn blink() -> Ability {
+    Ability {
+        charge_s: 100.0,
+        duration_s: 0.1,
+        speed: 30.0,
+        along_input: true,
+        vertical: true,
+        no_gravity: true,
+        lock_direction: true,
+        ..Ability::default()
+    }
+}
+
+/// An ability with charges that come back at once, so it blinks at every tick.
+fn many(a: Ability) -> Ability {
+    Ability { max_charges: 99, spawn_charges: 99, charge_s: 0.01, ..a }
+}
+
+/// Bug: a flier's blink along its keys went level (the sim's old rule only pitched it with the
+/// flier's own up or down key). Measured: its speed along the slanted aim line is the whole speed, so
+/// from 4.5 m below the eye its climb is 30 * 5 / sqrt(425) = 7.28 m/s, whichever key it strafes by.
+#[test]
+fn a_flying_bots_blink_along_its_keys_climbs_toward_its_aim_line() {
+    for seed in FRAME_KINDS {
+        let (mut air, mut frame) = (Air::new(blinker(blink(), 0.05), BELOW), frame_lengths(seed));
+        let mut seen = 0;
+        while air.t < 0.4 {
+            air.step(frame());
+            if air.s.using_ability() {
+                seen += 1;
+                let v = air.s.vel;
+                assert!((v.length() - 30.0).abs() < 0.05, "seed {seed:?}: speed {}", v.length());
+                assert!((v.y - 30.0 * 0.242_536).abs() < 0.1, "seed {seed:?}: it climbs at {} m/s, not 7.28", v.y);
+            }
+        }
+        assert!(seen >= 5, "seed {seed:?}: it blinked for {seen} frames");
+    }
+}
+
+/// Bug: a flier's up key climbed its blink even when the aim line was level. Measured: a flier's up and
+/// down keys play no part, the pitch is the aim line's. At the height where the line is level
+/// (`pos.y` = the lift) the blink doesn't climb with the key held.
+#[test]
+fn a_fliers_up_key_plays_no_part_in_the_pitch_of_its_blink() {
+    for seed in FRAME_KINDS {
+        let start = Vec3::new(0.0, 0.5, -20.0);
+        let (mut air, mut frame) = (Air::new(blinker(blink(), 0.02), start), frame_lengths(seed));
+        air.s.keys.held = true;
+        let mut seen = 0;
+        while air.t < 0.3 {
+            air.step(frame());
+            if air.s.using_ability() {
+                seen += 1;
+                assert!(air.s.vel.y.abs() < 0.1, "seed {seed:?}: it climbs at {} m/s with the key held", air.s.vel.y);
+            }
+        }
+        assert!(seen >= 3, "seed {seed:?}: it blinked for {seen} frames");
+    }
+}
+
+/// A dash not set to the keys that doesn't hold its direction asks again every substep, so it keeps
+/// turning toward the aim point from where the bot is then: moved sideways by hand halfway through, it
+/// turns to the new line at once. A negative speed goes the other way.
+#[test]
+fn a_dash_that_doesnt_lock_its_direction_follows_the_aim_line_from_where_it_is() {
+    for speed in [10.0, -10.0] {
+        let a = Ability {
+            charge_s: 100.0,
+            duration_s: 1.0,
+            speed,
+            vertical: true,
+            no_gravity: true,
+            lock_direction: false,
+            ..Ability::default()
+        };
+        let mut air = Air::new(blinker(a, 0.05), BELOW);
+        let (mut checked, mut worst) = (0, 0.0f32);
+        let mut turned = false;
+        while air.t < 1.0 {
+            air.step(DT);
+            if !turned && air.t > 0.5 {
+                air.p.x += 3.0;
+                turned = true;
+                continue;
+            }
+            if air.s.using_ability() {
+                // The frame's last substep (half a frame) began here.
+                let start = air.p - air.s.vel * (DT / 2.0);
+                let aim = -start + Vec3::Y * 0.5;
+                let want = aim.normalize() * speed.signum();
+                let got = air.s.vel / speed.abs();
+                worst = worst.max((got - want).length());
+                checked += 1;
+            }
+        }
+        assert!(checked > 60, "{checked} frames");
+        assert!(worst < 2e-3, "speed {speed}: the velocity was {worst} off the aim line");
+    }
+}
+
+/// Plan K15c, settling: a flier with no gravity that strafes and blinks along its keys at 30 m/s for
+/// 0.1 s drifts to the height where its aim line is level (`pos.y` = the lift) and never crosses it.
+/// A blink covers about its length over its distance to the player (3 m / 22 m) of what is left.
+#[test]
+fn a_blinking_flier_settles_at_the_height_where_its_aim_line_is_level() {
+    for (from, label) in [(4.5, "4 m above"), (-3.5, "4 m below")] {
+        for seed in FRAME_KINDS {
+            let start = Vec3::new(0.0, from, -20.0);
+            let (mut air, mut frame) = (Air::new(blinker(many(blink()), 0.25), start), frame_lengths(seed));
+            let side = (from - 0.5).signum();
+            let (mut crossed, mut first) = (false, None);
+            while air.t < 40.0 {
+                air.step(frame());
+                crossed |= (air.p.y - 0.5) * side < -1e-3;
+                if first.is_none() && air.s.ability_uses() == 1 && !air.s.using_ability() {
+                    first = Some(1.0 - (air.p.y - 0.5) / (from - 0.5));
+                }
+            }
+            // The first blink covers its length over its distance (3 m / 20.4 m) of the 4 m.
+            let share = first.expect("it blinked");
+            assert!((share - 3.0 / 20.4).abs() < 0.01, "{label}, seed {seed:?}: the first blink covered {share}");
+            let left = air.p.y - 0.5;
+            let uses = air.s.ability_uses();
+            assert!(!crossed, "{label}, seed {seed:?}: it crossed the level of its aim line");
+            assert!(left.abs() < 0.12, "{label}, seed {seed:?}: still {left} m off (a few percent of 4 m is 0.12)");
+            assert!(uses > 100, "{label}, seed {seed:?}: {uses} uses");
+        }
+    }
+}
+
+/// Measured: a walking bot with no gravity that is off the ground keeps the velocity a dash with an end
+/// factor of 1 or an impulse leaves it with (no friction in the air, nothing pulls it down). An impulse
+/// of 3 m/s along its aim line is still 3 m/s five seconds on.
+#[test]
+fn a_walker_without_gravity_keeps_the_speed_an_impulse_gives_it() {
+    let m = Motion {
+        gravity: 0.0,
+        friction: 8.0,
+        braking: 20.0,
+        dodges: vec![],
+        abilities: Some(Abilities {
+            aim_lift: 0.5,
+            ..abilities(vec![Ability { charge_s: 100.0, speed: 3.0, vertical: true, ..Ability::default() }])
+        }),
+        ..strafer()
+    };
+    for seed in FRAME_KINDS {
+        let (mut air, mut frame) = (Air::new(m.clone(), Vec3::new(0.0, 3.0, -20.0)), frame_lengths(seed));
+        while air.t < 5.0 {
+            air.step(frame());
+        }
+        assert_eq!(air.s.ability_uses(), 1);
+        assert!((air.s.vel.length() - 3.0).abs() < 0.01, "seed {seed:?}: speed {}", air.s.vel.length());
+        assert!(!air.s.grounded);
+    }
+}
+
+/// An aim lift that is NaN or far out is a problem; one of 0 is stored as no key at all, so a stored
+/// scenario and its fingerprint stay as they were.
+#[test]
+fn the_aim_lift_is_checked_and_stored_only_when_it_is_set() {
+    for good in [0.0, 0.5, -0.3, 100.0, -100.0] {
+        assert!(Abilities { aim_lift: good, ..abilities(vec![]) }.problems().is_empty(), "{good}");
+    }
+    for bad in [f32::NAN, f32::INFINITY, 101.0, -250.0] {
+        let p = Abilities { aim_lift: bad, ..abilities(vec![]) }.problems();
+        assert_eq!(p, vec!["a bot's ability has an aim height out of range".to_string()], "{bad}");
+    }
+    let text = toml::to_string(&with(Ability { speed: 3.0, ..Ability::default() })).unwrap();
+    assert!(!text.contains("aim_lift"), "{text}");
+    let lifted = Motion { abilities: Some(Abilities { aim_lift: 0.5, ..abilities(vec![]) }), ..strafer() };
+    let text = toml::to_string(&lifted).unwrap();
+    assert!(text.contains("aim_lift = 0.5"), "{text}");
+    assert_eq!(toml::from_str::<Motion>(&text).unwrap(), lifted);
 }

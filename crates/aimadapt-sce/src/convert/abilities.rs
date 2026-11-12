@@ -1,10 +1,16 @@
 //! A bot's abilities: movement abilities (dashes, blinks, ability jumps) become the
 //! bot's [`Abilities`]; the ones the trainer can't play yet come back as reasons.
 //! Velocities and distances in the file are centimeters, times are seconds.
+//!
+//! A dash that can go up or down (`MainVelocityCanGoVertical` with a main velocity) follows the
+//! bot's aim line, which needs the player's size too (see [`aim_lift`]). It is refused when it
+//! keeps gravity for its duration, when it is an impulse along the movement keys, when it isn't
+//! along the keys on a bot that doesn't aim, and when the bot's or the player's hitbox is
+//! neither a spheroid nor a capsule: none of those was measured.
 
 use aimadapt_sim::motion::{Abilities, Ability};
 
-use super::{UU_PER_M, push_once};
+use super::{UU_PER_M, camera_offset, push_once};
 use crate::inventory::Gap;
 use crate::scenario::{ABILITY_KINDS, BotChoice, BotSlot};
 use crate::settings::Section;
@@ -31,10 +37,6 @@ const UNPLAYED: &[(&str, Unplayed)] = &[
     ("AIMinTargHealth", |a| a.f32_or("AIMinTargHealth", 0.0) > 0.0),
     ("AIMaxTargHealth", |a| a.f32_or("AIMaxTargHealth", 100.0) < 100.0),
     ("CancelDashOnGreaterThan45Collisions", |a| a.is("CancelDashOnGreaterThan45Collisions")),
-    // In KovaaK's a dash that can go up or down with a main velocity launches the bot high
-    // into the air; the trainer can't play that. Ability jumps (a velocity of 0 and an
-    // up velocity) are fine.
-    ("MainVelocityCanGoVertical", |a| a.is("MainVelocityCanGoVertical") && a.f32_or("MainVelocity", 0.0) != 0.0),
     // Not measured in KovaaK's.
     ("AIDamageReaction", |a| a.is("AIDamageReaction")),
 ];
@@ -45,11 +47,51 @@ fn costs_health(a: &Section) -> bool {
     a.f32_or("HealthRestore", 0.0) < 0.0
 }
 
+/// Whether a movement ability can send the bot up or down and has a main velocity to do it
+/// with. (With no main velocity it is an ability jump, which is level work for this module.)
+fn goes_up_or_down(a: &Section) -> bool {
+    a.is("MainVelocityCanGoVertical") && a.f32_or("MainVelocity", 0.0) != 0.0
+}
+
+/// The hitbox shapes a bot's aim line was measured for.
+fn aim_shape(ch: &Section) -> Option<&str> {
+    let shape = ch.str("MainBBType");
+    ["Spheroid", "Cylindrical"].into_iter().find(|s| *s == shape)
+}
+
+/// A body height in meters: twice the radius for a spheroid (whatever its `MainBBHeight`), and
+/// `MainBBHeight` for a capsule (`Cylindrical`). `None` for any other shape.
+fn body_height(ch: &Section) -> Option<f32> {
+    match aim_shape(ch)? {
+        "Spheroid" => Some(2.0 * ch.f32_or("MainBBRadius", 0.0).max(0.0) / UU_PER_M),
+        _ => Some(ch.f32_or("MainBBHeight", 0.0).max(0.0) / UU_PER_M),
+    }
+}
+
+/// How much higher than the line from a bot's middle to the player's eye the bot's aim line is.
+/// KovaaK's runs it from one body height above the bot's middle to one body height above the
+/// middle of the player's character (measured; `CameraOffset` plays no part at either end), so
+/// it is the player's body height, less the bot's, less how far the eye is above the player's
+/// middle. The level part of the camera offset is left out. A player with a head follows the
+/// same rule, which wasn't measured. `None` when either hitbox is of a shape that wasn't
+/// measured, or there is no player character.
+fn aim_lift(ch: &Section, player: Option<&Section>) -> Option<f32> {
+    let player = player?;
+    Some(body_height(player)? - body_height(ch)? - camera_offset(player).y)
+}
+
 /// Reasons a target's abilities can't be played yet. A target's melee ability (a
 /// knockback) isn't played: only helper bots push, see [`super::helpers`]. Weapon
-/// abilities are reported with the file's other gaps. `ch` is the bot's character and
-/// `top_invincible` whether the scenario's `InvincibleBots` is on.
-pub(super) fn reasons(c: &BotChoice, ch: &Section, top_invincible: bool, reasons: &mut Vec<Gap>) {
+/// abilities are reported with the file's other gaps. `ch` is the bot's character,
+/// `top_invincible` whether the scenario's `InvincibleBots` is on and `player` the
+/// player's character.
+pub(super) fn reasons(
+    c: &BotChoice,
+    ch: &Section,
+    top_invincible: bool,
+    player: Option<&Section>,
+    reasons: &mut Vec<Gap>,
+) {
     for a in movement(c).filter(|a| costs_health(a)) {
         // A bot that can't die was not measured paying for an ability. Nor was a cost on an
         // ability that doesn't move the bot: the bot only gets abilities for those that do.
@@ -72,6 +114,12 @@ pub(super) fn reasons(c: &BotChoice, ch: &Section, top_invincible: bool, reasons
             push_once(reasons, Gap::planned("a movement ability the trainer can't play yet", detail));
         }
     }
+    for a in movement(c).filter(|a| goes_up_or_down(a)) {
+        if let Some(why) = vertical_refusal(a, c, ch, player) {
+            let detail = format!("{}: MainVelocityCanGoVertical=true {why}", a.name());
+            push_once(reasons, Gap::planned("a movement ability the trainer can't play yet", detail));
+        }
+    }
     for a in &c.abilities {
         if is_kind(a, 1) {
             let detail = format!("a target's melee ability: {}", a.name());
@@ -85,6 +133,33 @@ pub(super) fn reasons(c: &BotChoice, ch: &Section, top_invincible: bool, reasons
             }
         }
     }
+}
+
+/// Why a dash that can go up or down isn't played, if it isn't: what was measured is a held
+/// dash that negates gravity (along the keys or not) and an impulse not along the keys, with
+/// the aim line of a spheroid or a capsule.
+fn vertical_refusal(a: &Section, c: &BotChoice, ch: &Section, player: Option<&Section>) -> Option<String> {
+    let held = a.f32_or("AbilityDuration", 0.0) > 0.0;
+    let along_keys = a.is("MainVelocitySetToMovementKeys");
+    if held && !a.is("NegateGravityForDuration") {
+        let seconds = a.str("AbilityDuration").trim();
+        return Some(format!("with AbilityDuration={seconds} and no NegateGravityForDuration"));
+    }
+    if !held && along_keys {
+        return Some("with MainVelocitySetToMovementKeys=true and no AbilityDuration".into());
+    }
+    if !along_keys && c.bot.is("NoAiming") {
+        return Some("on a bot with NoAiming".into());
+    }
+    let Some(player) = player else { return Some("and the file has no player character".into()) };
+    if aim_shape(ch).is_none() || aim_shape(player).is_none() {
+        let name = |s: &Section| match s.str("MainBBType").trim() {
+            "" => "none".to_string(),
+            t => t.to_string(),
+        };
+        return Some(format!("with a bot MainBBType of {} and a player MainBBType of {}", name(ch), name(player)));
+    }
+    None
 }
 
 /// Whether a movement ability changes the bot's speed or sends it up.
@@ -130,8 +205,8 @@ const LONGEST_S: f32 = 3600.0;
 const FARTHEST_M: f32 = 10_000.0;
 
 /// The bot's movement abilities and the settings for using them, or none if it has
-/// no movement ability. `ch` is its character profile.
-pub(super) fn abilities(c: &BotChoice, ch: &Section) -> Option<Abilities> {
+/// no movement ability. `ch` is its character profile and `player` the player's.
+pub(super) fn abilities(c: &BotChoice, ch: &Section, player: Option<&Section>) -> Option<Abilities> {
     let list: Vec<Ability> = movement(c).map(ability).collect();
     if list.is_empty() {
         return None;
@@ -145,6 +220,8 @@ pub(super) fn abilities(c: &BotChoice, ch: &Section) -> Option<Abilities> {
         start_block_s: ch.f32_or("BlockAbilityOnStartDuration", 1.0).clamp(0.0, LONGEST_S),
         global_cooldown_s: secs(ch, "AbilityGlobalCooldown"),
         sees_through_walls: c.bot.is("SeeThroughWalls"),
+        // Only a bot with a dash that goes up or down has an aim line to follow.
+        aim_lift: if movement(c).any(goes_up_or_down) { aim_lift(ch, player).unwrap_or(0.0) } else { 0.0 },
         list,
     })
 }

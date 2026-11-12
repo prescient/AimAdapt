@@ -23,7 +23,7 @@ fn read(name: &str) -> Sce {
 #[test]
 fn finds_every_fixture() {
     let files = find_files(&[fixtures()]);
-    assert_eq!(files.len(), 12);
+    assert_eq!(files.len(), 13);
     assert!(files.iter().all(|f| f.extension().unwrap() == "sce"));
 }
 
@@ -413,6 +413,9 @@ fn every_local_scenario_file_reads() {
 fn imported_fixtures_keep_their_fingerprints() {
     assert_eq!(import(&path("Dash Lane")).unwrap().scenario.fingerprint(), "7de71ff815020d9e");
     assert_eq!(import(&path("Still Wall")).unwrap().scenario.fingerprint(), "dae40cef9b1e60b7");
+    // Plan K15c: a bot with a dash that goes up or down has an aim lift. High Blink had no stored best
+    // before, so its fingerprint is pinned the way it was first taken.
+    assert_eq!(import(&path("High Blink")).unwrap().scenario.fingerprint(), "a3090bfdae8ca8f6");
 }
 
 /// Regression test: CI failed on every push from plan K3 on. Git on Windows checked the
@@ -441,6 +444,7 @@ fn git_keeps_the_fixtures_bytes() {
         "Jump Court",
         "Costly Hop",
         "Quiet Guns",
+        "High Blink",
     ] {
         assert!(!crlf(name), "{name} was given CRLF line ends");
     }
@@ -628,6 +632,52 @@ fn armed_bots_that_do_not_aim_play_and_ones_that_aim_do_not() {
     assert!(!refused.is_empty() && refused.iter().all(|g| g.feature == "bots shoot back"), "{refused:?}");
     let protected = aiming.replace("InvinciblePlayer=false", "InvinciblePlayer=true");
     assert!(convert(&protected).is_ok());
+}
+
+/// Plan K15c on one made-up file: a flying ball with no gravity starts 3.45 m above the player's eye,
+/// strafes, and blinks along its keys for 0.1 s at 26 m/s. A level blink would never move it up or down;
+/// this one follows the ball's aim line, which runs from one body height above the ball to one body height
+/// above the player's middle. The player is a capsule 1.7 m tall with its camera 0.45 m up and the ball is
+/// 0.6 m across, so the line is level at 0.65 m above the eye (1.7 - 0.6 - 0.45), and every blink drifts
+/// the ball toward that height without crossing it. Played on frames of 1/120 s and on uneven ones.
+#[test]
+fn a_flying_ball_that_blinks_along_its_keys_drifts_to_where_its_aim_line_is_level() {
+    let i = import(&path("High Blink")).unwrap();
+    assert!(i.scenario.problems().is_empty());
+    assert!(i.notes.iter().any(|n| n.contains("movement abilities")), "{:?}", i.notes);
+    let w = i.scenario.world.as_ref().unwrap();
+    let ab = w.motion.as_ref().unwrap().abilities.as_ref().unwrap();
+    assert!((ab.aim_lift - 0.65).abs() < 1e-5, "{}", ab.aim_lift);
+    let a = &ab.list[0];
+    assert_eq!((a.speed, a.duration_s, a.max_charges), (26.0, 0.1, 3));
+    assert!(a.vertical && a.along_input && a.no_gravity && a.lock_direction);
+    assert_eq!((ab.press_every_s, ab.chance, ab.start_block_s), (0.8, 1.0, 0.3));
+
+    let level = 0.65;
+    for seed in [None, Some(1), Some(2), Some(3)] {
+        let mut rng = seed.map(aimadapt_sim::rng::Rng::new);
+        let mut sim = started(i.scenario.clone());
+        let start = sim.targets()[0].pos;
+        assert!((start.y - 3.45).abs() < 0.01, "starts {} m above the eye", start.y);
+        let (mut last, mut blinks, mut fast, mut crossed, mut played) = (start, 0, false, false, 0.0);
+        while played < 18.0 {
+            let dt = rng.as_mut().map_or(1.0 / 120.0, |r| 1.0 / (60.0 + 180.0 * r.next_f32()));
+            sim.step(dt, idle());
+            played += dt;
+            let p = sim.targets()[0].pos;
+            let speed = (p - last).length() / dt;
+            if speed > 15.0 && !fast {
+                blinks += 1;
+            }
+            fast = speed > 15.0;
+            crossed |= p.y < level - 1e-3;
+            last = p;
+        }
+        println!("seed {seed:?}: from {:.3} to {:.4} m, level at {level}, {blinks} blinks", start.y, last.y);
+        assert!(blinks >= 10, "seed {seed:?}: {blinks} blinks");
+        assert!(!crossed, "seed {seed:?}: it went below the level of its aim line");
+        assert!((last.y - level).abs() < 0.1, "seed {seed:?}: it ended {} m above the eye, level is {level}", last.y);
+    }
 }
 
 /// Plan K6b on one made-up file: a hopping ball with an air jump, a pogo and buffered jumps, a ball

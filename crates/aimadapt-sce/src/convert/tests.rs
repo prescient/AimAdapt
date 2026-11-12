@@ -827,25 +827,135 @@ fn full_auto_makes_no_difference_to_a_bots_ability() {
     assert_eq!(get("true"), get("false"));
 }
 
-/// A dash that can go up or down with a main velocity does something else in KovaaK's
-/// (it launches the bot high into the air), which the trainer can't play yet.
+// Plan K15c: movement abilities that can go up or down (`MainVelocityCanGoVertical`) with a main
+// velocity. KovaaK's sends such a bot along its aim line, from one body height above the bot's middle
+// to one body height above the middle of the player's character, so the importer needs both sizes.
+
+/// A made-up player: a capsule 180 units tall, its camera 50 units up.
+const CAPSULE_PLAYER: &str =
+    "MainBBType=Cylindrical\nMainBBHeight=180.0\nMainBBRadius=40.0\nCameraOffset=X=0.000 Y=0.000 Z=50.000";
+
+/// [`dasher`] with these settings added to the player's character.
+fn dasher_vs(player: &str, ability: &str) -> String {
+    let text = dasher(ability);
+    assert!(text.contains("Name=Gunner\n"));
+    text.replacen("Name=Gunner\n", &format!("Name=Gunner\n{player}\n"), 1)
+}
+
+/// A blink along the movement keys that negates gravity and goes up or down: played.
+const KEYS_BLINK: &str = "MainVelocity=2400.0\nMainVelocityCanGoVertical=true\nAbilityDuration=0.1\n\
+    NegateGravityForDuration=true\nMainVelocitySetToMovementKeys=true\nLockDirectionForDuration=true\n\
+    EndVelocityFactor=0.0";
+
+fn aim_lift_of(text: &str) -> f32 {
+    imported_motion(text).unwrap().abilities.unwrap().aim_lift
+}
+
+const CANT: &str = "a movement ability the trainer can't play yet";
+
+/// The bot's character a spheroid of radius 0.4 m (its `MainBBHeight` of 200 plays no part).
+fn big_ball(text: String) -> String {
+    text.replace("MainBBRadius=20.0", "MainBBRadius=40.0").replace("MainBBHeight=40.0", "MainBBHeight=200.0")
+}
+
+/// Bug: a bot whose dash can go up or down was refused outright, and in the sim it aimed from its middle
+/// at the eye. Now `aim_lift` is the player's body height, less the bot's, less how far the eye is above
+/// the player's middle (a body height is twice the radius for a sphere or spheroid and `MainBBHeight` for
+/// a capsule), and only a bot with such a dash gets one.
 #[test]
-fn a_vertical_dash_is_refused_but_a_vertical_jump_imports() {
-    let refused = |ability: &str| convert(&Sce::parse(&dasher(ability)), "box.sce", "0").map(|_| ()).unwrap_err();
-    let gaps = refused("MainVelocity=2000.0\nMainVelocityCanGoVertical=true");
-    assert_eq!(gaps.len(), 1, "{gaps:?}");
-    assert_eq!(
-        gaps[0].to_string(),
-        "a movement ability the trainer can't play yet (Zip: MainVelocityCanGoVertical=true)"
+fn a_bot_with_a_dash_that_goes_up_or_down_gets_its_aim_lift() {
+    let near = |got: f32, want: f32| assert!((got - want).abs() < 1e-5, "{got} != {want}");
+    // A capsule player 1.8 m tall with the camera 0.5 m up, a spheroid bot of radius 0.4 m: 1.8 - 0.8 - 0.5.
+    near(aim_lift_of(&big_ball(dasher_vs(CAPSULE_PLAYER, KEYS_BLINK))), 0.5);
+    // The bot's own camera offset changes nothing.
+    let own_camera = big_ball(dasher_vs(CAPSULE_PLAYER, KEYS_BLINK))
+        .replace("MainBBRadius=40.0", "MainBBRadius=40.0\nCameraOffset=X=0.000 Y=0.000 Z=90.000");
+    near(aim_lift_of(&own_camera), 0.5);
+    // A capsule bot 1.6 m tall: 1.8 - 1.6 - 0.5.
+    let capsule = dasher_vs(CAPSULE_PLAYER, KEYS_BLINK)
+        .replace("MainBBType=Spheroid", "MainBBType=Cylindrical")
+        .replace("MainBBHeight=40.0", "MainBBHeight=160.0");
+    near(aim_lift_of(&capsule), -0.3);
+    // A spheroid player of radius 0.5 m (its `MainBBHeight` of 180 plays no part): 1.0 - 0.8 - 0.5.
+    let ball_player =
+        CAPSULE_PLAYER.replace("Cylindrical", "Spheroid").replace("MainBBRadius=40.0", "MainBBRadius=50.0");
+    near(aim_lift_of(&big_ball(dasher_vs(&ball_player, KEYS_BLINK))), -0.3);
+    // By inference, since a player with a head wasn't measured: the eye is the camera offset above the
+    // top of the body, and half the head's offset higher, so it is 0.5 + 0.9 + 0.2 above the middle:
+    // 1.8 - 0.8 - 1.6.
+    let head = format!("{CAPSULE_PLAYER}\nMainBBHasHead=true\nMainBBHeadRadius=45.0\nMainBBHeadOffset=40.0");
+    near(aim_lift_of(&big_ball(dasher_vs(&head, KEYS_BLINK))), -0.6);
+}
+
+/// Only a bot with a movement ability that can go up or down and has a main velocity gets an aim lift:
+/// a level one and one with no main velocity (an ability jump) don't.
+#[test]
+fn a_bot_whose_dashes_are_level_gets_no_aim_lift() {
+    let level = "MainVelocity=2400.0\nMainVelocityCanGoVertical=false\nAbilityDuration=0.1";
+    let jump = "MainVelocity=0.0\nMainVelocityCanGoVertical=true\nUpVelocity=600.0";
+    for ability in [level, jump] {
+        assert_eq!(aim_lift_of(&dasher_vs(CAPSULE_PLAYER, ability)), 0.0, "{ability}");
+    }
+    assert_ne!(aim_lift_of(&dasher_vs(CAPSULE_PLAYER, KEYS_BLINK)), 0.0);
+}
+
+/// Bug: every file with a dash that can go up or down was refused, whatever its settings. The ones that
+/// were measured play (along the keys with `NegateGravityForDuration`, not along them with it, and an
+/// impulse not along them); the others are refused, each saying why.
+#[test]
+fn dashes_that_go_up_or_down_play_where_they_were_measured_and_are_refused_where_they_were_not() {
+    let up = "MainVelocity=2000.0\nMainVelocityCanGoVertical=true";
+    let plays = |ability: &str| {
+        let r = reasons(&dasher_vs(CAPSULE_PLAYER, ability));
+        assert!(r.is_empty(), "{ability}: {r:?}");
+    };
+    let refused = |text: String, why: &str| assert_eq!(reasons(&text), vec![format!("{CANT} (Zip: {why})")]);
+    plays(KEYS_BLINK);
+    plays(&format!("{up}\nAbilityDuration=0.3\nNegateGravityForDuration=true"));
+    plays(up);
+    // 1. A held dash that keeps its gravity, along the keys or not.
+    let gravity = "MainVelocityCanGoVertical=true with AbilityDuration=0.3 and no NegateGravityForDuration";
+    refused(dasher_vs(CAPSULE_PLAYER, &format!("{up}\nAbilityDuration=0.3")), gravity);
+    let keys = format!("{up}\nAbilityDuration=0.3\nMainVelocitySetToMovementKeys=true");
+    refused(dasher_vs(CAPSULE_PLAYER, &keys), gravity);
+    // 2. An impulse along the keys.
+    refused(
+        dasher_vs(CAPSULE_PLAYER, &format!("{up}\nMainVelocitySetToMovementKeys=true")),
+        "MainVelocityCanGoVertical=true with MainVelocitySetToMovementKeys=true and no AbilityDuration",
     );
-    // A horizontal dash, and a jump that is vertical with no main velocity, play.
-    assert!(
-        convert(&Sce::parse(&dasher("MainVelocity=2000.0\nMainVelocityCanGoVertical=false")), "box.sce", "0").is_ok()
+    // 3. Not along the keys, on a bot that doesn't aim.
+    let blind = |ability: &str| {
+        dasher_vs(CAPSULE_PLAYER, ability).replace("AbilityUseTimer=0.3", "AbilityUseTimer=0.3\nNoAiming=true")
+    };
+    refused(blind(up), "MainVelocityCanGoVertical=true on a bot with NoAiming");
+    // (Along the keys, such a bot blinks level, which plays.)
+    assert!(reasons(&blind(KEYS_BLINK)).is_empty());
+    // 4. A box-shaped bot or player, or a file with no player character.
+    let both = "MainVelocityCanGoVertical=true with a bot MainBBType of";
+    refused(
+        dasher_vs(CAPSULE_PLAYER, up).replace("MainBBType=Spheroid", "MainBBType=Cuboid"),
+        &format!("{both} Cuboid and a player MainBBType of Cylindrical"),
     );
+    refused(
+        dasher_vs(&CAPSULE_PLAYER.replace("Cylindrical", "Cuboid"), up),
+        &format!("{both} Spheroid and a player MainBBType of Cuboid"),
+    );
+    refused(dasher(up), &format!("{both} Spheroid and a player MainBBType of none"));
+    let no_player = reasons(&dasher_vs(CAPSULE_PLAYER, up).replace("PlayerProfile=Gunner\n", ""));
+    let why = format!("{CANT} (Zip: MainVelocityCanGoVertical=true and the file has no player character)");
+    assert!(no_player.contains(&why), "{no_player:?}");
+    // The level kinds of dash don't need to know the player's size.
+    assert!(reasons(&dasher("MainVelocity=2000.0\nMainVelocityCanGoVertical=false")).is_empty());
+}
+
+/// A dash that goes up or down with no main velocity is an ability jump: it imports with no aim lift,
+/// whatever the player is.
+#[test]
+fn a_vertical_ability_jump_imports_with_no_aim_lift() {
     let jump = dasher("MainVelocity=0.0\nMainVelocityCanGoVertical=true\nUpVelocity=600.0");
-    let m = convert(&Sce::parse(&jump), "box.sce", "0").unwrap().scenario.world.unwrap().motion.unwrap();
-    let a = &m.abilities.unwrap().list[0];
-    assert_eq!((a.speed, a.up_speed, a.vertical), (0.0, 6.0, true));
+    let ab = imported_motion(&jump).unwrap().abilities.unwrap();
+    let a = &ab.list[0];
+    assert_eq!((a.speed, a.up_speed, a.vertical, ab.aim_lift), (0.0, 6.0, true, 0.0));
 }
 
 /// Helper files set "anywhere" and "never" as huge numbers (an `AIMaxTargDist` of a

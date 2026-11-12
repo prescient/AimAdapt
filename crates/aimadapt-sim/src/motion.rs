@@ -596,7 +596,7 @@ impl BotState {
         let wish = right * self.side * m.strafe_mult + toward * self.fore * back;
         let cap = m.max_speed * wish.length();
         let dir = wish.normalize_or_zero();
-        let view = self.ability_view(m, dir, spawn_forward);
+        let view = ability::View { wish: dir, spawn_forward };
         self.use_abilities(m, rng, &view, *pos, seen);
         let (dir, cap) = if self.ability_blocks_input(m) { (Vec3::ZERO, 0.0) } else { (dir, cap) };
 

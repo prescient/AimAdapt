@@ -20,8 +20,9 @@ A scenario is refused when it uses something the trainer doesn't model, so every
 | K7 Armed bots that never fire, invincible characters | 399d081 | 132 of 225 |
 | Fix: spawn offsets follow the map's axes | 4e0c441 | 132 of 225 |
 | Fix: regeneration between shots | cf9d8ca | 132 of 225 |
-| Fix: when a bot uses an ability | | 132 of 225 |
-| K15 The rest: vertical dashes, damage reactions | | |
+| Fix: when a bot uses an ability | a94eb94 | 132 of 225 |
+| K15c Dashes that go up or down | | 132 of 225 |
+| K15 The rest: abilities used when hurt, the smaller refusals | | |
 | K8 Bots that destroy themselves | | |
 | K9 Heads | | |
 | K10 Waypoint paths | | |
@@ -379,6 +380,19 @@ The eight files were played in the sim without a window on the code before and a
 
 Fourteen of the eighteen files have such a dash. Nine have a long dash along the aim line that keeps its speed, four have blinks along the movement keys, and one has an impulse. None of them plays with the dash alone.
 
+What gets built in K15c:
+
+- `aimadapt-sim`: a bot's abilities carry an aim lift in meters, which is how far above the player's eye the bot's aim line is level. A dash that can go up or down keeps the heading it had (the movement keys, or the bot's facing) and takes the pitch of the aim line, with its whole speed along the slant. A bot that doesn't aim gets a level dash, and so does an aim line of no length. Level dashes are as they were.
+- `aimadapt-sce`: the lift is the player's body height, less the bot's, less the height of the eye above the player's middle. Only a bot with a dash that goes up or down gets one. The refusal of every such dash goes, and narrower ones take its place, each with its own reason: a held dash that keeps gravity, an impulse along the movement keys, a dash not along the keys on a bot with `NoAiming`, a bot or player that is neither a spheroid nor a capsule, and a file with no player character.
+- No rule mark. A lift of 0 isn't stored, so a scenario without such a dash keeps its stored settings and its fingerprint.
+- A made-up fixture, High Blink: a flying ball that blinks along its strafe and drifts to the height where its aim line is level.
+
+K15c is done. Still 132 of the 225 files play. None started and none stopped, and all 132 keep their fingerprints, their notes and their stored settings, so no best starts again. Of the 14 files, 9 no longer have a reason about the dash. The other 5 keep one because their player is shaped like a box, and each of them has other reasons as well. Five of the 14 now wait on one thing: one on an ability used when hurt (K15d), and four on weapon abilities that hurt the bot itself or the player (K8).
+
+Twenty-five changes were made to the new code one at a time, and each fails at least one test. In the sim: the lift ignored, the lift turned over, a level dash, the climb added on top of the level speed, a pitched dash for a bot that doesn't aim, no guard for a line of no length, a level ability pitched, the keys ignored, an unlocked dash that keeps its first direction, no range check on the lift, and a lift that is always stored. In the importer: the camera left out of the lift, a spheroid's height read from `MainBBHeight`, a capsule's from its radius, a lift for every bot, each refusal dropped or widened, a box counted as a measured shape, and an ability jump counted as a dash.
+
+No imported scenario with such a dash was watched in the game window, and none of the local files plays one yet.
+
 **Abilities used when hurt (K15d)**, measured with `React Test R1` to `R14`, `R17` and `R18`: a tall capsule that hops, or a flying ball that blinks to and fro, as its reaction to damage, under a held automatic weapon or single shots.
 
 - A hit is a trigger when the damage taken since the last trigger reaches `AIDamageReactionThreshold`. With a threshold of 0 every hit is one. The sum starts again at the trigger. A threshold of 50 under shots of 10 gave a trigger at every fifth hit, and under 1 damage 100 times a second a trigger every half second.
@@ -559,6 +573,15 @@ These rows are filled in as packages land. A row leaves the table when a test ma
 | `AIMinTargDist`, `AIMaxTargDist`, `AIMaxTargFOV`, `AIUseOnGround`, `AIUseInAir` | Rules that stop a use: distance to the player, the player within the view angle, on the ground or in the air | No |
 | A new ability window | Starts when the last one ends, on its own timer | Partly: the windows and the presses ran on separate timers |
 | A dash that comes later than its settings say | Not copied | Open: seen twice in KovaaK's on a 4.2 s dash (once 5.67 s), cause unknown |
+| A dash that goes up or down, with a player that has a head | The aim line ends one body height above the player's middle, and the eye is where the importer puts it for a head | No: measured with a player without a head |
+| An impulse along the aim line on a bot with gravity | Thrown along the aim line, and then it falls | No: measured on bots without gravity |
+| A blink along the movement keys on a bot with `NoAiming`, with a key down | Level, where the key points | Partly: it blinked level in the films, and its heading under each key wasn't fitted |
+| A dash that goes up or down on a cuboid bot, or with a cuboid player | Refused | No: a box's body height wasn't measured. Five local files have a box-shaped player, each with other reasons |
+| A held dash that goes up or down and keeps gravity (no `NegateGravityForDuration`) | Refused, along the movement keys or not | Partly: along the keys it threw a walking bot upward by an amount no rule explained, and not along the keys it wasn't tried. No local file has either |
+| An impulse (no duration) along the movement keys that can go up or down | Refused | No: no local file has one |
+| A dash that goes up or down and isn't along the movement keys, on a bot with `NoAiming` | Refused | No: no local file has one |
+| A dash that goes up or down in a file with no player character, or with a player that has no `MainBBType` | Refused | No: every local file with such a dash has both |
+| A blink that goes farther than its speed times its duration | Not copied | Open: about a tenth farther in the films, cause unknown |
 | Which targets a helper's hit reaches | Every target its hurtbox overlaps (and that it can see, when it needs sight) | No: it may hit only the target its AI has picked |
 | Several helpers with the same name | Each takes the next spawn point its character is allowed on, in file order | No |
 | A pinned helper's spawn delay | None: it hits from the start of the run | No |

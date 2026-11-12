@@ -35,6 +35,14 @@ pub struct Abilities {
     pub global_cooldown_s: f32,
     /// Counts as in combat even with no line of sight (`SeeThroughWalls`).
     pub sees_through_walls: bool,
+    /// Meters to add to the height of the line from the bot's middle to the player's eye to get the
+    /// bot's aim line, which a dash that can go up or down follows. KovaaK's runs that line from one
+    /// body height above the bot's middle to one body height above the middle of the player's
+    /// character (measured), so this is the player's body height, less the bot's, less how far the
+    /// eye is above the player's middle. The importer sets it for a bot with such a dash and leaves
+    /// it 0 for the others.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub aim_lift: f32,
     /// In the order the bot tries them.
     pub list: Vec<Ability>,
 }
@@ -69,9 +77,13 @@ pub struct Ability {
     /// The velocity is multiplied by this when the ability ends.
     pub end_factor: f32,
     /// Goes the way the bot is moving (`MainVelocitySetToMovementKeys`); else, or
-    /// when it isn't moving, the way it faces.
+    /// when it isn't moving, the way it faces. With `vertical` it is the way the keys point
+    /// over the ground (measured), pitched like the aim line.
     pub along_input: bool,
-    /// The direction may point up or down (`MainVelocityCanGoVertical`).
+    /// The direction may point up or down (`MainVelocityCanGoVertical`). Measured: it follows
+    /// the bot's aim line, see [`direction`]. Along the keys, with a flier's up and down keys
+    /// playing no part; not along them, toward the player (away for a negative speed). A bot
+    /// that doesn't aim goes level along the keys.
     pub vertical: bool,
     /// The direction is fixed when the ability starts.
     pub lock_direction: bool,
@@ -142,6 +154,7 @@ impl Abilities {
         let times =
             [self.press_every_s, self.window_s[0], self.window_s[1], self.start_block_s, self.global_cooldown_s];
         check(timers(&times), "a time");
+        check(fine(self.aim_lift, -100.0, 100.0), "an aim height");
         for a in &self.list {
             check(a.max_charges <= 1000 && a.spawn_charges <= 1000, "a number of charges");
             check(timers(&[a.charge_s, a.delay_s, a.reuse_s]), "a time");
@@ -394,28 +407,37 @@ impl AbilityState {
 pub(super) struct View {
     /// Its movement input as a direction, or zero.
     pub wish: Vec3,
-    /// A flier's up (+1) or down (-1) intent.
-    pub up: f32,
     pub spawn_forward: Vec3,
 }
 
 /// The way an ability sends the bot from `pos`.
-fn direction(m: &Motion, a: &Ability, v: &View, pos: Vec3) -> Vec3 {
+///
+/// A level ability goes along the bot's movement input (when it is set to the keys and a key is
+/// down) or the way it faces. One that can go up or down follows the bot's aim line, which
+/// KovaaK's runs from one body height above the bot's middle to one body height above the middle
+/// of the player's character: the line from the middle to the eye, `aim_lift` higher (see
+/// [`Abilities::aim_lift`]). Measured: set to the keys, it goes where the keys point over the
+/// ground and takes the pitch of the aim line whichever key is down, at the whole speed along
+/// the slanted line (a flier's up and down keys play no part); a bot that doesn't aim goes level.
+/// Not set to the keys, it goes along the aim line, toward the player for a positive speed.
+pub(super) fn direction(m: &Motion, ab: &Abilities, a: &Ability, v: &View, pos: Vec3) -> Vec3 {
     let to_eye = -pos;
     let flat = Vec3::new(to_eye.x, 0.0, to_eye.z).normalize_or(v.spawn_forward);
     let facing = if m.faces_player { flat } else { v.spawn_forward };
-    let climb = if a.vertical { v.up } else { 0.0 };
-    let mut d = if a.along_input && (v.wish != Vec3::ZERO || climb != 0.0) {
-        v.wish + Vec3::Y * climb
-    } else if a.vertical && m.faces_player && to_eye.length_squared() > 1e-6 {
-        to_eye
-    } else {
-        facing
-    };
+    let level = |d: Vec3| Vec3::new(d.x, 0.0, d.z).normalize_or(facing);
+    let heading = if a.along_input && v.wish != Vec3::ZERO { level(v.wish) } else { facing };
     if !a.vertical {
-        d.y = 0.0;
+        return heading;
     }
-    d.normalize_or(facing)
+    let aim = to_eye + Vec3::Y * ab.aim_lift;
+    let len = aim.length();
+    if !m.faces_player || len * len <= 1e-6 {
+        return heading;
+    }
+    // The heading, pitched like the aim line. Not set to the keys the heading is the facing, which is
+    // the way the aim line runs over the ground, so this is the aim line itself.
+    let run = Vec3::new(aim.x, 0.0, aim.z).length();
+    heading * (run / len) + Vec3::Y * (aim.y / len)
 }
 
 impl BotState {
@@ -433,10 +455,6 @@ impl BotState {
     /// Whether an ability is going on right now.
     pub fn using_ability(&self) -> bool {
         self.ab.active.is_some()
-    }
-
-    pub(super) fn ability_view(&self, m: &Motion, wish: Vec3, spawn_forward: Vec3) -> View {
-        View { wish, up: if m.flight.is_some() { self.up } else { 0.0 }, spawn_forward }
     }
 
     /// Whether an ability that blocks the bot's own movement is going on.
@@ -527,7 +545,7 @@ impl BotState {
         self.ab.last_end = Some(at + a.duration_s.max(0.0));
         self.ab.uses += 1;
         self.ab.owed += a.health_cost;
-        let dir = direction(m, a, view, pos);
+        let dir = direction(m, ab, a, view, pos);
         if a.duration_s > 0.0 {
             // Held: the horizontal speed every substep. Without `no_gravity` the climb
             // happens once, here, and gravity acts as usual.
@@ -564,7 +582,7 @@ impl BotState {
     pub(super) fn hold_ability(&mut self, m: &Motion, view: &View, pos: Vec3, h: f32) {
         let (Some(ab), Some(act)) = (&m.abilities, self.ab.active) else { return };
         let Some(a) = ab.list.get(act.idx) else { return };
-        let dir = if a.lock_direction { act.dir } else { direction(m, a, view, pos) };
+        let dir = if a.lock_direction { act.dir } else { direction(m, ab, a, view, pos) };
         if a.speed != 0.0 {
             self.vel.x = dir.x * a.speed;
             self.vel.z = dir.z * a.speed;
