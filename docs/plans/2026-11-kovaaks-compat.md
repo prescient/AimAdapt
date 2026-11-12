@@ -23,7 +23,8 @@ A scenario is refused when it uses something the trainer doesn't model, so every
 | Fix: when a bot uses an ability | a94eb94 | 132 of 225 |
 | K15c Dashes that go up or down | 65512d7 | 132 of 225 |
 | K15d Abilities used when hurt | 8ddb138 | 133 of 225 |
-| K15e The smaller refusals | | 133 of 225 |
+| K15e The smaller refusals | 3ddc7f7 | 133 of 225 |
+| Fix: a bot comes back after its least respawn delay | | 133 of 225 |
 | K8 Bots that destroy themselves | | |
 | K9 Heads | | |
 | K10 Waypoint paths | | |
@@ -528,6 +529,31 @@ Result: still 132 of 225. None started and none stopped. The 47 playing files wh
 The 47 were played in the sim without a window, at 120 frames a second, by a bot that aims perfectly and holds fire, on the old rule and the new. Every file runs its full length with no problem reported. Idle runs are the same. With the bot shooting, 13 files give the same run, 30 give more kills, 3 the same kills with small changes in hits or score, and 1 fewer (299 to 149). That one has a delay shorter than its shot interval: it used to heal a little between shots and now gets a full step after each one, as the maps with one step per shot showed. The three files the bot could never get a kill in now give 149, 211 and 287, each at health over damage hits per kill. Five files give no kills on either rule. Their bots regenerate at or above the weapon's damage rate: four have no delay, and one gets a step after each shot that is larger than the shot's damage. The two playing files with a delay below the shot interval are not on a knife's edge: the step lands between shots at any frame rate above about 35 a second.
 
 A delay of 0 with low health is sensitive to where the steps fall. In the play above, 0.1 s is exactly 12 frames, and reading the timers one frame earlier or later moved one file's kills between 154 and 178. Real frames don't line up like that, and KovaaK's has the same sensitivity. None of the 47 was watched in the game window.
+
+### Faults found while measuring K8
+
+K8's rules were measured in KovaaK's before anything was built. The films showed faults in what already plays. Each gets its own commit with a regression test, before K8 is built.
+
+#### A bot came back after the middle of its respawn range
+
+A character has `MinRespawnDelay` and `MaxRespawnDelay`. The importer stored the middle of the two as the bot's respawn delay, on the guess that KovaaK's draws a delay from the range. Nothing had measured it.
+
+Measured in KovaaK's 3.9.13 on 12 November 2026 with three test maps, each with still balls that come back where they were (films at about 55 frames a second, times good to about 0.02 s):
+
+- With 0.5 to 3.0, a ball that destroyed itself came back 0.53 to 0.57 s after it went, all 28 times.
+- With the same range, a ball the player shot came back 0.53 to 0.57 s after it went, all 51 times.
+- With 0.2 to 0.4, a ball that destroyed itself came back 0.23 to 0.26 s after it went, all 22 times.
+- So a bot comes back `MinRespawnDelay` after it goes, however it went, and `MaxRespawnDelay` plays no part. A ball shows about 0.04 s later than the delay says, which is two frames of the film.
+
+Not measured: a character with no `MinRespawnDelay` key (read as 0, as before). The 0.04 s isn't modelled.
+
+What gets built:
+
+- `aimadapt-sce`: a bot's respawn delay is its character's `MinRespawnDelay`, never below 0. `MaxRespawnDelay` is still compared when two characters are checked for being the same kind of bot, so two that differ only there stay two kinds and no scenario's slots change.
+
+Result: still 133 of 225. None started and none stopped. Eight playing files have a range, so their stored delay is shorter and their fingerprint is new: bests set here on them start again. Nothing else in their stored settings changed, and their notes are as they were. The other 125 keep their fingerprints. Among the fixtures only Still Wall has a range (0.1 to 0.3), and its pin was taken again.
+
+The eight were played in the sim without a window after the fix, idle and by a bot that aims perfectly and holds fire. Every file imports with no problem reported, and every run goes its full length except in one very long scenario, which the play tool cuts short. In five of the eight the shooting bot never kills a target inside the run, so the delay doesn't show there. In the other three targets come back sooner. None was watched in the game window.
 
 ### K8. Bots that destroy themselves
 

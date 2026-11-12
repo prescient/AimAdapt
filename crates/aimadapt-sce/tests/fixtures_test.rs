@@ -110,7 +110,8 @@ fn still_bots_on_a_json_map_import_with_kovaaks_rules() {
     assert_eq!(s.timing.duration_s, 30.0);
     assert_eq!((s.targets.count, s.targets.shape, s.targets.health), (3, Shape::Sphere, 1.0));
     assert!((s.targets.radius - 0.3).abs() < 1e-6);
-    assert!((s.targets.respawn_delay_s - 0.2).abs() < 1e-6);
+    // The file says 0.1 to 0.3: a bot comes back after the least.
+    assert!((s.targets.respawn_delay_s - 0.1).abs() < 1e-6);
     assert_eq!(s.targets.color, "#ff8000");
     assert_eq!((s.weapon.trigger, s.weapon.fire_rate), (Trigger::Click, 5.0));
     assert_eq!(s.scoring.per_kill, 10.0);
@@ -406,13 +407,15 @@ fn every_local_scenario_file_reads() {
 /// new world field that isn't left out of the file at its default would restart them
 /// all. These were taken before helper bots (plan K3) were added; Dash Lane's bot dashes, so
 /// its pin was taken again when abilities were timed as measured (it had been b4157023853bb7c5;
-/// the file sets its start block, so only the new rule mark changed it). A fingerprint also
-/// covers a hash of the file's bytes, which is why git must not touch the fixtures
-/// (see `git_keeps_the_fixtures_bytes`).
+/// the file sets its start block, so only the new rule mark changed it). Still Wall's bots have a
+/// respawn delay of 0.1 to 0.3 s, so its pin was taken again when a bot was made to come back after
+/// the least of the two, as measured (it had been dae40cef9b1e60b7; only the stored delay changed
+/// it). A fingerprint also covers a hash of the file's bytes, which is why git must not touch the
+/// fixtures (see `git_keeps_the_fixtures_bytes`).
 #[test]
 fn imported_fixtures_keep_their_fingerprints() {
     assert_eq!(import(&path("Dash Lane")).unwrap().scenario.fingerprint(), "7de71ff815020d9e");
-    assert_eq!(import(&path("Still Wall")).unwrap().scenario.fingerprint(), "dae40cef9b1e60b7");
+    assert_eq!(import(&path("Still Wall")).unwrap().scenario.fingerprint(), "d38091b5eb573292");
     // Plan K15c: a bot with a dash that goes up or down has an aim lift. High Blink had no stored best
     // before, so its fingerprint is pinned the way it was first taken.
     assert_eq!(import(&path("High Blink")).unwrap().scenario.fingerprint(), "a3090bfdae8ca8f6");

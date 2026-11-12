@@ -805,9 +805,10 @@ fn body_color(ch: &Section) -> Option<String> {
     ch.vec3("EnemyBodyColor").filter(|c| c.iter().any(|v| *v > 0.0)).map(hex_color)
 }
 
-/// Seconds before a character comes back: halfway between its least and most.
+/// Seconds before a character comes back: its least. KovaaK's was measured to bring a bot
+/// back `MinRespawnDelay` after it goes and to make no use of `MaxRespawnDelay`.
 fn respawn_delay(ch: &Section) -> f32 {
-    ((ch.f32_or("MinRespawnDelay", 0.0) + ch.f32_or("MaxRespawnDelay", 0.0)) / 2.0).max(0.0)
+    ch.f32_or("MinRespawnDelay", 0.0).max(0.0)
 }
 
 /// The bot's hitbox as the sim's shape, radius and height, in meters.

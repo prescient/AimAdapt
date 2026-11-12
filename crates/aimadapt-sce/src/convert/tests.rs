@@ -1846,3 +1846,24 @@ fn older_and_newer_offsets_together_are_refused() {
     let zeros = format!("SpawnXOffset=300.0\n{}", fixed_offset("X=0.000 Y=0.000 Z=0.000"));
     assert_all_at(&offset_sce("", &zeros, 0.0, &[("0, 0, 0", "")]), Vec3::new(0.0, 0.0, -3.0));
 }
+
+/// Bug: a bot whose character has a range of respawn delays came back after the middle of
+/// the range. Measured in KovaaK's 3.9.13 on 12 November 2026 (`AimAdapt - Fuse Test F5` to
+/// `F7` maps): a bot comes back `MinRespawnDelay` after it goes, whether the player killed
+/// it or it died by itself, and `MaxRespawnDelay` plays no part. With 0.5 to 3.0 all 79
+/// respawns filmed came 0.53 to 0.57 s later, and with 0.2 to 0.4 all 22 came at 0.23 to 0.26.
+#[test]
+fn a_bot_comes_back_after_its_least_respawn_delay() {
+    let wide = "MinRespawnDelay=0.5\nMaxRespawnDelay=3.0\n";
+    let delay = |extra: &str| {
+        let text = VOLUME_SCE.replace("MainBBType=Spheroid", &format!("{extra}MainBBType=Spheroid"));
+        import_ok(&text).scenario.targets.respawn_delay_s
+    };
+    assert_eq!(delay(wide), 0.5);
+    assert_eq!(delay("MinRespawnDelay=1.0\nMaxRespawnDelay=1.0\n"), 1.0, "no range: as before");
+    assert_eq!(delay("MinRespawnDelay=-1.0\nMaxRespawnDelay=3.0\n"), 0.0, "never below nothing");
+    // Each kind of bot has its own.
+    let short = format!("{BIG_HITBOX}MinRespawnDelay=0.2\nMaxRespawnDelay=0.4\n");
+    let w = import_ok(&with_big_kind(wide, &short)).scenario.world.unwrap();
+    assert_eq!(w.kinds.iter().map(|k| k.respawn_delay_s).collect::<Vec<_>>(), vec![0.5, 0.2]);
+}
