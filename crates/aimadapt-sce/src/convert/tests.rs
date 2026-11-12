@@ -1433,3 +1433,210 @@ fn a_cost_with_regen_or_with_bot_lives_gets_a_note() {
 fn an_imported_timeout_scores_nothing() {
     assert_eq!(imported(&hop("-30.0")).scenario.scoring.per_timeout, 0.0);
 }
+
+// Spawn offsets run along the map's axes, never the spawn point's (measured in KovaaK's 3.9.13).
+
+/// A made-up map for the offset tests: the player's start at the origin turned
+/// `player_yaw` degrees, and one bot spawn point 10 m ahead for each of `points`: its
+/// `rotation` (roll, pitch, yaw) and the characters it permits.
+fn offset_map(player_yaw: f32, points: &[(&str, &str)]) -> String {
+    let mut objects = vec![format!(
+        r#"{{"type": "gameObject", "name": "SpawnPoint", "location": "0, 0, 0", "rotation": "0, 0, {player_yaw}", "scale": "1, 1, 1", "properties": [{{"name": "TeamMask", "value": 1}}]}}"#
+    )];
+    for (rotation, permitted) in points {
+        objects.push(format!(
+            r#"{{"type": "gameObject", "name": "SpawnPoint", "location": "1000, 0, 0", "rotation": "{rotation}", "scale": "1, 1, 1", "properties": [{{"name": "TeamMask", "value": 2}}, {{"name": "PermittedCharacterProfiles", "value": "{permitted}"}}]}}"#
+        ));
+    }
+    format!("[Map Data]\n{{\"version\": \"1.0.0\", \"objects\": [\n {}\n]}}\n", objects.join(",\n "))
+}
+
+/// [`VOLUME_SCE`]'s bots and player with `top` lines at the top of the file, `character`
+/// settings on the bots' character and the map of [`offset_map`].
+fn offset_sce(top: &str, character: &str, player_yaw: f32, points: &[(&str, &str)]) -> String {
+    let head = VOLUME_SCE.split("[Map Data]").next().unwrap();
+    let head = head.replace("MainBBType=Spheroid", &format!("{character}MainBBType=Spheroid"));
+    format!("{top}{head}{}", offset_map(player_yaw, points))
+}
+
+/// `GameVersion` lines for the top of a file, none for an empty version.
+fn game_version(version: &str) -> String {
+    if version.is_empty() { String::new() } else { format!("GameVersion={version}\n") }
+}
+
+/// A character's `SpawnOffsetMin` and `SpawnOffsetMax`, both `v` (written as `X=… Y=… Z=…`).
+fn fixed_offset(v: &str) -> String {
+    format!("SpawnOffsetMin={v}\nSpawnOffsetMax={v}\n")
+}
+
+/// Where the targets of the file appear, from the first spawn point, over a number of draws.
+fn target_offsets(text: &str) -> Vec<Vec3> {
+    let world = import_ok(text).scenario.world.unwrap();
+    let at = Vec3::from_array(world.spawns[0].pos);
+    let mut rng = aimadapt_sim::sim::Rng::new(5);
+    (0..30).map(|_| world.spawn_pos(&mut rng, &[], 0.2, Vec3::NEG_Z) - at).collect()
+}
+
+/// Every target appears `want` (meters, sim axes) from the spawn point.
+fn assert_all_at(text: &str, want: Vec3) {
+    for got in target_offsets(text) {
+        assert!(got.distance(want) < 1e-4, "{got} is not {want}");
+    }
+}
+
+const THREE_M_RIGHT: &str = "X=0.000 Y=300.000 Z=0.000";
+
+/// Bug: the importer stored each spawn point's own axes and ran the offsets along them,
+/// so a bot spawn point turned 90 degrees put its targets in the wrong place. Measured
+/// in KovaaK's 3.9.13 (JSON and Reflex maps, points turned by yaw and by pitch): a spawn
+/// point's rotation never turns an offset. An offset of Y=300 is 3 m to the map's right,
+/// the sim's +x for a player who isn't turned. The old code put it on the sim's z.
+#[test]
+fn an_offset_is_the_same_on_a_turned_spawn_point() {
+    let text = offset_sce("", &fixed_offset(THREE_M_RIGHT), 0.0, &[("0, 0, 90", "")]);
+    assert_all_at(&text, Vec3::new(3.0, 0.0, 0.0));
+    let world = import_ok(&text).scenario.world.unwrap();
+    assert!(world.offset_axes.is_some(), "the turned point's own axes would move the target");
+}
+
+/// A spawn point pitched up keeps its offsets level: they run along the map's axes.
+#[test]
+fn an_offset_stays_level_on_a_pitched_spawn_point() {
+    let text = offset_sce("", &fixed_offset("X=300.000 Y=0.000 Z=0.000"), 0.0, &[("0, 30, 0", "")]);
+    assert_all_at(&text, Vec3::new(0.0, 0.0, -3.0));
+}
+
+/// A point turned half round with offsets that mirror each other fills the same box, so
+/// nothing is stored for it (and its scenario keeps its fingerprint).
+#[test]
+fn a_mirrored_box_needs_no_offset_axes() {
+    let character = "SpawnOffsetMin=X=0.000 Y=-50.000 Z=0.000\nSpawnOffsetMax=X=0.000 Y=50.000 Z=0.000\n";
+    let world = import_ok(&offset_sce("", character, 0.0, &[("0, 0, 180", "")])).scenario.world.unwrap();
+    assert_eq!(world.offset_axes, None);
+}
+
+/// The player's start turned 90 degrees with a bot spawn point that isn't turned: the
+/// point's own axes already are the map's, so nothing is stored. The offset runs along
+/// the map's right, which the player now faces (the sim's -z).
+#[test]
+fn a_turned_player_with_an_unturned_spawn_point_needs_no_offset_axes() {
+    let text = offset_sce("", &fixed_offset(THREE_M_RIGHT), 90.0, &[("0, 0, 0", "")]);
+    assert_eq!(import_ok(&text).scenario.world.unwrap().offset_axes, None);
+    assert_all_at(&text, Vec3::new(0.0, 0.0, -3.0));
+}
+
+/// The player's start turned 90 degrees and the bot's spawn point turned another way:
+/// the world keeps the map's frame as the turned player sees it.
+#[test]
+fn a_turned_player_with_a_turned_spawn_point_keeps_the_maps_frame() {
+    let text = offset_sce("", &fixed_offset(THREE_M_RIGHT), 90.0, &[("0, 0, 30", "")]);
+    let world = import_ok(&text).scenario.world.unwrap();
+    let frame = world.offset_axes.expect("the point's own axes would move the target");
+    for (got, want) in frame.iter().zip([Vec3::NEG_Z, Vec3::Y, Vec3::X]) {
+        assert!(Vec3::from_array(*got).distance(want) < 1e-5, "{frame:?}");
+    }
+    assert_all_at(&text, Vec3::new(0.0, 0.0, -3.0));
+}
+
+/// Two kinds of bot, only the second (Big) with offsets, and two spawn points: the first
+/// turned 90 degrees, the second not. Big appears on the turned one when `big_turned`.
+fn kinds_on_points(big_turned: bool) -> World {
+    let text = with_big_kind("", &format!("{BIG_HITBOX}{}", fixed_offset(THREE_M_RIGHT)));
+    let (big, dot) = (("0, 0, 90", "Big Ball"), ("0, 0, 0", "Dot Ball"));
+    let points = if big_turned { [big, dot] } else { [("0, 0, 90", "Dot Ball"), ("0, 0, 0", "Big Ball")] };
+    let text = format!("{}{}", text.split("[Map Data]").next().unwrap(), offset_map(0.0, &points));
+    import_ok(&text).scenario.world.unwrap()
+}
+
+/// The world needs the map's frame where the kind that has offsets is used on a turned
+/// point; kept to a point that isn't turned, it doesn't.
+#[test]
+fn offset_axes_follow_the_spawn_points_a_kind_uses() {
+    let turned = kinds_on_points(true);
+    assert_eq!(turned.kinds.len(), 2);
+    assert!(turned.offset_axes.is_some());
+    let level = kinds_on_points(false);
+    assert_eq!(level.kinds.len(), 2);
+    assert_eq!(level.offset_axes, None);
+}
+
+/// Bug guard: a file with no offsets keeps exactly the numbers it had, signs of zeros
+/// included (the sign is in its fingerprint), however its spawn points are turned.
+#[test]
+fn no_offsets_stores_what_it_always_did() {
+    // An older file too: turning a zero vector would flip a sign.
+    for version in ["", "2.0.4.9"] {
+        let text = offset_sce(&game_version(version), "", 0.0, &[("0, 0, 90", ""), ("0, 20, 45", "")]);
+        let world = import_ok(&text).scenario.world.unwrap();
+        assert_eq!(world.offset_axes, None, "{version:?}");
+        assert_eq!(world.offset_min.map(f32::to_bits), [0.0f32, 0.0, -0.0].map(f32::to_bits), "{version:?}");
+        assert_eq!(world.offset_max.map(f32::to_bits), [0.0f32, 0.0, -0.0].map(f32::to_bits), "{version:?}");
+    }
+}
+
+/// Bug: a file saved by KovaaK's before 2.0.5.0 has its offsets a quarter turned: X runs
+/// along the map's right and Y along its backward. From 2.0.5.0 (and with no version)
+/// X runs forward and Y right. The switch is exactly at 2.0.5.0.
+#[test]
+fn offsets_in_older_files_are_turned_a_quarter() {
+    let at = |version: &str, v: &str| offset_sce(&game_version(version), &fixed_offset(v), 0.0, &[("0, 0, 0", "")]);
+    let (x, y) = ("X=300.000 Y=0.000 Z=0.000", "X=0.000 Y=300.000 Z=0.000");
+    assert_all_at(&at("2.0.4.9", x), Vec3::new(3.0, 0.0, 0.0));
+    assert_all_at(&at("2.0.4.9", y), Vec3::new(0.0, 0.0, 3.0));
+    for version in ["2.0.5.0", "3.9.13.0", ""] {
+        assert_all_at(&at(version, x), Vec3::new(0.0, 0.0, -3.0));
+        assert_all_at(&at(version, y), Vec3::new(3.0, 0.0, 0.0));
+    }
+}
+
+/// Which `GameVersion`s turn the offsets.
+#[test]
+fn the_version_that_turns_offsets_is_read_by_parts() {
+    let turned = |text: &str| offsets::offsets_turned(&Sce::parse(text).settings.top);
+    let with_version = |value: &str| turned(&format!("GameVersion={value}\nName=x\n"));
+    for old in ["2.0.4.9", "2.0.4.0", "1.0.8.0", "2.0"] {
+        assert!(with_version(old), "{old}");
+    }
+    for new in ["2.0.5.0", "2.0.5", "v2.6.3", "3.7.1", "", "abc"] {
+        assert!(!with_version(new), "{new:?}");
+    }
+    assert!(!turned("Name=x\n"), "no key");
+}
+
+/// Bug: `SpawnXOffset`, `SpawnYOffset` and `VerticalSpawnOffset` were ignored. Each is a
+/// fixed offset, in the same frame as the newer keys and with the same version rule.
+#[test]
+fn the_older_offset_keys_are_a_fixed_offset() {
+    let at =
+        |version: &str, key: &str| offset_sce(&game_version(version), &format!("{key}\n"), 0.0, &[("0, 0, 90", "")]);
+    assert_all_at(&at("", "SpawnXOffset=300.0"), Vec3::new(0.0, 0.0, -3.0));
+    assert_all_at(&at("", "SpawnYOffset=300.0"), Vec3::new(3.0, 0.0, 0.0));
+    assert_all_at(&at("", "VerticalSpawnOffset=50.0"), Vec3::new(0.0, 0.5, 0.0));
+    assert_all_at(&at("2.0.4.9", "SpawnXOffset=300.0"), Vec3::new(3.0, 0.0, 0.0));
+    assert_all_at(&at("2.0.4.9", "SpawnYOffset=300.0"), Vec3::new(0.0, 0.0, 3.0));
+}
+
+/// A leftover under a millimeter in an older key can't be seen, so it stores the same
+/// scenario as the file without the key.
+#[test]
+fn a_tiny_older_offset_is_no_offset() {
+    let fingerprint =
+        |character: &str| import_ok(&offset_sce("", character, 0.0, &[("0, 0, 90", "")])).scenario.fingerprint();
+    assert_eq!(fingerprint("SpawnYOffset=0.05\n"), fingerprint(""));
+    assert_ne!(fingerprint("SpawnYOffset=0.5\n"), fingerprint(""));
+}
+
+/// A character with the older keys and the newer ones both set isn't read: how KovaaK's
+/// adds them wasn't measured. The older keys with newer ones that are all zero are fine.
+#[test]
+fn older_and_newer_offsets_together_are_refused() {
+    let both = format!("SpawnXOffset=300.0\n{}", fixed_offset(THREE_M_RIGHT));
+    let err = convert(&Sce::parse(&offset_sce("", &both, 0.0, &[("0, 0, 0", "")])), "x.sce", "0").unwrap_err();
+    assert!(err.iter().any(|g| g.feature == "spawn offsets" && g.detail.starts_with("Dot Ball:")), "{err:?}");
+    // The second kind of bot too.
+    let big = format!("{BIG_HITBOX}{both}");
+    let err = convert(&Sce::parse(&with_big_kind("", &big)), "x.sce", "0").unwrap_err();
+    assert!(err.iter().any(|g| g.feature == "spawn offsets" && g.detail.starts_with("Big Ball:")), "{err:?}");
+    let zeros = format!("SpawnXOffset=300.0\n{}", fixed_offset("X=0.000 Y=0.000 Z=0.000"));
+    assert_all_at(&offset_sce("", &zeros, 0.0, &[("0, 0, 0", "")]), Vec3::new(0.0, 0.0, -3.0));
+}

@@ -16,7 +16,8 @@ use aimadapt_sim::collide::Collider;
 use aimadapt_sim::world::{ChaseFlight, Pusher, WorldMesh, WorldSpawn};
 
 use super::abilities::is_kind;
-use super::{UU_PER_M, axes, push_once, rise};
+use super::offsets;
+use super::{UU_PER_M, push_once, rise};
 use crate::inventory::{Gap, armed};
 use crate::map::{Map, Spawn};
 use crate::scenario::{BotChoice, Resolved};
@@ -48,7 +49,7 @@ pub(super) struct Helper {
     every_s: f32,
     needs_sight: bool,
     /// Its height in meters, and the middle of its spawn offset in the sim's axes
-    /// (right, up, back).
+    /// (right, up, back), along the map's.
     height: f32,
     offset: Vec3,
 }
@@ -129,7 +130,13 @@ fn start_delay(who: &str, ch: &Section, reasons: &mut Vec<Gap>) -> f32 {
 
 /// Reads the file's helper slots: the helpers the trainer plays, and the reasons it
 /// can't play the others. A helper with nothing to push with is left out, with a note.
-pub(super) fn plan(r: &Resolved, player_team: u32, reasons: &mut Vec<Gap>, notes: &mut Vec<String>) -> Plan {
+pub(super) fn plan(
+    r: &Resolved,
+    player_team: u32,
+    turned: bool,
+    reasons: &mut Vec<Gap>,
+    notes: &mut Vec<String>,
+) -> Plan {
     let mut plan = Plan::default();
     let mut counts: HashMap<String, usize> = HashMap::new();
     for slot in r.bots.iter().filter(|s| s.is_helper(player_team)) {
@@ -144,7 +151,7 @@ pub(super) fn plan(r: &Resolved, player_team: u32, reasons: &mut Vec<Gap>, notes
         let nth = counts.entry(key).or_default();
         *nth += 1;
         plan.characters.push(name.clone());
-        let Some(helper) = read(c, ch, name, *nth - 1, reasons, notes) else { continue };
+        let Some(helper) = read(c, ch, name, *nth - 1, turned, reasons, notes) else { continue };
         plan.helpers.push(helper);
     }
     plan
@@ -157,6 +164,7 @@ fn read(
     ch: &Section,
     character: String,
     nth: usize,
+    turned: bool,
     reasons: &mut Vec<Gap>,
     notes: &mut Vec<String>,
 ) -> Option<Helper> {
@@ -227,6 +235,13 @@ fn read(
     }
     let flight = if held == Some(true) { flight(who, ch, reasons) } else { None };
     let start_s = start_delay(who, ch, reasons);
+    let offset = match offsets::read(ch, turned) {
+        Ok([lo, hi]) => (Vec3::from_array(lo) + Vec3::from_array(hi)) / 2.0,
+        Err(gap) => {
+            push_once(reasons, gap);
+            Vec3::ZERO
+        }
+    };
     if reasons.len() > before {
         return None;
     }
@@ -244,7 +259,6 @@ fn read(
             notes.push(note);
         }
     }
-    let offset = |key: &str| axes(ch.vec3(key).unwrap_or_default()) / UU_PER_M;
     Some(Helper {
         character,
         nth,
@@ -257,7 +271,7 @@ fn read(
         every_s: every,
         needs_sight: !c.bot.is("SeeThroughWalls"),
         height: ch.f32_or("MainBBHeight", 0.0).max(0.0) / UU_PER_M,
-        offset: (offset("SpawnOffsetMin") + offset("SpawnOffsetMax")) / 2.0,
+        offset,
     })
 }
 
@@ -304,12 +318,15 @@ pub(super) struct Frame {
     pub axes: [Vec3; 3],
 }
 
-/// The helpers as pushers, each at its spawn point's `frame`. A chasing one needs a
+/// The helpers as pushers, each at its spawn point's `frame`, with its offset along the
+/// map's axes `map_axes`: KovaaK's runs a target's offset that way, and a helper's wasn't
+/// measured (its `facing` stays on its spawn point's own axes). A chasing one needs a
 /// wall bots can't pass between it and every place a target appears; without one it
 /// would fly to its target.
 pub(super) fn pushers(
     plan: &Plan,
     frames: &[Frame],
+    map_axes: [Vec3; 3],
     meshes: &[WorldMesh],
     spawns: &[WorldSpawn],
     reasons: &mut Vec<Gap>,
@@ -317,7 +334,7 @@ pub(super) fn pushers(
     let walls = Collider::for_bots(meshes);
     let mut out = Vec::new();
     for (h, f) in plan.helpers.iter().zip(frames) {
-        let offset: Vec3 = f.axes.iter().zip(h.offset.to_array()).map(|(a, o)| *a * o).sum();
+        let offset: Vec3 = map_axes.iter().zip(h.offset.to_array()).map(|(a, o)| *a * o).sum();
         let pos = f.at + rise(h.height) + offset;
         if h.chases {
             let open = spawns.iter().any(|s| {

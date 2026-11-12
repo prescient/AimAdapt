@@ -8,7 +8,8 @@
 //! Z up. The sim uses meters with -Z forward, +X right and +Y up, with the player's
 //! eye at the origin facing -Z. Map positions and walls are multiplied by the
 //! scenario's `MapScale`; character sizes, speeds and spawn offsets are not (for
-//! character heights that's checked against KovaaK's, at map scale 1 and 4).
+//! character heights that's checked against KovaaK's, at map scale 1 and 4). Spawn
+//! offsets run along the map's axes, not the spawn point's (see `offsets`).
 //!
 //! Reflex maps (the older format) are in centimeters too, with X right, Y up and Z
 //! forward. On both formats KovaaK's puts a character's middle its whole height
@@ -23,6 +24,7 @@ use aimadapt_sim::{Scenario, Vec3};
 
 mod abilities;
 mod helpers;
+mod offsets;
 mod rules;
 
 use crate::inventory::Gap;
@@ -113,7 +115,8 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
     rule_reasons(top, &mut reasons);
 
     // Bots on the player's team push the targets around; they aren't targets.
-    let helpers = helpers::plan(&r, player_team, &mut reasons, &mut notes);
+    let turned = offsets::offsets_turned(top);
+    let helpers = helpers::plan(&r, player_team, turned, &mut reasons, &mut notes);
     let targets: Vec<&BotSlot> = r.bots.iter().filter(|s| !s.is_helper(player_team)).collect();
     let kill_limit = rules::kill_limit(top, &r.bots, player_team, &mut reasons);
     let pushed = !helpers.helpers.is_empty();
@@ -146,6 +149,10 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
 
     let map_scale = top.f32_or("MapScale", 1.0);
     let characters: Vec<&Section> = kinds.iter().map(|(ch, _)| *ch).collect();
+    let bot_offsets = offsets::read(bot, turned).unwrap_or_else(|gap| {
+        push_once(&mut reasons, gap);
+        [[0.0; 3]; 2]
+    });
     let mut spawn_characters = Vec::new();
     let world = world(
         map,
@@ -153,6 +160,7 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
         r.player,
         &characters,
         spawn_rise(bot),
+        bot_offsets,
         player_team,
         &teams,
         &helpers,
@@ -188,7 +196,7 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
         // Several kinds: each with its own hitbox, health, look and movement, on the
         // spawn points its character may use.
         let sizes = std::iter::once((shape, radius, height)).chain(others);
-        add_kinds(&mut world, &kinds, sizes, &spawn_characters)?;
+        add_kinds(&mut world, &kinds, sizes, &spawn_characters, turned)?;
         world.slots = slots;
         if rotations.iter().any(Option::is_some) {
             world.rotations = rotations;
@@ -196,6 +204,7 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
     } else {
         world.motion = motion;
     }
+    offsets::keep_offset_axes(&mut world);
     world_rules(&mut world, top, source, source_hash);
     rules::score_notes(top, &mut notes);
     if kinds.len() == 1 {
@@ -336,12 +345,13 @@ fn add_kinds(
     kinds: &[(&Section, Option<Motion>)],
     sizes: impl Iterator<Item = (Shape, f32, f32)>,
     spawn_characters: &[Vec<String>],
+    turned: bool,
 ) -> Result<(), Vec<Gap>> {
     // The world starts every bot at the first kind's height and offsets; the others
     // keep what differs.
     let first = kinds.first().map(|(ch, _)| *ch);
     for ((ch, m), (shape, radius, height)) in kinds.iter().zip(sizes) {
-        let own = spawn_offsets(ch);
+        let own = offsets::read(ch, turned).map_err(|gap| vec![gap])?;
         let offsets = (own != [world.offset_min, world.offset_max]).then_some(own);
         let rise = first.map_or(0.0, |f| spawn_rise(ch) - spawn_rise(f));
         let spawns: Vec<u32> = spawn_characters
@@ -526,7 +536,9 @@ fn map_walls(map: &Map, map_scale: f32) -> MapWalls {
 // Where the player stands: lifted onto a floor it overlaps, or pulled down onto
 // one within its step-up height, as Unreal's walking movement does (both measured
 // in KovaaK's). The eye is the camera offset above its middle, or with a head, above
-// the top of its body (and half the head's offset higher: one measurement).
+// the top of its body (and half the head's offset higher: one measurement). The
+// player's own spawn offset is read as the newer settings alone, along the sim's axes:
+// what the older settings and the file's version do to it wasn't measured.
 fn player_eye(player: Option<&Section>, start: Vec3, meshes: &[WorldMesh]) -> Vec3 {
     let mut body = start;
     let mut camera = Vec3::ZERO;
@@ -826,12 +838,6 @@ fn spawn_rise(ch: &Section) -> f32 {
     }
 }
 
-/// A character's spawn offsets `[min, max]` in meters, in the sim's axes. Each axis is
-/// picked between the two values, so their order doesn't matter (ww5t writes min above max).
-fn spawn_offsets(ch: &Section) -> [[f32; 3]; 2] {
-    ["SpawnOffsetMin", "SpawnOffsetMax"].map(|k| (axes(ch.vec3(k).unwrap_or_default()) / UU_PER_M).to_array())
-}
-
 /// A box bot stays lined up with the map's axes, so it lines up with the sim's only when the
 /// map's turn is a multiple of 90 degrees.
 fn box_alignment(bots: &[&Section], yaw_deg: f32, reasons: &mut Vec<Gap>) {
@@ -857,6 +863,7 @@ fn world(
     player: Option<&Section>,
     bots: &[&Section],
     bot_height: f32,
+    bot_offsets: [[f32; 3]; 2],
     player_team: u32,
     teams: &[u32],
     helpers: &helpers::Plan,
@@ -903,8 +910,7 @@ fn world(
     let bot_teams: Vec<u32> =
         if teams.is_empty() { vec![if player_team == 1 { 2 } else { 1 }] } else { teams.to_vec() };
     // Where a spawn point is and which way it faces: its own right, up and back axes.
-    // The offset runs along them. A Reflex yaw turns the same way as an Unreal one, so
-    // both use its rotation.
+    // A Reflex yaw turns the same way as an Unreal one, so both use its rotation.
     let frame = |s: &crate::map::Spawn| {
         let q = ue_rotation(match s.angles {
             Some(a) if reflex => [0.0, 0.0, a[0]],
@@ -948,7 +954,7 @@ fn world(
         reasons.push(Gap::planned("the map has no spawn point the bots can use", ""));
         return None;
     }
-    let [a, b] = spawn_offsets(bot);
+    let [a, b] = bot_offsets;
     if !skipped.is_empty() {
         notes.push(format!(
             "some walls aren't drawn yet ({}); they don't change where bots appear",
@@ -962,12 +968,16 @@ fn world(
         ));
     }
     let frames: Vec<helpers::Frame> = taken.iter().map(|i| frame(&map.spawns[*i])).collect();
-    let pushers = helpers::pushers(helpers, &frames, &meshes, &spawns, reasons);
+    // The map's own right, up and back, which every offset runs along. The scenario keeps
+    // them only if they move a target (see `offsets::keep_offset_axes`).
+    let map_axes = [Vec3::X, Vec3::Y, Vec3::Z].map(|v| turn * v);
+    let pushers = helpers::pushers(helpers, &frames, map_axes, &meshes, &spawns, reasons);
     Some(World {
         spawns,
         pushers,
         offset_min: a,
         offset_max: b,
+        offset_axes: Some(map_axes.map(|v| v.to_array())),
         blocked_radius: bot.f32_or("BlockedSpawnRadius", 0.0).max(0.0) / UU_PER_M,
         cluster: bot.is("InvertBlockedSpawn") && bot.f32_or("BlockedSpawnRadius", 0.0) > 0.0,
         meshes,

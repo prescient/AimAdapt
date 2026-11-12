@@ -129,11 +129,13 @@ fn a_helper_is_a_pusher_and_not_a_target() {
     assert_eq!(w.spawns.len(), 1);
     assert!((w.spawns[0].pos[2] - -10.0).abs() < 1e-4 && (w.spawns[0].pos[0] - -2.0).abs() < 1e-4);
     // A pusher: 5 m ahead of the player's own start (not of the helper's point), 0.02 m
-    // up (its height) and 0.2 m along its own right (the middle of its offset), which
-    // for a spawn point turned to face right is back toward the player. It faces right.
+    // up (its height) and 0.2 m along the map's right (the middle of its offset), however
+    // its spawn point is turned (it was along the point's own right, which for a point
+    // turned to face right is back toward the player, until the offsets followed the
+    // map). It faces right, as its spawn point does.
     assert_eq!(w.pushers.len(), 1);
     let p = &w.pushers[0];
-    assert!(Vec3::from_array(p.pos).distance(Vec3::new(0.0, 0.02, -4.8)) < 1e-4, "{:?}", p.pos);
+    assert!(Vec3::from_array(p.pos).distance(Vec3::new(0.2, 0.02, -5.0)) < 1e-4, "{:?}", p.pos);
     assert!(Vec3::from_array(p.facing).distance(Vec3::X) < 1e-4, "{:?}", p.facing);
     assert_eq!((p.chases, p.needs_sight), (false, true));
     assert_eq!((p.radius, p.push, p.lift), (1.5, 3.0, 1.0));
@@ -146,6 +148,48 @@ fn a_helper_is_a_pusher_and_not_a_target() {
     assert!(m.dodges.is_empty() && m.abilities.is_none() && m.jetpack.is_none() && m.max_speed == 0.0);
     // Nothing about the helper shows without it: bots move only when they say so.
     assert!(!i.notes.iter().any(|n| n.contains("bots move by their dodge profiles")), "{:?}", i.notes);
+}
+
+/// Bug: a helper's offset ran along its spawn point's own axes, though KovaaK's runs
+/// offsets along the map's, whatever way the point is turned. (A helper's wasn't measured
+/// itself; it follows the bots'.) Its facing still follows its spawn point.
+#[test]
+fn a_helpers_offset_runs_along_the_maps_axes_and_its_facing_along_its_spawn_point() {
+    for (yaw, facing) in [(90, Vec3::X), (180, Vec3::Z), (270, Vec3::NEG_X)] {
+        let text = HELPER_SCE.replacen("\"rotation\": \"0, 0, 90\"", &format!("\"rotation\": \"0, 0, {yaw}\""), 1);
+        let p = import(&text).unwrap().scenario.world.unwrap().pushers[0].clone();
+        // The middle of the offset, 0.2 m, is to the map's right (the sim's +x).
+        assert!(Vec3::from_array(p.pos).distance(Vec3::new(0.2, 0.02, -5.0)) < 1e-4, "{yaw}: {:?}", p.pos);
+        assert!(Vec3::from_array(p.facing).distance(facing) < 1e-4, "{yaw}: {:?}", p.facing);
+    }
+}
+
+/// A helper's offset is read like a bot's: the older keys are a fixed offset, a file
+/// saved before KovaaK's 2.0.5.0 has it turned a quarter, and the older keys together
+/// with the newer ones are refused, naming the character.
+#[test]
+fn a_helpers_offset_reads_the_older_keys_and_the_version() {
+    let older = with(
+        "SpawnOffsetMin=X=0.000 Y=10.000 Z=0.000
+SpawnOffsetMax=X=0.000 Y=30.000 Z=0.000",
+        "SpawnXOffset=40.0",
+    );
+    let at = |text: &str| Vec3::from_array(import(text).unwrap().scenario.world.unwrap().pushers[0].pos);
+    // 0.4 m forward of the spawn point's place, 5 m ahead of the player.
+    assert!(at(&older).distance(Vec3::new(0.0, 0.02, -5.4)) < 1e-4, "{}", at(&older));
+    // Saved before 2.0.5.0, X runs along the map's right.
+    let old_file = format!(
+        "GameVersion=2.0.4.9
+{older}"
+    );
+    assert!(at(&old_file).distance(Vec3::new(0.4, 0.02, -5.0)) < 1e-4, "{}", at(&old_file));
+    let both = with(
+        "SpawnOffsetMin=X=0.000 Y=10.000 Z=0.000",
+        "SpawnXOffset=40.0
+SpawnOffsetMin=X=0.000 Y=10.000 Z=0.000",
+    );
+    let r = reasons(&both);
+    assert!(r.iter().any(|g| g.feature == "spawn offsets" && g.detail.starts_with("Push Orb:")), "{r:?}");
 }
 
 /// A file with only helpers has no bots; one with a helper and no melee ability just
@@ -369,7 +413,7 @@ fn helpers_take_their_spawn_points_in_order() {
     // Two do: the first helper takes the first point (500), the second the next (900).
     let w = import(&two(&point(900, 1))).unwrap().scenario.world.unwrap();
     let z: Vec<f32> = w.pushers.iter().map(|p| p.pos[2]).collect();
-    assert!((z[0] - -4.8).abs() < 1e-4 && (z[1] - -9.0).abs() < 1e-4, "{z:?}");
+    assert!((z[0] - -5.0).abs() < 1e-4 && (z[1] - -9.0).abs() < 1e-4, "{z:?}");
     // Neither point is a target's, and neither is the player's start (it's at 0).
     assert_eq!(w.spawns.len(), 1);
 }
@@ -380,13 +424,15 @@ fn helpers_take_their_spawn_points_in_order() {
 fn the_players_start_skips_a_helpers_spawn_point() {
     let w = import(HELPER_SCE).unwrap().scenario.world.unwrap();
     // The player's eye is at Unreal x = 0, so the helper (x = 500) is 5 m ahead.
-    assert!((w.pushers[0].pos[2] - -4.8).abs() < 1e-4);
+    assert!((w.pushers[0].pos[2] - -5.0).abs() < 1e-4);
     // Name the player's character on the helper's point too, and it's the start: the
     // helper is then at the player's eye (and the map turns to face as the point does).
+    // Its 0.2 m offset runs along the map's right, which is now straight ahead; it was
+    // along the point's own right, to the player's right, before offsets followed the map.
     let both = with("\"value\": \"Push Orb\"", "\"value\": \"Push Orb, Gunner\"");
     let w = import(&both).unwrap().scenario.world.unwrap();
     let pos = Vec3::from_array(w.pushers[0].pos);
-    assert!(pos.distance(Vec3::new(0.2, 0.02, 0.0)) < 1e-3, "{pos}");
+    assert!(pos.distance(Vec3::new(0.0, 0.02, -0.2)) < 1e-3, "{pos}");
 }
 
 /// A bot with `NoDodging` (or one that doesn't move) must do nothing by itself once

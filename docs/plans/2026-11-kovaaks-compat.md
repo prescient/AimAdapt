@@ -17,7 +17,9 @@ A scenario is refused when it uses something the trainer doesn't model, so every
 | K6b The jump key | 13f11d4 | 111 of 225 |
 | K15a An ability that costs health | e3c7715 | 113 of 225 |
 | K15b Chasers that take time to arrive | 19f0673 | 116 of 225 |
-| K7 Armed bots that never fire, invincible characters | | 132 of 225 |
+| K7 Armed bots that never fire, invincible characters | 399d081 | 132 of 225 |
+| Fix: spawn offsets follow the map's axes | | 132 of 225 |
+| Fix: regeneration between shots | | |
 | K15 The rest: vertical dashes, damage reactions | | |
 | K8 Bots that destroy themselves | | |
 | K9 Heads | | |
@@ -362,6 +364,36 @@ What gets built:
 
 Result: 132 of 225. The 116 files that played before keep their fingerprints, notes and stored settings. Four files are still refused for bots that aim and fire and two for `InvincibleBots` on the player's character, all six with other reasons too.
 
+### Two faults found by playing K7's files
+
+The 16 files K7 made play were played in the sim without a window, by a bot that aims perfectly. Two older faults showed, and neither is K7's. Each gets its own commit with a regression test, before K8 starts.
+
+#### Spawn offsets ran along each spawn point's facing
+
+A character's `SpawnOffsetMin` and `SpawnOffsetMax` move its bots away from the spawn point they appear at. The importer ran that offset along the spawn point's own axes. The rule was read off one benchmark family (ww5t), whose spawn points face away from the player and whose offsets are written with the larger number first, and it was never measured.
+
+Measured in KovaaK's 3.9.13 on 11 November 2026 with 40 test maps. Each has one still bot at a spawn point 10 m ahead and an offset of 5 m on one axis, and the ball's place is read off the screen as a tangent:
+
+- A spawn point's rotation never turns an offset. Yaw and pitch were tried, on a Reflex map and on a JSON map.
+- In a file whose `GameVersion` is 2.0.5.0 or later, X runs along the map's forward axis, Y to the map's right and Z up. The numbers are Unreal units and `MapScale` doesn't scale them.
+- In a file whose `GameVersion` is below 2.0.5.0 the offset is a quarter turn round: X runs to the map's right and Y to the map's back. That was measured at 2.0.4.9 and at 2.0.4.0, and 2.0.5.0 is the first version without the turn.
+- The older keys `SpawnXOffset`, `SpawnYOffset` and `VerticalSpawnOffset` are read at every version. They make one fixed offset, in the same frame and under the same version rule.
+- The player's facing doesn't matter. With the player's start turned 90° the ball sat at a tangent of −0.509. The map's axes predict −0.5, and an offset that followed the player's view would have put it dead ahead.
+- A copy of a ww5t file cut down to one spawn point showed its targets in an upright column at a tangent of 0.7375. The map's axes predict 0.7335 and the old rule 0.543.
+
+Not measured: the old and the new keys both set on one character (no installed file has that), a helper bot's offset, the player's own character's offsets, a version below 2.0.4.0, and whether `MapScale` scales the older keys.
+
+What gets built:
+
+- `aimadapt-sim`: the sim's own rule stays, an offset along each spawn point's own axes. A world can now name one frame for every spawn point's offset (`offset_axes`), used in place of each point's axes. The field is optional and left out of a stored scenario when it isn't set, and nothing draws a new random number.
+- `aimadapt-sce`: one reader for a character's offsets, used for targets and helpers. It reads the new keys and the older ones, turns the offset a quarter turn in a file older than 2.0.5.0, and refuses a character that sets both kinds of key.
+- The importer writes the map's frame into the world only when it changes where a bot can appear: when, for some offset on some spawn point it is used at, the box of possible places along the map's axes differs from the box along the point's own axes. A spawn point turned half round with mirrored offsets, or a turned player start with unturned spawn points, gives the same box, so those worlds store nothing new and keep their fingerprints.
+- A helper bot's offset runs along the map's axes too. Its facing stays its spawn point's.
+
+Result: still 132 of 225, and 32 of the playing files changed, so their bests start again. 29 now store the map's frame and their targets appear in other places. 20 of those belong to the Voltaic S5 Novice set, the five ww5t files among them. Taken at the corners of each offset box, the places move by less than 2 m on average in 7 files, by 5 to 9 m in 14 and by 17 m or more in 8. One tracking scenario's bot used to start 16° to one side and now starts dead ahead. Two files gain a fixed vertical offset from the older key (0.1 m up, 0.5 m down). In one file a helper's four pushers moved 4 cm. The other 100 keep their fingerprints, notes and stored settings.
+
+The 32 were played in the sim without a window. Each runs its full length with no problem reported, a target is up in at least 95% of frames, and the bot that aims perfectly hits. None was watched in the game window after the fix.
+
 ### K8. Bots that destroy themselves
 
 "Pressure" scenarios give each bot a weapon ability or a weapon that damages the bot itself after a delay, so a target that isn't shot in time goes away and counts against the player.
@@ -435,6 +467,12 @@ These rows are filled in as packages land. A row leaves the table when a test ma
 | `InvincibleBots` on a character | That character's bots can't die, whatever the scenario's own flag says | No |
 | A bot with a weapon that is told not to aim | It never fires, so it plays as a bot without a weapon | Partly: no shot in 49 s on two test maps whose bots carry a hitscan weapon. Other kinds of weapon weren't tried |
 | `InvinciblePlayer` on the player's character, with no bot that fires | Nothing to do: nothing in the trainer hurts the player | No |
+| A spawn offset in a file whose `GameVersion` is below 2.0.4.0 | Turned a quarter, as measured at 2.0.4.0 and 2.0.4.9 | No: no playing file that old has an offset to the side or along the map (two have 0.05 of a unit, read as none) |
+| A spawn offset in a file with no `GameVersion`, or one that can't be read | Not turned, as from 2.0.5.0 on | No: every installed file has the key |
+| The older offset keys (`SpawnXOffset`, `SpawnYOffset`, `VerticalSpawnOffset`) on a map with a `MapScale` | Not scaled, like the newer keys | No |
+| An older offset key below 0.1 of a unit | No offset: it would move a bot by less than a millimetre | No |
+| A helper bot's spawn offset | Along the map's axes like a target's, at the middle of its range | No: measured on targets only. One playing file has one |
+| The player's own character's spawn offset | The newer keys alone, at the middle of the range, along the player's own facing. The older keys and the file's version aren't applied | No: one playing file sets an older key there, of 1 unit |
 | `StandStillUntilHurt` on a bot that is pushed | The pushes move it only once it has been hurt | No |
 | A flier's vertical speed when it is lifted | The push is added to it like any other speed | No |
 | A target bouncing on a push cushion | Not copied: in KovaaK's it lost about 4% of its height per cycle, cause unknown | Open |

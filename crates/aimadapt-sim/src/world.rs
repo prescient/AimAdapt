@@ -24,9 +24,16 @@ pub struct World {
     /// Where targets can appear, each picked in proportion to its weight.
     pub spawns: Vec<WorldSpawn>,
     /// A random offset added to the spawn point: each axis between these two values
-    /// (in either order), along the spawn point's own axes.
+    /// (in either order), along the spawn point's own axes, or along `offset_axes`
+    /// when the world has them.
     pub offset_min: [f32; 3],
     pub offset_max: [f32; 3],
+    /// One frame for every spawn point's offset, where the offsets' x, y and z point,
+    /// used in place of each point's own axes. KovaaK's never turns an offset with its
+    /// spawn point, so an imported world has it when its points are turned in a way
+    /// that would move the targets.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offset_axes: Option<[[f32; 3]; 3]>,
     /// No target appears closer than this to another one, in meters.
     pub blocked_radius: f32,
     /// Inverted (KovaaK's `InvertBlockedSpawn` on the bots): a new target appears
@@ -108,6 +115,7 @@ impl Default for World {
             spawns: Vec::new(),
             offset_min: [0.0; 3],
             offset_max: [0.0; 3],
+            offset_axes: None,
             blocked_radius: 0.0,
             cluster: false,
             accuracy_mult: AccuracyMult::default(),
@@ -413,8 +421,9 @@ impl WorldBox {
 pub struct WorldSpawn {
     pub pos: [f32; 3],
     pub weight: f32,
-    /// Where the spawn point's own x, y and z axes point (it faces along -z), for
-    /// the offset.
+    /// Where the spawn point's own x, y and z axes point (it faces along -z). The
+    /// offset runs along them unless the world has `offset_axes`; a bot that doesn't
+    /// face the player strafes along the first one either way.
     pub axes: [[f32; 3]; 3],
     /// A spawn volume's three edges from `pos`, one of its corners, in meters: a
     /// target appears anywhere in the box they span. All zero for a spawn point.
@@ -511,6 +520,13 @@ impl World {
         // Each rotation id indexes a counter, so a huge one would allocate gigabytes.
         if self.rotations.iter().flatten().any(|r| *r as usize >= self.slots.len()) {
             p.push("a bot slot names a rotation the world doesn't have".into());
+        }
+        if let Some(axes) = &self.offset_axes {
+            if axes.iter().flatten().any(|v| !v.is_finite()) {
+                p.push("the offset frame has a value that isn't a number".into());
+            } else if axes.iter().any(|a| Vec3::from_array(*a).length_squared() <= 1e-12) {
+                p.push("the offset frame has an axis with no length".into());
+            }
         }
         let motions = self.motion.iter().chain(self.kinds.iter().filter_map(|k| k.motion.as_ref()));
         for problem in motions.filter_map(|m| m.abilities.as_ref()).flat_map(|a| a.problems()) {
@@ -648,9 +664,10 @@ impl World {
                     offset += Vec3::from_array(e) * rng.next_f32();
                 }
             }
+            let offset_axes = self.offset_axes.unwrap_or(point.axes);
             for i in 0..3 {
                 let (lo, hi) = (offset_min[i], offset_max[i]);
-                offset += Vec3::from_array(point.axes[i]) * (lo + (hi - lo) * rng.next_f32());
+                offset += Vec3::from_array(offset_axes[i]) * (lo + (hi - lo) * rng.next_f32());
             }
             pos = self.out_of_walls(Vec3::from_array(point.pos) + offset + rise, radius);
             right = Vec3::from_array(point.axes[0]);
@@ -737,8 +754,10 @@ mod tests {
         assert!(placed[0].distance(placed[1]) >= 1.5);
     }
 
-    /// ww5t writes its offsets with min above max, and along each spawn point's
-    /// facing: a point turned 90° moves its x offset onto the world's z.
+    /// ww5t writes its offsets with min above max. The sim's own rule is that an
+    /// offset runs along its spawn point's axes (a point turned 90° moves its x offset
+    /// onto the world's z); KovaaK's doesn't do that, and the importer sets
+    /// `offset_axes` where it matters.
     #[test]
     fn offsets_follow_the_spawn_points_axes_in_either_order() {
         let w = World {
@@ -755,6 +774,65 @@ mod tests {
         for _ in 0..20 {
             let p = w.spawn_pos(&mut rng, &[], 0.0, Vec3::NEG_Z);
             assert!((p.z + 9.0).abs() < 1e-5 && p.x.abs() < 1e-5 && p.y.abs() <= 0.5, "{p}");
+        }
+    }
+
+    /// A world with a spawn point turned 90° (its own x axis along the world's z) and
+    /// an offset of 1 m along x, with a frame for the offsets or without.
+    fn turned_world(offset_axes: Option<[[f32; 3]; 3]>) -> World {
+        World {
+            spawns: vec![WorldSpawn {
+                pos: [0.0, 0.0, -10.0],
+                axes: [[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]],
+                ..WorldSpawn::default()
+            }],
+            offset_min: [1.0, 0.0, 0.0],
+            offset_max: [1.0, 0.0, 0.0],
+            offset_axes,
+            ..World::default()
+        }
+    }
+
+    /// With `offset_axes` the offset runs along that frame in place of the spawn point's
+    /// own axes, and the right-hand direction a bot strafes along stays the point's.
+    #[test]
+    fn offsets_run_along_the_worlds_frame_when_it_has_one() {
+        let map = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut rng = Rng::new(3);
+        let (pos, right) = turned_world(Some(map)).spawn_point(&mut rng, &[], 0.0, Vec3::NEG_Z);
+        assert!(pos.distance(Vec3::new(1.0, 0.0, -10.0)) < 1e-5, "{pos}");
+        assert!(right.distance(Vec3::Z) < 1e-5, "{right}");
+        // Without it: along the point's own axes, as before.
+        let (pos, right) = turned_world(None).spawn_point(&mut Rng::new(3), &[], 0.0, Vec3::NEG_Z);
+        assert!(pos.distance(Vec3::new(0.0, 0.0, -9.0)) < 1e-5, "{pos}");
+        assert!(right.distance(Vec3::Z) < 1e-5, "{right}");
+    }
+
+    /// A world without a frame for its offsets stores no key for it (so scenarios stored
+    /// before it keep their fingerprints); with one it is kept and read back.
+    #[test]
+    fn the_offset_frame_is_left_out_when_unset_and_survives_a_round_trip() {
+        let text = toml::to_string(&turned_world(None)).unwrap();
+        assert!(!text.contains("offset_axes"), "{text}");
+        let w = turned_world(Some([[0.0, 0.0, -1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]]));
+        let text = toml::to_string(&w).unwrap();
+        assert!(text.contains("offset_axes"), "{text}");
+        assert_eq!(toml::from_str::<World>(&text).unwrap(), w);
+    }
+
+    /// A frame for the offsets with a value that isn't a number, or an axis with no
+    /// length, is a problem.
+    #[test]
+    fn a_bad_offset_frame_is_a_problem() {
+        let good = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        assert!(World { offset_axes: Some(good), ..world() }.problems().is_empty());
+        for bad in [
+            [[f32::NAN, 0.0, 0.0], good[1], good[2]],
+            [good[0], [0.0, f32::INFINITY, 0.0], good[2]],
+            [good[0], good[1], [0.0, 0.0, 0.0]],
+        ] {
+            let problems = World { offset_axes: Some(bad), ..world() }.problems();
+            assert!(problems.iter().any(|p| p.contains("offset frame")), "{bad:?}: {problems:?}");
         }
     }
 
