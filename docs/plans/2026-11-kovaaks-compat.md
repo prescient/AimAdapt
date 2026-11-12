@@ -22,8 +22,8 @@ A scenario is refused when it uses something the trainer doesn't model, so every
 | Fix: regeneration between shots | cf9d8ca | 132 of 225 |
 | Fix: when a bot uses an ability | a94eb94 | 132 of 225 |
 | K15c Dashes that go up or down | 65512d7 | 132 of 225 |
-| K15d Abilities used when hurt | | 133 of 225 |
-| K15e The smaller refusals | | |
+| K15d Abilities used when hurt | 8ddb138 | 133 of 225 |
+| K15e The smaller refusals | | 133 of 225 |
 | K8 Bots that destroy themselves | | |
 | K9 Heads | | |
 | K10 Waypoint paths | | |
@@ -423,7 +423,11 @@ Thirty-six changes were made to the new code one at a time. Thirty-five fail at 
 
 The file that started was played without the game window. With no shots its bot never blinks, and under held fire it blinks every few seconds at uneven gaps, which fits the rules above. No imported scenario with a reaction was watched in the game window.
 
-**The smaller refusals (K15e).** What is left after those three: a bot with a size of zero (3 files), a melee ability on a target (2), a health cost on an ability that doesn't move the bot (2), `AIMaxSelfHealth` (1), `AIMaxTargHealth` (1), an ability on a bot that doesn't dodge (1) and a hurtbox on a movement ability (1). One of the two files that K15 alone can start needs the first three. Each is read in the local files and measured before it is built. A setting that only files with other refusals use stays refused, with its reason.
+**The smaller refusals (K15e).** What was left after those three: a bot with a size of zero (3 files), a melee ability on a target (2), a health cost on an ability that doesn't move the bot (2), `AIMaxSelfHealth` (1), `AIMaxTargHealth` (1), an ability on a bot that doesn't dodge (1) and a hurtbox on a movement ability (1). The rule for them was set before they were read: a setting that only files with other refusals use stays refused, with its reason.
+
+K15e builds nothing, and K15 ends with it. The local files were listed again after K15d. Of the eighteen files above, one plays, six have no K15 refusal left and wait on other packages, and eleven still have one. Those eleven have the seven kinds in the list, a dash that goes up or down in a scenario whose player is shaped like a box (5 files) and a reaction on an impulse (1). Ten of the eleven are refused for something outside K15 too: abilities for the player, bots that shoot back, solid props, heads, waypoint paths, map objects, aim assist or aiming down sights. Building their K15 setting would start none of them, so each keeps its refusal.
+
+The eleventh is the second of the two files that K15 alone could start. It needs three of the kinds at once. Its targets have a melee ability to use near the player, who can be hurt and has one life. It also has bots too small to hit that stand still and pay health for an ability on a timer: a health cost on an ability that doesn't move the bot, on a bot with a size of zero. Most of its rotations start with one of them and go on with one kind of target, so the small bot holds a place until it dies and that kind of target arrives a set time into the run. The death by a cost was measured in K15a. Two things weren't: whether a bot uses an ability that doesn't move it, and what a target's melee ability does to the player. The second is a question about the player being hurt, and K8 has to answer that for its own files. So this file moves to K8, and its three settings stay refused until then.
 
 ## Wave 2: beyond the backlog's plan
 
@@ -532,6 +536,7 @@ A delay of 0 with low health is sensitive to where the steps fall. In the play a
 - Read the 19 files: the delay, what starts it (a timer from spawn, or the first hit), and what the score does when a bot dies that way.
 - `aimadapt-sim`: a kind can have a fuse. The engine shows it only if KovaaK's does.
 - The four armed-bot files left over from K7 belong here: their bots aim and fire.
+- One file left over from K15e belongs here too. Its targets have a melee ability to use near the player, and bots too small to hit pay health on a timer until they die, which brings in a new kind of target a set time into the run. Measure in KovaaK's what a melee hit does to a player who can be hurt, what the run and the score do when the player dies, and whether a bot uses an ability that doesn't move it. Then the file needs a melee ability on a target, a health cost on an ability that doesn't move the bot, and a bot with a size of zero, which nobody can see or hit.
 
 ### K9. Heads
 
