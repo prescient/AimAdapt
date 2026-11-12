@@ -2890,3 +2890,355 @@ fn a_bot_that_cant_be_hurt_reacts_to_the_third_hit_of_ten() {
         assert_eq!(sim.stats().damage_done, 30.0, "hits on a bot that can't be hurt count with the weapon's damage");
     }
 }
+
+// What a bot's abilities keep when it respawns. All of these guard against one bug: the abilities of a bot
+// that came back started all their timers again, the start block and the frequency windows among them.
+
+/// A still bot of this kind: one ability that moves nothing (so that a use is all that happens), a key that
+/// ticks every `tick` s after `block` s, and a health cost per use.
+fn pressing_kind(block: f32, tick: f32, cost: f32) -> crate::motion::Motion {
+    use crate::motion::{Abilities, Ability, Motion};
+    let ability = Ability { max_charges: 99, spawn_charges: 99, health_cost: cost, ..Ability::default() };
+    let abilities = Abilities {
+        press_every_s: tick,
+        chance: 1.0,
+        window_s: [1.0, 1.0],
+        start_block_s: block,
+        list: vec![ability],
+        ..Default::default()
+    };
+    Motion { abilities: Some(abilities), ..Default::default() }
+}
+
+/// What a run of a sim shows of each bot: the time (in seconds of play) at which it appeared, and at which it
+/// first used an ability.
+#[derive(Default)]
+struct Lives {
+    seen: Vec<(u64, f32, Option<f32>)>,
+}
+
+impl Lives {
+    fn look(&mut self, sim: &Sim) {
+        for t in sim.targets() {
+            let uses = t.bot.as_ref().map_or(0, |b| b.ability_uses());
+            match self.seen.iter_mut().find(|s| s.0 == t.id) {
+                None => self.seen.push((t.id, sim.elapsed(), (uses > 0).then(|| sim.elapsed()))),
+                Some(s) if s.2.is_none() && uses > 0 => s.2 = Some(sim.elapsed()),
+                Some(_) => {}
+            }
+        }
+    }
+
+    fn life(&self, id: u64) -> &(u64, f32, Option<f32>) {
+        self.seen.iter().find(|s| s.0 == id).unwrap_or_else(|| panic!("no bot {id}: {:?}", self.seen))
+    }
+
+    /// When the bot with this id first used an ability, in seconds of play; infinity if it hadn't by the
+    /// time the run ended.
+    fn first_use(&self, id: u64) -> f32 {
+        self.life(id).2.unwrap_or(f32::INFINITY)
+    }
+
+    /// The same, counted from when the bot appeared.
+    fn first_use_after_appearing(&self, id: u64) -> f32 {
+        self.first_use(id) - self.life(id).1
+    }
+}
+
+/// Plays idle frames until the sim reaches `at`.
+fn idle_until(sim: &mut Sim, lives: &mut Lives, at: f32) {
+    while sim.elapsed() < at {
+        sim.step(FRAME, idle());
+        lives.look(sim);
+    }
+}
+
+/// L: a kill. One bot with an ability (block 3.0, a tick every 0.1 s), a respawn delay of 0.5. It is shot at
+/// 4.0 s. The new bot's first use comes about 0.1 s after it appears; the first bot's came 3.0 s after.
+#[test]
+fn a_bot_that_comes_back_after_a_kill_doesnt_wait_out_the_start_block_again() {
+    let mut s = on_a_floor(Vec::new(), Some(pressing_kind(3.0, 0.1, 0.0)));
+    s.targets.health = 10.0;
+    s.targets.respawn_delay_s = 0.5;
+    s.weapon.damage = 10.0;
+    let mut sim = Sim::new(s, 1);
+    let mut lives = Lives::default();
+    lives.look(&sim);
+    idle_until(&mut sim, &mut lives, 4.0);
+    let at = sim.targets()[0].pos;
+    sim.step(FRAME, shoot(at));
+    assert_eq!(sim.stats().kills, 1);
+    idle_until(&mut sim, &mut lives, 6.0);
+    let first = lives.first_use_after_appearing(1);
+    assert!((3.0..3.05).contains(&first), "the first bot waited out the block: {first}");
+    let second = lives.first_use_after_appearing(2);
+    assert!((0.08..0.14).contains(&second), "the next one used at its first tick: {second}");
+}
+
+/// M: a bot that goes by itself. Health 20, an ability that costs 10, block 3.0, a tick of 1.0, a respawn
+/// delay of 0.5: life one uses at 3.0 and 4.0 and leaves as a timeout; life two appears at 4.5, uses at 5.5
+/// and 6.5 and leaves; and so on.
+#[test]
+fn a_bot_that_goes_by_itself_comes_back_with_its_block_over() {
+    let mut s = on_a_floor(Vec::new(), Some(pressing_kind(3.0, 1.0, 10.0)));
+    s.targets.health = 20.0;
+    s.targets.respawn_delay_s = 0.5;
+    let mut sim = Sim::new(s, 1);
+    let mut left = Vec::new();
+    while sim.elapsed() < 12.0 {
+        let events = sim.step(FRAME, idle());
+        if events.iter().any(|e| matches!(e, Event::TimedOut { .. })) {
+            left.push(sim.elapsed());
+        }
+    }
+    let want = [4.0, 6.5, 9.0, 11.5];
+    let fits = left.len() == want.len() && left.iter().zip(want).all(|(l, w)| (w - 0.005..w + 0.05).contains(l));
+    assert!(fits, "timeouts at {left:?}, wanted about {want:?}");
+}
+
+/// A block still running when a bot is killed ends at its time in the run: the time the bot was away counts.
+/// Block 3.0, a tick every 0.1 s, a respawn delay of 0.5: the bot is shot at 1.0 s, the next one appears at
+/// about 1.5 s and first uses its ability 3.0 s into the run (3.5 s if the time away were left out).
+#[test]
+fn a_block_still_running_at_a_kill_ends_at_its_time_in_the_run() {
+    let mut s = on_a_floor(Vec::new(), Some(pressing_kind(3.0, 0.1, 0.0)));
+    s.targets.health = 10.0;
+    s.targets.respawn_delay_s = 0.5;
+    s.weapon.damage = 10.0;
+    let mut sim = Sim::new(s, 1);
+    let mut lives = Lives::default();
+    lives.look(&sim);
+    idle_until(&mut sim, &mut lives, 1.0);
+    let at = sim.targets()[0].pos;
+    sim.step(FRAME, shoot(at));
+    assert_eq!(sim.stats().kills, 1);
+    idle_until(&mut sim, &mut lives, 5.0);
+    assert_eq!(lives.first_use(1), f32::INFINITY, "the first bot left before its block ended");
+    let used = lives.first_use(2);
+    assert!((2.99..3.11).contains(&used), "the block ended 3.0 s into the run: {used}");
+}
+
+/// Two kinds of still bot with abilities in two slots, one kind to a slot (a respawn delay of 0.5 s, one hit
+/// kills).
+fn two_slots_of(motions: [crate::motion::Motion; 2]) -> (Sim, Lives) {
+    use crate::world::{WorldKind, WorldSpawn};
+    let mut s = on_a_floor(Vec::new(), None);
+    s.targets.count = 2;
+    s.weapon.damage = 10.0;
+    let w = s.world.as_mut().unwrap();
+    w.spawns = vec![
+        WorldSpawn { pos: [-3.0, -1.0, -10.0], ..Default::default() },
+        WorldSpawn { pos: [3.0, -1.0, -10.0], ..Default::default() },
+    ];
+    let kind = |(spawn, motion): (usize, crate::motion::Motion)| WorldKind {
+        health: 10.0,
+        respawn_delay_s: 0.5,
+        spawns: vec![spawn as u32],
+        motion: Some(motion),
+        ..Default::default()
+    };
+    w.kinds = motions.into_iter().enumerate().map(kind).collect();
+    w.slots = vec![vec![(0, 1.0)], vec![(1, 1.0)]];
+    let sim = Sim::new(s, 3);
+    let mut lives = Lives::default();
+    lives.look(&sim);
+    (sim, lives)
+}
+
+/// The same, each kind with its own start block and a tick of 0.1 s.
+fn two_slots(blocks: [f32; 2]) -> (Sim, Lives) {
+    two_slots_of(blocks.map(|block| pressing_kind(block, 0.1, 0.0)))
+}
+
+/// N: slots. Two slots with one kind each, the first kind with a block of 3.0 and the second with 6.0. The
+/// first slot's bot is killed at about 4.0 and comes back: it uses its ability at its first tick, while the
+/// second slot's bot, which never left, still waits until 6.0.
+#[test]
+fn a_brain_goes_to_the_bot_that_takes_its_slot() {
+    let (mut sim, mut lives) = two_slots([3.0, 6.0]);
+    idle_until(&mut sim, &mut lives, 4.0);
+    let of_kind = |sim: &Sim, kind: u32| sim.targets().iter().find(|t| t.kind() == Some(kind)).map(|t| (t.id, t.pos));
+    let (first, at) = of_kind(&sim, 0).unwrap();
+    let (other, _) = of_kind(&sim, 1).unwrap();
+    sim.step(FRAME, shoot(at));
+    assert_eq!(sim.stats().kills, 1);
+    idle_until(&mut sim, &mut lives, 7.0);
+    let (back, _) = of_kind(&sim, 0).unwrap();
+    assert_ne!(back, first);
+    let used = lives.first_use_after_appearing(back);
+    assert!((0.08..0.14).contains(&used), "the new bot of the first slot used at its first tick: {used}");
+    let waited = lives.first_use_after_appearing(other);
+    assert!((5.99..6.05).contains(&waited), "the second slot's bot waited out its own block: {waited}");
+}
+
+/// A brain goes to its own slot, whichever bot comes back first. Two slots, both kinds with a reuse time of
+/// 2.0 s: the first slot's bots try at 0.1 and 2.2, the second's (a block of 1.0) at 1.0 and 3.1. The second
+/// slot's bot is killed at about 3.35 and the first's at about 3.55. The first slot is refilled first, at
+/// about 3.85, and its bot's next try is the first tick more than 2.0 s after 2.2; the second slot's, at
+/// about 4.05, waits until more than 2.0 s after 3.1. Brains handed out in the order they were left would
+/// swap the two.
+#[test]
+fn a_brain_goes_to_its_own_slot_whichever_bot_comes_back_first() {
+    let kinds = [0.0, 1.0].map(|block| {
+        let mut m = pressing_kind(block, 0.1, 0.0);
+        m.abilities.as_mut().unwrap().list[0].reuse_s = 2.0;
+        m
+    });
+    let (mut sim, mut lives) = two_slots_of(kinds);
+    let of_kind = |sim: &Sim, kind: u32| sim.targets().iter().find(|t| t.kind() == Some(kind)).map(|t| (t.id, t.pos));
+    for (kind, at, kills) in [(1, 3.35, 1), (0, 3.55, 2)] {
+        idle_until(&mut sim, &mut lives, at);
+        let (_, pos) = of_kind(&sim, kind).unwrap();
+        sim.step(FRAME, shoot(pos));
+        lives.look(&sim);
+        assert_eq!(sim.stats().kills, kills);
+    }
+    idle_until(&mut sim, &mut lives, 6.0);
+    let (first, _) = of_kind(&sim, 0).unwrap();
+    let (second, _) = of_kind(&sim, 1).unwrap();
+    assert!(lives.life(first).1 < lives.life(second).1, "the first slot was refilled first");
+    let used = lives.first_use(first);
+    assert!((4.2..4.32).contains(&used), "the first slot's bot went on from the try at 2.2: {used}");
+    let used = lives.first_use(second);
+    assert!((5.1..5.22).contains(&used), "the second slot's bot went on from the try at 3.1: {used}");
+}
+
+/// Two slots that hold the same kind keep a brain each. One kind with a reuse time of 2.0 s fills both slots.
+/// The first slot's bot is shot before its first tick, so the bot that takes its place first tries at about
+/// 0.65 while the second slot's bot tried at 0.1. The second slot's bot is shot at 1.0 and the first's at
+/// 1.2. The first slot is refilled first, at about 1.5, and its bot goes on from the try at 0.65: it uses at
+/// about 2.7. The second slot's bot, back at about 1.7, goes on from 0.1 and uses at about 2.2. Brains
+/// matched by kind alone would swap the two.
+#[test]
+fn two_slots_of_one_kind_keep_a_brain_each() {
+    use crate::world::{WorldKind, WorldSpawn};
+    let mut s = on_a_floor(Vec::new(), None);
+    s.targets.count = 2;
+    s.weapon.damage = 10.0;
+    let mut motion = pressing_kind(0.0, 0.1, 0.0);
+    motion.abilities.as_mut().unwrap().list[0].reuse_s = 2.0;
+    let w = s.world.as_mut().unwrap();
+    w.spawns = vec![
+        WorldSpawn { pos: [-3.0, -1.0, -10.0], ..Default::default() },
+        WorldSpawn { pos: [3.0, -1.0, -10.0], ..Default::default() },
+    ];
+    let kind = WorldKind {
+        health: 10.0,
+        respawn_delay_s: 0.5,
+        spawns: vec![0, 1],
+        motion: Some(motion),
+        ..Default::default()
+    };
+    w.kinds = vec![kind];
+    w.slots = vec![vec![(0, 1.0)], vec![(0, 1.0)]];
+    let mut sim = Sim::new(s, 3);
+    let mut lives = Lives::default();
+    lives.look(&sim);
+    let in_slot = |sim: &Sim, slot: u32| sim.targets().iter().find(|t| t.slot == slot).map(|t| (t.id, t.pos));
+    for (slot, at, kills) in [(0, 0.05, 1), (1, 1.0, 2), (0, 1.2, 3)] {
+        idle_until(&mut sim, &mut lives, at);
+        let (_, pos) = in_slot(&sim, slot).unwrap();
+        sim.step(FRAME, shoot(pos));
+        lives.look(&sim);
+        assert_eq!(sim.stats().kills, kills);
+    }
+    idle_until(&mut sim, &mut lives, 4.0);
+    let (first, _) = in_slot(&sim, 0).unwrap();
+    let (second, _) = in_slot(&sim, 1).unwrap();
+    assert!(lives.life(first).1 < lives.life(second).1, "the first slot was refilled first");
+    let used = lives.first_use(first);
+    assert!((2.55..2.85).contains(&used), "the first slot's bot went on from the try at 0.65: {used}");
+    let used = lives.first_use(second);
+    assert!((2.05..2.3).contains(&used), "the second slot's bot went on from the try at 0.1: {used}");
+}
+
+/// A slot whose kinds take turns keeps each kind's brain for the next bot of that kind (not measured: a
+/// decision). One slot, two kinds in turn, both with a block of 2.0 and a respawn delay of 0.5. The lives
+/// are shot at 1.0, 2.5 and 4.0. The first two never use the ability: each kind's block counts from its own
+/// first bot (0 and about 1.5). The third and fourth are their kinds' second bots, and use it at their first
+/// tick.
+#[test]
+fn a_slot_whose_kinds_take_turns_keeps_each_kinds_brain() {
+    use crate::world::WorldKind;
+    let mut s = on_a_floor(Vec::new(), None);
+    s.weapon.damage = 10.0;
+    let w = s.world.as_mut().unwrap();
+    let kind = || WorldKind {
+        health: 10.0,
+        respawn_delay_s: 0.5,
+        spawns: vec![0],
+        motion: Some(pressing_kind(2.0, 0.1, 0.0)),
+        ..Default::default()
+    };
+    w.kinds = vec![kind(), kind()];
+    w.slots = vec![vec![(0, 1.0), (1, 1.0)]];
+    w.rotations = vec![Some(0)];
+    let mut sim = Sim::new(s, 3);
+    let mut lives = Lives::default();
+    lives.look(&sim);
+    let mut kinds = Vec::new();
+    for (at, kills) in [(1.0, 1), (2.5, 2), (4.0, 3)] {
+        idle_until(&mut sim, &mut lives, at);
+        let (kind, pos) = (sim.targets()[0].kind(), sim.targets()[0].pos);
+        kinds.push(kind);
+        sim.step(FRAME, shoot(pos));
+        lives.look(&sim);
+        assert_eq!(sim.stats().kills, kills);
+    }
+    idle_until(&mut sim, &mut lives, 5.0);
+    kinds.push(sim.targets()[0].kind());
+    assert_eq!(kinds, vec![Some(0), Some(1), Some(0), Some(1)]);
+    for (id, used) in [(1, false), (2, false), (3, true), (4, true)] {
+        let after = lives.first_use_after_appearing(id);
+        let fits = if used { (0.08..0.14).contains(&after) } else { after == f32::INFINITY };
+        assert!(fits, "bot {id} first used its ability {after} s after it appeared");
+    }
+}
+
+/// O: no slots, two targets up. Brains are handed out first in, first out, and the list never holds more than
+/// two.
+#[test]
+fn brains_are_handed_out_first_in_first_out_and_never_pile_up() {
+    use crate::world::WorldSpawn;
+    let mut s = on_a_floor(Vec::new(), Some(pressing_kind(2.0, 0.1, 0.0)));
+    s.targets.count = 2;
+    s.targets.health = 10.0;
+    s.targets.respawn_delay_s = 0.5;
+    s.weapon.damage = 10.0;
+    s.timing.duration_s = 60.0;
+    s.world.as_mut().unwrap().spawns = vec![
+        WorldSpawn { pos: [-3.0, -1.0, -10.0], ..Default::default() },
+        WorldSpawn { pos: [3.0, -1.0, -10.0], ..Default::default() },
+    ];
+    let mut sim = Sim::new(s, 3);
+    let mut lives = Lives::default();
+    assert!(sim.brains.is_empty());
+    // One is killed at 1.0 s and the other at 1.2 s. The first comes back at 1.5 s and takes the older brain.
+    for (at, in_list) in [(1.0, 1), (1.2, 2)] {
+        idle_until(&mut sim, &mut lives, at);
+        let pos = sim.targets()[0].pos;
+        sim.step(FRAME, shoot(pos));
+        assert_eq!(sim.brains.len(), in_list);
+    }
+    assert!((sim.brains[0].at - 1.0).abs() < 0.02 && (sim.brains[1].at - 1.2).abs() < 0.02);
+    while sim.targets().is_empty() {
+        sim.step(FRAME, idle());
+    }
+    assert_eq!(sim.brains.len(), 1, "the first bot back took one");
+    assert!((sim.brains[0].at - 1.2).abs() < 0.02, "the one that stayed is the newer: {}", sim.brains[0].at);
+    // Kill whichever is first up every 0.3 s for a while: the list never holds more than two.
+    let mut most = 0;
+    while sim.elapsed() < 50.0 {
+        for _ in 0..72 {
+            sim.step(FRAME, idle());
+            most = most.max(sim.brains.len());
+        }
+        if let Some(t) = sim.targets().first() {
+            let pos = t.pos;
+            sim.step(FRAME, shoot(pos));
+            most = most.max(sim.brains.len());
+        }
+    }
+    assert!(sim.stats().kills > 50, "{}", sim.stats().kills);
+    assert!(most <= 2, "{most}");
+}

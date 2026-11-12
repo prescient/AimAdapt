@@ -1029,7 +1029,7 @@ impl Air {
 
 /// Frames of 1/120 s with `None`, or of lengths between 1/240 and 1/60 s drawn with the seed: the
 /// engine steps the sim with the real frame lengths.
-fn frame_lengths(seed: Option<u64>) -> Box<dyn FnMut() -> f32> {
+pub(super) fn frame_lengths(seed: Option<u64>) -> Box<dyn FnMut() -> f32> {
     match seed {
         None => Box::new(|| DT),
         Some(seed) => {
@@ -1039,7 +1039,7 @@ fn frame_lengths(seed: Option<u64>) -> Box<dyn FnMut() -> f32> {
     }
 }
 
-const FRAME_KINDS: [Option<u64>; 4] = [None, Some(1), Some(2), Some(3)];
+pub(super) const FRAME_KINDS: [Option<u64>; 4] = [None, Some(1), Some(2), Some(3)];
 
 /// A flier with no gravity that hovers when no key is down and strafes, with one ability and an aim
 /// lift of 0.5. Its up key is the test's to press (`s.keys.held`).

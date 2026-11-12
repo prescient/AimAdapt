@@ -410,18 +410,22 @@ fn every_local_scenario_file_reads() {
 /// the file sets its start block, so only the new rule mark changed it). Still Wall's bots have a
 /// respawn delay of 0.1 to 0.3 s, so its pin was taken again when a bot was made to come back after
 /// the least of the two, as measured (it had been dae40cef9b1e60b7; only the stored delay changed
-/// it). A fingerprint also covers a hash of the file's bytes, which is why git must not touch the
+/// it). The three with bots that have abilities (Dash Lane, High Blink and Flinch Kite) were taken again
+/// when the start block, the reuse clocks and the frequency windows were made to run on from one life of a
+/// bot to the next, as measured: only the new rule mark ("abilities over respawns") changed them, the
+/// stored settings are as they were (it had been 7de71ff815020d9e, a3090bfdae8ca8f6 and 332d0b6934b5c9eb).
+/// A fingerprint also covers a hash of the file's bytes, which is why git must not touch the
 /// fixtures (see `git_keeps_the_fixtures_bytes`).
 #[test]
 fn imported_fixtures_keep_their_fingerprints() {
-    assert_eq!(import(&path("Dash Lane")).unwrap().scenario.fingerprint(), "7de71ff815020d9e");
+    assert_eq!(import(&path("Dash Lane")).unwrap().scenario.fingerprint(), "1312b8d06a0a21c1");
     assert_eq!(import(&path("Still Wall")).unwrap().scenario.fingerprint(), "d38091b5eb573292");
     // Plan K15c: a bot with a dash that goes up or down has an aim lift. High Blink had no stored best
     // before, so its fingerprint is pinned the way it was first taken.
-    assert_eq!(import(&path("High Blink")).unwrap().scenario.fingerprint(), "a3090bfdae8ca8f6");
+    assert_eq!(import(&path("High Blink")).unwrap().scenario.fingerprint(), "7866fe40a60be139");
     // Plan K15d: a reaction to damage is left out of the file when an ability has none, so the others
     // above kept theirs. Flinch Kite is the first file with one.
-    assert_eq!(import(&path("Flinch Kite")).unwrap().scenario.fingerprint(), "332d0b6934b5c9eb");
+    assert_eq!(import(&path("Flinch Kite")).unwrap().scenario.fingerprint(), "c88b00b69ff88cda");
 }
 
 /// Regression test: CI failed on every push from plan K3 on. Git on Windows checked the

@@ -356,6 +356,51 @@ fn a_character_without_a_start_block_key_waits_one_second_and_an_explicit_zero_s
     assert_eq!(block(&without), 1.0);
 }
 
+fn dasher_abilities(text: &str) -> aimadapt_sim::motion::Abilities {
+    let m = convert(&Sce::parse(text), "box.sce", "0").unwrap().scenario.world.unwrap().motion.unwrap();
+    m.abilities.unwrap()
+}
+
+/// The text without the lines that set any of these keys.
+fn without_keys(text: &str, keys: &[&str]) -> String {
+    let kept: Vec<&str> =
+        text.lines().filter(|l| !keys.iter().any(|k| l.split('=').next().is_some_and(|name| name == *k))).collect();
+    kept.join("\n")
+}
+
+/// Bug: a bot profile without an `AbilityUseTimer` key played as a key that ticks once a frame (a tick of 0 s).
+/// Measured in KovaaK's: absent, the tick is 0.1 s. An explicit 0 stays 0.
+#[test]
+fn a_bot_profile_without_an_ability_use_timer_ticks_every_tenth_of_a_second() {
+    let abilities = dasher_abilities;
+    let with_keys = dasher(ZIP);
+    assert_eq!(abilities(&with_keys).press_every_s, 0.3);
+    assert_eq!(abilities(&with_keys.replace("AbilityUseTimer=0.3", "AbilityUseTimer=0.25")).press_every_s, 0.25);
+    assert_eq!(abilities(&with_keys.replace("AbilityUseTimer=0.3", "AbilityUseTimer=0.0")).press_every_s, 0.0);
+    let no_timer = without_keys(&with_keys, &["AbilityUseTimer"]);
+    assert!(!no_timer.contains("AbilityUseTimer"));
+    assert_eq!(abilities(&no_timer).press_every_s, 0.1);
+}
+
+/// Bug: a bot profile without a `UseAbilityFrequency` key played as one that never presses (a chance of 0).
+/// Measured in KovaaK's: absent, the bot always presses. An explicit 0 stays 0. The window keys read as 0
+/// when absent, as before.
+#[test]
+fn a_bot_profile_without_a_use_ability_frequency_always_presses() {
+    let abilities = dasher_abilities;
+    let with_keys = dasher(ZIP);
+    assert_eq!(abilities(&with_keys).chance, 0.5);
+    assert_eq!(abilities(&with_keys.replace("UseAbilityFrequency=0.5", "UseAbilityFrequency=0.4")).chance, 0.4);
+    assert_eq!(abilities(&with_keys.replace("UseAbilityFrequency=0.5", "UseAbilityFrequency=0.0")).chance, 0.0);
+    let no_chance = without_keys(&with_keys, &["UseAbilityFrequency"]);
+    assert!(!no_chance.contains("UseAbilityFrequency"));
+    assert_eq!(abilities(&no_chance).chance, 1.0);
+    // The window keys stay as they were: absent reads as 0.
+    let no_windows = without_keys(&with_keys, &["UseAbilityFreqMinTime", "UseAbilityFreqMaxTime"]);
+    assert!(!no_windows.contains("UseAbilityFreqM"));
+    assert_eq!(abilities(&no_windows).window_s, [0.0, 0.0]);
+}
+
 #[test]
 fn a_movement_ability_with_only_a_launch_takes_the_defaults() {
     let m = convert(&Sce::parse(&dasher("UpVelocity=400.0")), "box.sce", "0").unwrap().scenario.world.unwrap().motion;

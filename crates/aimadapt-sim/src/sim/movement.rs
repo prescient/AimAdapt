@@ -96,11 +96,11 @@ impl Sim {
     /// damage, and its slot fills again after its respawn delay. `timed_out` gets the
     /// value of its track (NaN for none), for `move_targets` to settle afterwards.
     fn leave_as_timeout(&mut self, i: usize, now: f32, events: &mut Vec<Event>, timed_out: &mut Vec<f32>) {
-        let t = self.targets.swap_remove(i);
+        let mut t = self.targets.swap_remove(i);
         self.stats.timeouts += 1;
         self.telemetry.targets.push(t.record(now, Outcome::TimedOut));
         events.push(Event::TimedOut { id: t.id });
-        self.pending.push(now + t.respawn_s);
+        self.queue_respawn(&mut t, now);
         timed_out.push(t.track.value.map_or(f32::NAN, |(value, _, _)| value));
     }
 }

@@ -11,6 +11,9 @@ use super::reaction::{Pending, Reaction, Until};
 use super::{BotState, Motion, between, is_zero};
 use crate::rng::Rng;
 
+mod brain;
+pub use brain::Brain;
+
 /// A bot's movement abilities, and the settings for using them.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -21,14 +24,16 @@ pub struct Abilities {
     pub press_every_s: f32,
     /// The chance that a window is one in which the bot presses its key
     /// (`UseAbilityFrequency`). Every window the bot rolls it again. In a window it's
-    /// willing in, it presses on every tick; in any other it doesn't press at all.
+    /// willing in, it presses on every tick; in any other it doesn't press at all. The windows
+    /// run on through a bot's death and its replacement's appearance, see [`Brain`].
     pub chance: f32,
     /// A window lasts a random time between these two (`UseAbilityFreqMinTime` and
     /// `UseAbilityFreqMaxTime`). With a chance of 1 they make no difference.
     pub window_s: [f32; 2],
-    /// No ability until this long after the bot appears (`BlockAbilityOnStartDuration`).
-    /// A tick exactly at its end goes through; earlier ticks aren't tries. KovaaK's waits
-    /// 1 s for a character that has no such key (the importer writes that in).
+    /// No ability until this long after the first bot appears (`BlockAbilityOnStartDuration`).
+    /// It counts once: a bot that comes back after a death doesn't wait it out again (measured,
+    /// see [`Brain`]). A tick exactly at its end goes through; earlier ticks aren't tries.
+    /// KovaaK's waits 1 s for a character that has no such key (the importer writes that in).
     pub start_block_s: f32,
     /// A pause after any ability ends, shared by all of them (`AbilityGlobalCooldown`),
     /// counted from the end the use was scheduled for (its tick plus its duration); a
@@ -271,10 +276,15 @@ struct Active {
     dir: Vec3,
 }
 
-/// All of a bot's ability state. Its clock starts when the bot appears.
+/// All of a bot's ability state. Its clock starts when the bot appears. A bot that takes the place of
+/// one that died carries part of the dead bot's state (see [`Brain`]), shifted onto its own clock: the
+/// start block (`began`), the windows and each ability's last try. The rest starts again.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct AbilityState {
     pub(super) clock: f32,
+    /// When, on this bot's clock, the state it carries began: 0 for a bot that carries nothing, and
+    /// negative for one that does (the start block counts from the first bot's appearance).
+    began: f32,
     pub(super) slots: Vec<Slot>,
     active: Option<Active>,
     /// When the latest use is scheduled to end: its tick plus its duration.
@@ -295,6 +305,7 @@ impl Default for AbilityState {
     fn default() -> Self {
         AbilityState {
             clock: 0.0,
+            began: 0.0,
             slots: Vec::new(),
             active: None,
             last_end: None,
@@ -360,6 +371,12 @@ impl AbilityState {
     /// - A charge starts to refill at the tick of the press that spent it, whatever the
     ///   ability's length. One that comes back exactly at a try isn't there for it, except
     ///   in a chain of refills that began when the bot appeared (see [`Slot::settle`]).
+    /// - What a bot's abilities keep when it dies and another takes its place (measured in 3.9.13 with
+    ///   still balls that come back where they were): the start block counts once, from the first
+    ///   bot's appearance; each ability's reuse clock runs on through the death and the respawn; the
+    ///   frequency windows run on, none starting at a respawn. The tick grid of the key and the
+    ///   charges start again with each bot (see [`Brain`]). Only the first bot rolls a
+    ///   window when it appears; a replacement draws no random number for its abilities.
     /// - `DelayAfterUse` counts from the press, and a try exactly when it is over isn't
     ///   used. No ability starts while one is going on, and a try exactly at the moment
     ///   one ends (its tick plus `AbilityDuration`) isn't used either.
@@ -375,7 +392,10 @@ impl AbilityState {
     /// set, and the first of those that is ready is used, so those after it aren't tried
     /// at that tick. The shared cooldown (`AbilityGlobalCooldown`) is a pause after the
     /// scheduled end of any ability (its tick plus its duration); a tie counts as over.
-    /// The block, the clock and the windows start again with each bot. KovaaK's also shows
+    /// Across a respawn, also not measured: `DelayAfterUse` and the shared cooldown start again with
+    /// each bot, an ability going on when its bot dies ends with it, a reaction to damage that is
+    /// waiting and the damage counted toward one are dropped, and a bot that first appears later in a run
+    /// counts its block from when it first appears. KovaaK's also shows
     /// a dash now and then coming later than these rules say (about one in four, 5.7 s once
     /// instead of 4.2 s). The trainer doesn't copy that.
     ///
@@ -385,11 +405,16 @@ impl AbilityState {
     /// reuse time is [`Slot::is_try`] and whether an ability can go is
     /// [`AbilityState::ready_at`].
     fn decide(&mut self, ab: &Abilities, rng: &mut Rng, at: f32) -> bool {
-        if at + TIE_S < ab.start_block_s {
+        if !self.past_block(ab, at) {
             return false;
         }
         self.roll_windows(ab, rng, at);
         self.willing
+    }
+
+    /// Whether the start block is over at `at`: it counts from `began`, a tie being over.
+    pub(super) fn past_block(&self, ab: &Abilities, at: f32) -> bool {
+        at - self.began + TIE_S >= ab.start_block_s
     }
 
     /// Whether the ability in slot `i` is ready at the try at `at`: it has a charge, its

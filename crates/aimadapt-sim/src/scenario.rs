@@ -540,6 +540,9 @@ impl Scenario {
             .is_some_and(|w| w.motions().any(|m| m.abilities.as_ref().is_some_and(|a| !a.list.is_empty())));
         if abilities {
             marks += "\n# rules: ability tries";
+            // The start block, the reuse clocks and the frequency windows run on from one life of a bot to
+            // the next instead of starting again with each bot (see `motion::Brain`).
+            marks += "\n# rules: abilities over respawns";
         }
         marks
     }
@@ -876,11 +879,17 @@ mod tests {
         let ability = Abilities { list: vec![Ability::default()], ..Abilities::default() };
         let dasher = Motion { abilities: Some(ability), ..Motion::default() };
         let s = with_world(World { motion: Some(dasher.clone()), ..World::default() });
-        assert_eq!(s.fingerprint(), fnv(&(s.settings_text() + "\n# rules: ability tries")));
+        assert_eq!(
+            s.fingerprint(),
+            fnv(&(s.settings_text() + "\n# rules: ability tries\n# rules: abilities over respawns"))
+        );
         // A second kind with an ability counts too.
         let second = WorldKind { motion: Some(dasher.clone()), ..WorldKind::default() };
         let s = with_world(World { kinds: vec![second], ..World::default() });
-        assert_eq!(s.fingerprint(), fnv(&(s.settings_text() + "\n# rules: ability tries")));
+        assert_eq!(
+            s.fingerprint(),
+            fnv(&(s.settings_text() + "\n# rules: ability tries\n# rules: abilities over respawns"))
+        );
         // No ability: an empty list, none at all, a bot that only walks, no world.
         let empty = Motion { abilities: Some(Abilities::default()), ..Motion::default() };
         let walker = Motion { max_speed: 3.0, dodges: vec![Dodge::default()], ..Motion::default() };
@@ -897,7 +906,8 @@ mod tests {
         both.targets.regen_per_s = 10.0;
         assert_eq!(
             both.fingerprint(),
-            fnv(&(both.settings_text() + "\n# rules: heals in steps\n# rules: ability tries"))
+            fnv(&(both.settings_text()
+                + "\n# rules: heals in steps\n# rules: ability tries\n# rules: abilities over respawns"))
         );
     }
 

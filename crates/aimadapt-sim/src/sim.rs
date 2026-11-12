@@ -11,7 +11,7 @@ use glam::Vec3;
 
 use crate::adaptive::{Knob, Mix, Pick, Prior, Rating, planned_kind};
 use crate::collide::Collider;
-use crate::motion::{BotState, separate};
+use crate::motion::{BotState, Brain, separate};
 use crate::scenario::{Movement, MovementKind, Range, Scenario, Shape, Trigger, WeaponKind};
 use crate::telemetry::{
     Outcome, ShotRecord, TargetFrame, TargetPose, TargetRecord, Telemetry, TrackSample, angle_deg, screen_offset,
@@ -459,6 +459,9 @@ pub struct Sim {
     next_no: u32,
     /// Running-clock times at which a replacement target should appear.
     pending: Vec<f32>,
+    /// What the abilities of bots that left keep for the bots that take their places (see
+    /// `queue_respawn`).
+    brains: Vec<spawning::Left>,
     /// Picks so far from each of the world's in-order rotations.
     turns: Vec<u32>,
     last_killed_dir: Option<Vec3>,
@@ -553,6 +556,7 @@ impl Sim {
             next_id: 1,
             next_no: 1,
             pending: Vec::new(),
+            brains: Vec::new(),
             turns: Vec::new(),
             last_killed_dir: None,
             last_kill_at: 0.0,

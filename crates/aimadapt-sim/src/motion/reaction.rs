@@ -141,7 +141,7 @@ impl BotState {
     /// The reaction of the ability in slot `i`, due at `due`: used if it can be, else dropped.
     fn react_at(&mut self, m: &Motion, i: usize, view: &View, pos: Vec3, seen: bool, due: f32) {
         let Some(ab) = &m.abilities else { return };
-        if due + TIE_S >= ab.start_block_s && self.can_start(m, i, view, pos, seen, due) {
+        if self.ab.past_block(ab, due) && self.can_start(m, i, view, pos, seen, due) {
             self.start_ability(m, ab, i, view, pos, due);
         }
     }

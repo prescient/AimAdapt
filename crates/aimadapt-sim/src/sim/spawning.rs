@@ -3,11 +3,36 @@
 use super::firing::HEAL_STEP_S;
 use super::*;
 
+/// What the abilities of a bot that left keep, with where it was and when it left.
+pub(super) struct Left {
+    pub(super) slot: u32,
+    pub(super) kind: Option<u32>,
+    pub(super) at: f32,
+    brain: Brain,
+}
+
 impl Sim {
+    /// A target that was taken out is replaced after its respawn delay. Its bot's brain (what its
+    /// abilities keep, see `Brain`) is saved for the bot that takes its place in the same slot and kind.
+    /// A slot that comes back as another kind leaves the brain waiting for the next bot of its own kind
+    /// there (a decision: KovaaK's wasn't measured on it). The list can't grow without end: a bot leaves
+    /// one brain when it goes and takes one of its slot and kind when it comes, so a slot and kind never
+    /// has more waiting than it had bots up at once.
+    pub(super) fn queue_respawn(&mut self, t: &mut Target, now: f32) {
+        self.pending.push(now + t.respawn_s);
+        let motion = self.current.world.as_ref().and_then(|w| w.motion_of(t.kind));
+        if let (Some(b), Some(m)) = (&mut t.bot, motion)
+            && let Some(brain) = b.take_brain(m)
+        {
+            self.brains.push(Left { slot: t.slot, kind: t.kind, at: now, brain });
+        }
+    }
+
     /// Replaces the opening targets, so they use the current difficulty.
     pub(super) fn respawn_all(&mut self) {
         self.targets.clear();
         self.turns.clear();
+        self.brains.clear();
         self.next_id = 1;
         self.next_no = 1;
         let mut events = Vec::new();
@@ -129,9 +154,14 @@ impl Sim {
             (radius, height, health, shape) = (k.radius, k.height, k.health, k.shape);
             (regen, respawn_s) = ((k.regen_per_s, k.regen_delay_s), k.respawn_delay_s);
         }
+        // The oldest brain left by a bot of this slot and kind goes to the bot that takes its place.
+        let left = self.brains.iter().position(|l| l.slot == slot && l.kind == kind).map(|i| self.brains.remove(i));
         let bot = match self.current.world.as_ref().and_then(|w| w.motion_of(kind)) {
             Some(m) => {
-                let mut b = BotState::new(m, &mut self.rng, pos, right);
+                let mut b = match left {
+                    Some(l) => BotState::reborn(m, &mut self.rng, pos, right, Some(l.brain), (now - l.at).max(0.0)),
+                    None => BotState::new(m, &mut self.rng, pos, right),
+                };
                 b.grounded = on_floor_at_spawn;
                 Some(b)
             }

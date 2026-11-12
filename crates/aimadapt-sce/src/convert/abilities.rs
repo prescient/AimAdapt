@@ -224,6 +224,9 @@ const FARTHEST_M: f32 = 10_000.0;
 /// bot takes that much, so it never reacts either way.
 const HIGHEST_THRESHOLD: f32 = 1.0e6;
 
+/// The time between ticks of a bot's ability key when its profile has no `AbilityUseTimer` (measured).
+const DEFAULT_TICK_S: f32 = 0.1;
+
 /// The bot's movement abilities and the settings for using them, or none if it has
 /// no movement ability. `ch` is its character profile and `player` the player's.
 pub(super) fn abilities(c: &BotChoice, ch: &Section, player: Option<&Section>) -> Option<Abilities> {
@@ -233,8 +236,11 @@ pub(super) fn abilities(c: &BotChoice, ch: &Section, player: Option<&Section>) -
     }
     let secs = |s: &Section, key: &str| s.f32_or(key, 0.0).clamp(0.0, LONGEST_S);
     Some(Abilities {
-        press_every_s: secs(c.bot, "AbilityUseTimer"),
-        chance: c.bot.f32_or("UseAbilityFrequency", 0.0).clamp(0.0, 1.0),
+        // Measured in KovaaK's: a bot profile with no `AbilityUseTimer` key ticks every 0.1 s, and one with no
+        // `UseAbilityFrequency` key always presses (a chance of 1). An explicit 0 stays 0 for both. The window
+        // keys read as 0 when absent.
+        press_every_s: c.bot.f32_or("AbilityUseTimer", DEFAULT_TICK_S).clamp(0.0, LONGEST_S),
+        chance: c.bot.f32_or("UseAbilityFrequency", 1.0).clamp(0.0, 1.0),
         window_s: [secs(c.bot, "UseAbilityFreqMinTime"), secs(c.bot, "UseAbilityFreqMaxTime")],
         // KovaaK's waits 1 s for a character with no such key; an explicit 0 is no wait.
         start_block_s: ch.f32_or("BlockAbilityOnStartDuration", 1.0).clamp(0.0, LONGEST_S),

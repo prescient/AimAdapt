@@ -166,7 +166,7 @@ impl Sim {
         if t.health > 1e-4 {
             return;
         }
-        let t = self.targets.swap_remove(i);
+        let mut t = self.targets.swap_remove(i);
         self.stats.kills += 1;
         self.kills.push(KillRecord {
             at_s: now,
@@ -181,7 +181,7 @@ impl Sim {
         self.telemetry.targets.push(t.record(now, Outcome::Killed));
         self.last_killed_dir = Some(t.pos.normalize());
         events.push(Event::Killed { id: t.id });
-        self.pending.push(now + t.respawn_s);
+        self.queue_respawn(&mut t, now);
         self.next_target(now);
         self.pace_kill(now);
         if self.per_target()

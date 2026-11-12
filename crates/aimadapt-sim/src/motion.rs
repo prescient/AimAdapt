@@ -18,6 +18,8 @@ use crate::rng::Rng;
 mod ability;
 #[cfg(test)]
 mod ability_tests;
+#[cfg(test)]
+mod brain_tests;
 mod jump;
 #[cfg(test)]
 mod jump_tests;
@@ -25,7 +27,7 @@ mod reaction;
 #[cfg(test)]
 mod reaction_tests;
 use ability::AbilityState;
-pub use ability::{Abilities, Ability};
+pub use ability::{Abilities, Ability, Brain};
 use jump::Keys;
 pub use reaction::Reaction;
 
@@ -400,6 +402,21 @@ impl Motion {
 impl BotState {
     /// A bot that just appeared at `home`; `spawn_right` is its spawn point's right.
     pub fn new(m: &Motion, rng: &mut Rng, home: Vec3, spawn_right: Vec3) -> BotState {
+        BotState::reborn(m, rng, home, spawn_right, None, 0.0)
+    }
+
+    /// A bot that appeared at `home`, `away_s` seconds after another one left, taking its place. It is
+    /// made as [`BotState::new`] makes one, with the same draws for its dodge, except that its abilities
+    /// keep what the `brain` of the bot that left carries (see [`Brain`]) and draw no random numbers. A
+    /// bot with no brain, or one that doesn't fit this motion, starts its abilities as `new` does.
+    pub fn reborn(
+        m: &Motion,
+        rng: &mut Rng,
+        home: Vec3,
+        spawn_right: Vec3,
+        brain: Option<Brain>,
+        away_s: f32,
+    ) -> BotState {
         let mut s = BotState {
             vel: Vec3::ZERO,
             grounded: false,
@@ -435,7 +452,10 @@ impl BotState {
         }
         // Last, so a bot without abilities draws the same numbers as before.
         if let Some(ab) = &m.abilities {
-            s.ab = AbilityState::new(ab, rng);
+            s.ab = match brain {
+                Some(b) if b.fits(ab) => b.reborn(ab, away_s),
+                _ => AbilityState::new(ab, rng),
+            };
         }
         s
     }

@@ -24,7 +24,8 @@ A scenario is refused when it uses something the trainer doesn't model, so every
 | K15c Dashes that go up or down | 65512d7 | 132 of 225 |
 | K15d Abilities used when hurt | 8ddb138 | 133 of 225 |
 | K15e The smaller refusals | 3ddc7f7 | 133 of 225 |
-| Fix: a bot comes back after its least respawn delay | | 133 of 225 |
+| Fix: a bot comes back after its least respawn delay | f6b14a1 | 133 of 225 |
+| Fix: what a bot's abilities keep over a respawn | | 133 of 225 |
 | K8 Bots that destroy themselves | | |
 | K9 Heads | | |
 | K10 Waypoint paths | | |
@@ -356,7 +357,7 @@ The rest of K15 was measured on 11 and 12 November 2026 in KovaaK's 3.9.13 at 12
 
 So a bot with one charge uses it at the first try that is later than the charge timer, the delay and the ability's length, all counted from the press. K2 saw a dash every 4.2 s from a 4.0 s charge, a 0.1 s dash and a tick every 0.1 s, and took the charge to refill from the end of the dash. The films show the other cause: that bot's reuse timer was 0.1 s, so its tries were 0.2 s apart, and the try at 4.0 s was a tie.
 
-Not measured: `AbilityGlobalCooldown`, two abilities on one bot (each is played with its own reuse timer, and a tick uses the first one that is ready), and whether the block starts again when a bot respawns (it is played as starting again with each bot). K3's rule for the time between a helper's hits was measured on helpers and doesn't follow these rules. It wasn't measured again and stays as it is. So does a helper whose character has no `BlockAbilityOnStartDuration`: it still starts at once.
+Not measured: `AbilityGlobalCooldown`, two abilities on one bot (each is played with its own reuse timer, and a tick uses the first one that is ready), and whether the block starts again when a bot respawns (it was played as starting again with each bot until it was measured: it counts once, see the faults found while measuring K8). K3's rule for the time between a helper's hits was measured on helpers and doesn't follow these rules. It wasn't measured again and stays as it is. So does a helper whose character has no `BlockAbilityOnStartDuration`: it still starts at once.
 
 What gets built in the fix:
 
@@ -555,6 +556,30 @@ Result: still 133 of 225. None started and none stopped. Eight playing files hav
 
 The eight were played in the sim without a window after the fix, idle and by a bot that aims perfectly and holds fire. Every file imports with no problem reported, and every run goes its full length except in one very long scenario, which the play tool cuts short. In five of the eight the shooting bot never kills a target inside the run, so the delay doesn't show there. In the other three targets come back sooner. None was watched in the game window.
 
+#### A bot's ability timers started again with each respawn
+
+The sim gave every new bot a fresh set of ability timers: the start block, the reuse clocks, the frequency windows, the charges and the key's ticks all began again when a bot came back. The fix to when a bot uses an ability had listed the block across a respawn as not measured.
+
+Measured in KovaaK's 3.9.13 on 12 November 2026 with seven test maps of still balls that come back where they were (films at about 55 frames a second, times good to about 0.02 s). Something of a bot outlives it, called its brain here. A life is one bot from its spawn to its death.
+
+- The start block counts once, from the run's start. With a block of 3.0 s and a key that ticks every 0.1 s, the first use came 3.0 s into the first life and 0.1 s into every later life.
+- Each ability's reuse clock runs on. With a reuse time of 2.0 s and a tick of 0.1 s the uses were 2.1 s apart, counted straight through a death and a respawn of 0.5 s.
+- The frequency windows run on. With a window of 2.0 s and a frequency of 0.5 the bot stopped and started pressing on edges 2.0 s apart counted from the run's start, through deaths. No window starts at a respawn.
+- The key's ticks start again with each life: the first tick comes one interval after the bot appears. With a tick of 1.0 s the uses came 1.0 and 2.0 s into every life.
+- The charges start again with each life. An ability with no charges at spawn and a charge time of 2.0 s first fired 2.0 s after each spawn.
+- A bot profile with no `AbilityUseTimer` key plays as a tick of 0.1 s, and one with no `UseAbilityFrequency` key always presses.
+
+Not measured, and played as follows: `DelayAfterUse` and `AbilityGlobalCooldown` start again with each life. An ability going on when its bot dies ends with it. A reaction to damage that is waiting, and the damage counted toward one, are dropped. A bot that first appears later in a run has its block counted from when it first appears. Where several bots are up, each place in the bot list keeps its own brain, and a place whose kind of bot changes between lives keeps each kind's brain for the next bot of that kind there.
+
+What gets built:
+
+- `aimadapt-sim`: when a bot leaves (killed, or gone by itself), the sim saves its brain with its slot and kind, and the next bot of that slot and kind takes it. A scenario without slots hands the oldest brain to the first bot back. The block's start, each reuse clock and the window carry over with the time the bot was away counted. The ticks, the charges, the delay after a use and the shared cooldown start fresh. A respawn draws no random numbers for any of it. Scenarios whose bots have abilities get a new rule mark in their fingerprint.
+- `aimadapt-sce`: a bot profile with no `AbilityUseTimer` reads as a tick of 0.1 s (it was a tick every frame), and one with no `UseAbilityFrequency` as always pressing (it was never). An explicit 0 stays 0 for both.
+
+Result: still 133 of 225. None started and none stopped. Nine playing files have bots with abilities, and their fingerprints are new: bests set here on them start again. Their stored settings and notes are as they were, since none of the nine leaves out either key. The other 124 keep their fingerprints. Among the fixtures Dash Lane, High Blink and Flinch Kite have abilities, and their pins were taken again.
+
+The nine were played in the sim without a window after the fix, idle and by a bot that aims perfectly and holds fire. Every file imports with no problem reported, and every run goes its full length except in one very long scenario, which the play tool cuts short. None was watched in the game window.
+
 ### K8. Bots that destroy themselves
 
 "Pressure" scenarios give each bot a weapon ability or a weapon that damages the bot itself after a delay, so a target that isn't shot in time goes away and counts against the player.
@@ -611,7 +636,10 @@ These rows are filled in as packages land. A row leaves the table when a test ma
 | A bot with two abilities | Each has its own reuse timer. A tick uses the first one in the list that is ready, and the ones after it aren't tried at that tick | No |
 | A try that the ability's own rules turn down (distance, view angle, ground or air) | Counts as a try, so the reuse timer runs from it | No |
 | A tick of the key while the bot isn't willing to use abilities (`UseAbilityFrequency`) | Not a try | No |
-| `BlockAbilityOnStartDuration` on a bot that respawns | Starts again with each new bot | No |
+| `DelayAfterUse` and `AbilityGlobalCooldown` on a bot that respawns | Start again with each new bot | No |
+| An ability going on, or a reaction to damage that is waiting, when its bot dies | Ends with the bot | No |
+| `BlockAbilityOnStartDuration` on a bot that first appears later in a run | Counts from when that bot first appears | No |
+| A place in the bot list whose kind of bot changes between lives | Each kind's ability timers wait for the next bot of that kind there | No |
 | A helper whose character has no `BlockAbilityOnStartDuration` | No wait before its first hit (a target waits 1 s) | No |
 | `EndVelocityFactor` | The share of the dash speed the bot keeps when the dash ends | No |
 | `LockDirectionForDuration`, `NegateGravityForDuration`, `AbilityBlocksMovement` | As named, for the ability's duration | No |
