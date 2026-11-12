@@ -117,7 +117,8 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
     let targets: Vec<&BotSlot> = r.bots.iter().filter(|s| !s.is_helper(player_team)).collect();
     let kill_limit = rules::kill_limit(top, &r.bots, player_team, &mut reasons);
     let pushed = !helpers.helpers.is_empty();
-    let Bots { kinds, slots, rotations, teams, moving } = bots(&targets, other_team, pushed, &mut reasons);
+    let Bots { kinds, slots, rotations, teams, moving } =
+        bots(&targets, other_team, pushed, top.is("InvincibleBots"), &mut reasons);
     let kind = kinds.first().map(|(ch, _)| *ch);
     let motion = kinds.first().and_then(|(_, m)| m.clone());
     if targets.is_empty() {
@@ -174,6 +175,7 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
                     .into(),
             );
         }
+        abilities::cost_notes(&targets, kill_limit, &mut notes);
         if crouches(&targets) {
             notes.push("bots don't crouch yet".into());
         }
@@ -268,7 +270,13 @@ struct Bots<'a> {
 /// The target slots' bots. With `pushed` (the file has helper bots) every bot gets a
 /// motion, since a bot has to have one to fall or be pushed. Without it, a bot that
 /// doesn't move gets one only if it falls (a walker's character with gravity).
-fn bots<'a>(target_slots: &[&BotSlot<'a>], other_team: u32, pushed: bool, reasons: &mut Vec<Gap>) -> Bots<'a> {
+fn bots<'a>(
+    target_slots: &[&BotSlot<'a>],
+    other_team: u32,
+    pushed: bool,
+    invincible: bool,
+    reasons: &mut Vec<Gap>,
+) -> Bots<'a> {
     let mut kinds: Vec<(&Section, Option<Motion>)> = Vec::new();
     let mut slots: Vec<Vec<(u32, f32)>> = Vec::new();
     let mut rotations: Vec<Option<u32>> = Vec::new();
@@ -284,7 +292,7 @@ fn bots<'a>(target_slots: &[&BotSlot<'a>], other_team: u32, pushed: bool, reason
             let Some(ch) = c.character else { continue };
             // Movement abilities play. A target's melee ability doesn't: the knockbacks
             // that matter are the helper bots'.
-            abilities::reasons(c, reasons);
+            abilities::reasons(c, ch, invincible, reasons);
             let moves = moves(c, ch);
             moving |= moves;
             if pushed && !moves && ch.is("IsFlyer") {

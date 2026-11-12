@@ -2366,3 +2366,183 @@ fn a_jumper_that_appears_standing_with_the_key_held_jumps_at_once() {
     run_for(&mut sim, 3.0);
     assert!(grounded(&sim), "and then stayed down");
 }
+
+// Plan K15a: an ability that costs the bot health.
+
+/// A ball that hops straight up and pays `cost` health for each hop, with a charge back every
+/// 0.5 s, so about two hops a second. It comes back 0.5 s after it leaves. A kill is worth 5
+/// points, a hit 1 and a point of damage 1.
+fn hopper(health: f32, cost: f32) -> Scenario {
+    use crate::motion::{Abilities, Ability, Motion};
+    let hop = Ability { charge_s: 0.5, up_speed: 4.0, health_cost: cost, ..Ability::default() };
+    let abilities =
+        Abilities { press_every_s: 0.05, chance: 1.0, window_s: [0.05, 0.05], list: vec![hop], ..Default::default() };
+    let motion = Motion { gravity: 8.0, abilities: Some(abilities), ..Default::default() };
+    let mut s = on_a_floor(Vec::new(), Some(motion));
+    s.targets.health = health;
+    s.targets.respawn_delay_s = 0.5;
+    s.scoring =
+        crate::scenario::Scoring { per_kill: 5.0, per_hit: 1.0, per_damage: 1.0, per_miss: 0.0, per_timeout: 0.0 };
+    s.weapon.damage = 1.0;
+    s
+}
+
+fn uses_of(sim: &Sim) -> u32 {
+    sim.targets().first().and_then(|t| t.bot.as_ref()).map_or(0, |b| b.ability_uses())
+}
+
+/// Plays until the first bot goes away, up to `limit_s`. Gives how many uses it had made by then
+/// (counting the one of the frame it left in), and all the events up to and including that frame.
+fn until_it_leaves(sim: &mut Sim, limit_s: f32) -> Option<(u32, Vec<Event>)> {
+    let mut all = Vec::new();
+    for _ in 0..(limit_s / FRAME) as usize {
+        let before = uses_of(sim);
+        let events = sim.step(FRAME, idle());
+        let left = events.iter().any(|e| matches!(e, Event::TimedOut { .. } | Event::Killed { .. }));
+        all.extend(events);
+        if left {
+            return Some((before + 1, all));
+        }
+    }
+    None
+}
+
+/// Each use takes its cost off the bot's health at once: 100 health and a cost of 40 is 60 after
+/// the first use and 20 after the second.
+#[test]
+fn each_use_takes_its_cost_off_the_bots_health() {
+    let mut sim = Sim::new(hopper(100.0, 40.0), 1);
+    for (uses, health) in [(1, 60.0), (2, 20.0)] {
+        while uses_of(&sim) < uses {
+            sim.step(FRAME, idle());
+        }
+        assert_eq!(sim.targets()[0].health, health, "after use {uses}");
+    }
+    assert_eq!(sim.stats().timeouts, 0);
+}
+
+/// A bot dies on the use that takes it to exactly 0 or below it, and a bot that can't pay for a
+/// single use dies on its first, in every life.
+#[test]
+fn a_bot_dies_of_the_use_that_spends_its_last_health() {
+    // (health, cost, the use it dies on)
+    for (health, cost, dies_on) in [(80.0, 40.0, 2), (100.0, 25.0, 4), (100.0, 40.0, 3), (30.0, 40.0, 1)] {
+        let mut sim = Sim::new(hopper(health, cost), 1);
+        for life in 1..=2 {
+            let (uses, events) = until_it_leaves(&mut sim, 10.0).unwrap_or_else(|| panic!("{health}/{cost}"));
+            assert_eq!(uses, dies_on, "{health} health, cost {cost}, life {life}");
+            assert!(events.iter().any(|e| matches!(e, Event::TimedOut { .. })), "{events:?}");
+            assert_eq!(sim.stats().timeouts, life);
+        }
+    }
+}
+
+/// The death is a target that went away: no kill, no score, no damage, and it doesn't count toward
+/// a kill limit, however many times it happens.
+#[test]
+fn a_bot_that_dies_of_its_cost_gives_no_kill_score_or_damage() {
+    let mut s = hopper(100.0, 40.0);
+    s.timing.kill_limit = 1;
+    let mut sim = Sim::new(s, 1);
+    let mut events = Vec::new();
+    for _ in 0..(10.0 / FRAME) as usize {
+        events.extend(sim.step(FRAME, idle()));
+    }
+    let st = sim.stats();
+    assert!(st.timeouts >= 3, "{st:?}");
+    assert_eq!((st.kills, st.hits, st.shots), (0, 0, 0));
+    assert_eq!((st.damage_done, st.damage_possible), (0.0, 0.0));
+    assert_eq!(sim.score(), 0.0);
+    assert!(events.iter().any(|e| matches!(e, Event::TimedOut { .. })));
+    assert!(!events.iter().any(|e| matches!(e, Event::Killed { .. })));
+    assert_eq!(sim.phase(), Phase::Running, "a kill limit of 1 isn't reached");
+    assert!(sim.telemetry.targets.iter().all(|t| t.outcome == Outcome::TimedOut));
+}
+
+/// The bot comes back after its respawn delay at full health, with its abilities fresh.
+#[test]
+fn a_bot_that_dies_of_its_cost_comes_back_at_full_health_after_its_delay() {
+    let mut sim = Sim::new(hopper(100.0, 40.0), 1);
+    until_it_leaves(&mut sim, 10.0).unwrap();
+    let left_at = sim.elapsed();
+    assert!(sim.targets().is_empty());
+    while sim.elapsed() < left_at + 0.45 {
+        sim.step(FRAME, idle());
+    }
+    assert!(sim.targets().is_empty(), "still away before its 0.5 s are over");
+    while sim.targets().is_empty() {
+        sim.step(FRAME, idle());
+    }
+    assert!((sim.elapsed() - (left_at + 0.5)).abs() < 0.02, "back after its delay: {}", sim.elapsed() - left_at);
+    assert_eq!(sim.targets()[0].health, 100.0);
+    assert_eq!(uses_of(&sim), 0, "it starts over");
+}
+
+/// A shot at a bot its cost has weakened is a kill, and the damage done is the shot's.
+#[test]
+fn a_shot_that_finishes_a_bot_its_cost_weakened_is_a_kill() {
+    let mut s = hopper(80.0, 40.0);
+    s.weapon.damage = 40.0;
+    let mut sim = Sim::new(s, 1);
+    while uses_of(&sim) < 1 {
+        sim.step(FRAME, idle());
+    }
+    assert_eq!(sim.targets()[0].health, 40.0);
+    let at = sim.targets()[0].pos;
+    let events = sim.step(FRAME, shoot(at));
+    assert!(events.iter().any(|e| matches!(e, Event::Killed { .. })), "{events:?}");
+    let st = sim.stats();
+    assert_eq!((st.kills, st.timeouts, st.hits, st.damage_done), (1, 0, 1, 40.0));
+    // 5 for the kill, 1 for the hit and 40 for the damage dealt: the cost's 40 isn't counted.
+    assert_eq!(sim.score(), 46.0);
+}
+
+/// A bot that can't die pays nothing: not when the world's bots are invincible, and not when its own
+/// kind is.
+#[test]
+fn a_bot_that_cant_die_pays_nothing_for_its_ability() {
+    for per_kind in [false, true] {
+        let mut s = hopper(100.0, 40.0);
+        let w = s.world.as_mut().unwrap();
+        if per_kind {
+            let motion = w.motion.take();
+            w.kinds = vec![crate::world::WorldKind { health: 100.0, invincible: true, motion, ..Default::default() }];
+            w.slots = vec![vec![(0, 1.0)]];
+        } else {
+            w.invincible = true;
+        }
+        let mut sim = Sim::new(s, 1);
+        for _ in 0..(5.0 / FRAME) as usize {
+            sim.step(FRAME, idle());
+        }
+        assert!(uses_of(&sim) >= 5, "it kept hopping (per kind {per_kind})");
+        assert_eq!((sim.stats().timeouts, sim.targets()[0].health), (0, 100.0), "per kind {per_kind}");
+    }
+}
+
+/// The cost isn't a hit: it doesn't restart the wait before a bot's health regenerates. A bot shot at
+/// the start has its regen begin 1 s later, and the hop at 0.05 s doesn't push that back.
+#[test]
+fn the_cost_doesnt_restart_the_regen_delay() {
+    let mut s = hopper(100.0, 40.0);
+    s.targets.regen_per_s = 100.0;
+    s.targets.regen_delay_s = 1.0;
+    // Only the first hop: the charge doesn't come back.
+    if let Some(a) = s.world.as_mut().and_then(|w| w.motion.as_mut()).and_then(|m| m.abilities.as_mut()) {
+        a.list[0].charge_s = 100.0;
+    }
+    let mut sim = Sim::new(s, 1);
+    let at = sim.targets()[0].pos;
+    sim.step(FRAME, shoot(at));
+    while sim.elapsed() < 0.5 {
+        sim.step(FRAME, idle());
+    }
+    assert_eq!(uses_of(&sim), 1);
+    assert_eq!(sim.targets()[0].health, 59.0, "100, a hit of 1 and a cost of 40, and no regen yet");
+    while sim.elapsed() < 1.04 {
+        sim.step(FRAME, idle());
+    }
+    // Regen began about 1 s after the shot, not after the hop 0.05 s later (which would give 59).
+    let h = sim.targets()[0].health;
+    assert!(h > 61.0 && h < 66.0, "{h}");
+}

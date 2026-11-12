@@ -14,8 +14,10 @@ A scenario is refused when it uses something the trainer doesn't model, so every
 | K4 Lives, time score and efficiency | 783b0d7 | 111 of 225 |
 | K5 Hitbox shapes | cfb7fd1 | 111 of 225 |
 | K6a Where bots appear and stand | 7736860 | 111 of 225 |
-| K6b The jump key | | 111 of 225 |
-| K15 Ability and helper setups K2 and K3 refuse | | |
+| K6b The jump key | 13f11d4 | 111 of 225 |
+| K15a An ability that costs health | | 113 of 225 |
+| K15b Chasers that take time to arrive | | |
+| K15 The rest: vertical dashes, damage reactions | | |
 | K7 Armed bots that never fire, invincible characters | | |
 | K8 Bots that destroy themselves | | |
 | K9 Heads | | |
@@ -69,7 +71,7 @@ Of the 118 files that don't play after K3, 58 wait on a single package, 30 on tw
 ## How the work is run
 
 - Each package is built by a smaller model from the package text below and a short brief. The result is reviewed before it is committed: the diff is read, the tests are run, the survey is run again over the real files, and the pre-commit hook runs on the whole tree.
-- One commit per package, through the pre-commit hook. Nothing is pushed.
+- One commit per package, through the pre-commit hook. Each commit is pushed to `main`, and the next package waits until the CI run for that push has passed.
 - Packages run one at a time, because nearly all of them change the same three crates (`aimadapt-sce`, `aimadapt-sim`, `aimadapt-engine`).
 - Tests use made-up scenarios only. Fixture files are hand-written `AimAdapt Test - <name>.sce` files in `crates/aimadapt-sce/tests/fixtures/`, with invented names and numbers that reproduce the mechanic. A builder works from the brief and the fixtures, and doesn't open other people's scenario files.
 - Every package follows [AGENTS.md](../../AGENTS.md): the README, the user guide (with a What's new line), BACKLOG, TESTING and SCENARIOS kept in step, and a failing-first test for every bug.
@@ -136,7 +138,7 @@ Done. Knockback was measured in KovaaK's first, on fourteen `AimAdapt - Knock Te
 - A helper hits on a fixed period: the smallest whole number of `AbilityUseTimer` presses (one at the least) that is as long as the longest of `AIReuseTimer`, `AbilityDuration + ChargeTimer` and `AbilityDuration + DelayAfterUse`. A press that lands exactly on that time is used. The helper hits on that schedule whether or not anything is in reach.
 - A long swing (`AbilityDuration` of 1 s) hits a target once when it enters the hurtbox, which is a different rule, so swings over 0.05 s are refused.
 - With `SeeThroughWalls=false` a helper hits only the targets it has a clear line to, middle to middle, past visible solid blocks. Clip blocks never stop a push.
-- A chasing helper (a fast flier whose dodge profile always goes forward) presses against the far face of the clip slab between it and its target, at the point nearest the target.
+- A chasing helper (a fast flier whose dodge profile always goes forward) presses against the far face of the clip slab between it and its target, at the point nearest the target. This was read off one map by eye, and K15b measured it properly: a chaser trails a moving target, and how far depends on its drag and its acceleration.
 
 Refused with a reason: pushes that do damage or vary between a smallest and a largest value, swings over 0.05 s, more than one charge, helpers that don't always use the ability or that see a narrower view, helpers that carry weapons, a target's own melee ability, helpers that are neither pinned nor a fast chaser, a hit period under 0.005 s, and a flying target that doesn't move by itself in a scenario with helpers (whether it hovers or falls when pushed wasn't measured).
 
@@ -270,7 +272,55 @@ Added on 11 November 2026, after the recount that followed K3. It runs after K6,
 - An ability used in reaction to damage (`AIDamageReaction`), with the health limits that go with it (`AIMaxSelfHealth`, `AIMaxTargHealth`), and a movement ability on a bot with `NoDodging`.
 - Helpers that go freely at their target (neither pinned nor a fast chaser behind a wall), a target's own melee ability, and bots of size zero that K3 doesn't count as helpers.
 
-Each one is measured, built and taken off the refusal list by itself, so this package can be split into several commits.
+Each one is measured, built and taken off the refusal list by itself, so this package is split into several commits.
+
+Counted over the 23 files before anything was built, as the files that have an item and the files that would play with that item alone: the vertical dash 14 and none, the health cost 6 and 2, the damage reaction 4 and none, the helpers of the fourth item 3 and 3, bots of size zero 3 and none, a target's melee ability 2 and none, and one file each for `AIMaxSelfHealth`, `AIMaxTargHealth`, an ability on a bot with `NoDodging` and a movement ability with a hurtbox. The health cost (K15a) and the helpers (K15b) are the two items that unlock files alone, 5 between them, so they come first. The other 2 of the 7 files need the vertical dash, and neither it nor the damage reaction has been measured yet.
+
+The health cost (K15a), measured on 11 November 2026 with two test maps in KovaaK's 3.9.13 (`AimAdapt - Cost Test A` and `B`). Four bots hopped with a movement ability whose `HealthRestore` is negative. They had no health regen and a respawn delay of 1.5 s, a kill was worth 1000 points and damage 1. Read from screenshots about 1.6 s apart, so the times are rough.
+
+- Each use takes the cost off the bot's health at once. After the first use the health bars stood at 60%, 50% and 75%, for costs of 40 of 100, 40 of 80 and 25 of 100.
+- The bot dies when a use takes it to exactly 0 (80 health with a cost of 40 on the second use, 100 with 25 on the fourth) or would take it below 0 (100 with 40 on the third use, with 20 left). A bot with 30 health and a cost of 40 dies on its first use in every life.
+- That death is no kill. The kill count, the damage and the score stayed empty through nine such deaths.
+- The bot comes back after its respawn delay at full health and starts over.
+
+Six local files have such an ability and none of them plays. In all six the cost is two fifths to a half of the bot's health. None has health regen, invincible bots, bot lives or a cooldown shared between abilities, so none of those was measured together with a cost.
+
+What gets built in K15a:
+
+- `aimadapt-sim`: an ability can have a health cost, taken off the bot's health at each use. A bot whose health reaches 0 that way leaves like a bot that drains away: it counts as a timeout, gives no kill, no score and no damage, and its slot fills again after the respawn delay. The cost is left out of a stored scenario when it is 0, so nothing that plays today changes.
+- `aimadapt-sce`: a negative `HealthRestore` on a movement ability becomes the cost. A positive one (healing) stays refused. So does a cost on a bot that can't die, which wasn't measured.
+- Tests: the cost at each use, the death at exactly 0 and below it, no credit for that death, the respawn at full health, a shot that finishes a bot the cost has weakened, the importer's three cases, a made-up fixture, and the fingerprints of fixtures that already play.
+- Expected: 2 files start playing, which makes 113 of 225, and no playing file changes.
+
+K15a is done. After it, 113 of the 225 files play. The 2 expected files started, none stopped, and the 111 that played before keep their fingerprints, their notes and their stored settings, so no best starts again. The other 4 files with a cost are still refused for something else.
+
+Three things were settled in review:
+
+- A cost on an ability that doesn't move the bot refuses the file. The importer keeps a bot's abilities only when one of them moves it, so such a cost would have been dropped without a word. Neither of the 2 files is refused by this.
+- The two combinations nobody measured play with a note on the scenario's page: a cost on a bot whose health regenerates or drains, and a cost in a scenario with bot lives. Neither of the 2 files has one.
+- Both notes had a run of spaces in the middle, where the text's line break in the source wasn't escaped. A test now checks that every note is one line with no run of spaces, and it fails on the old text.
+
+The new sim tests were run against the code with the cost taken out, where 7 of them and the fixture test fail. The 2 files were played in the sim without a window: left alone, their bots leave by themselves and the run scores 0 with no kills, and with shots that always hit they give kills and a score. No real file was played in the engine and looked at. There a bot that leaves by itself goes without a sound or a flash, and the results screen counts it under Timeouts.
+
+The helpers (K15b). Reading the three files showed that their helpers aren't free. They are chasers behind a clip slab, like K3's, and K3 refuses them only because their top speed is under the 10000 units/s it takes a chaser to have (theirs is under a third of that). K3 plays a chaser as if it always sat at the point of the slab nearest its target. That holds only for a chaser so fast that it never falls behind, so the chase was measured.
+
+Measured on 11 November 2026 in KovaaK's 3.9.13 at 120 frames a second (`AimAdapt - Knock Test S…` and `L…`). A visible chaser flew behind a slab 860 units from the lane of a target that ran back and forth at 600 units/s, 2.5 s each way. Six films of the game window gave both places in every frame, to about 6 units. The films differ in the chaser's top speed (300, 1000 and 3000 units/s), its acceleration (50000 and 100000 units/s²) and its `DragCoefficient` (4, 13 and 26).
+
+- Each frame the chaser's velocity first loses the share `DragCoefficient` times the frame time. Then it gains `Acceleration` times the frame time along the line from the chaser to its target. Then its length is cut to `MaxSpeed`. Last, the slab takes away the part that points into it.
+- So a chaser trails a moving target. Once it keeps pace, the line from it to the target leans away from the slab's normal by an angle whose sine is the drag times the target's speed over the acceleration. With an acceleration of 50000 the chaser was about 138 units behind at a drag of 13, 260 to 285 at a drag of 26 (the law gives 270 to 283) and 40 to 60 at a drag of 4 (50 to 56).
+- One law fits all six films with the drag at 0.9 to 1.0 times `DragCoefficient`, to within 5 to 13 units.
+- No other setting enters it. The films also differ in `Friction`, `AerialFriction`, `BrakingFrictionFactor`, `BrakingDeceleration`, the aim profile and `SeeThroughWalls`, and the same law fits them.
+- The chaser aims a little late. The films fit best with the aim 0.008 to 0.033 s behind the target, which adds 5 to 20 units at 600 units/s.
+- When the top speed binds, the result depends on the frame rate: the speed a frame adds into the slab counts toward the cut, and the slab removes it only afterwards. It bound in two films (top speeds of 300 and 1000). It doesn't bind in any local file, where every chaser is far faster than its target.
+
+Three of the files that play have chasers, and K3 plays them as instant. Their chasers follow the same law, and at their targets' top speeds the lean reaches about 10 degrees. They are imported again with the flight, so bests set on them here start again.
+
+What gets built in K15b:
+
+- `aimadapt-sim`: a chasing pusher can have a flight (an acceleration, a top speed and a drag) and a start delay. With a flight it starts at its spawn point and flies by the law above, in steps of 1/120 s at most, held to the plane through its spawn point. Its reach lies along the line to its target, and the level push points from where it is to the target. A chasing pusher without a flight stays K3's instant one, for worlds written by hand.
+- `aimadapt-sce`: a flier on the player's team whose dodge profile always goes forward is a chaser when its top speed, its acceleration and its drag are all above 0. The speed threshold goes. A chaser without a drag is refused, because that wasn't measured. A helper character's `BlockAbilityOnStartDuration` becomes the start delay (the three refused files set one, and every playing file has 0).
+- Tests: a regression test for the instant chaser (a chaser trails a target that moves at a steady speed by the lag the law gives), the start delay, a top speed that binds, the refusals, the chasing fixture with made-up flight settings, and the fingerprints of fixtures that already play.
+- Expected: the 3 files start playing, which makes 116 of 225, and the 3 playing files with chasers change.
 
 ## Wave 2: beyond the backlog's plan
 
@@ -344,7 +394,9 @@ These rows are filled in as packages land. A row leaves the table when a test ma
 | Which targets a helper's hit reaches | Every target its hurtbox overlaps (and that it can see, when it needs sight) | No: it may hit only the target its AI has picked |
 | Several helpers with the same name | Each takes the next spawn point its character is allowed on, in file order | No |
 | A pinned helper's spawn delay | None: it hits from the start of the run | No |
-| A chasing helper's position | On the outer face of the clip slab, at the point nearest its target, with no travel time | Partly: one test map, by eye |
+| A chasing helper's position (until K15b lands) | On the outer face of the clip slab, at the point nearest its target, with no travel time | Wrong for a moving target: six films show it trails (see K15) |
+| An ability's health cost on a bot that regenerates | The cost isn't a hit, so it doesn't restart the wait before the regen | No: no installed file has both |
+| A bot that dies of its ability's cost, on a scenario with lives | It counts as a timeout and uses up no life, like a bot that drains away | No: no installed file has both |
 | A moving cuboid bot's box | Stays lined up with the map's axes as the bot moves and turns | No: measured on still bots |
 | `InvincibleBots` on a character | That character's bots can't die, whatever the scenario's own flag says | No |
 | `StandStillUntilHurt` on a bot that is pushed | The pushes move it only once it has been hurt | No |

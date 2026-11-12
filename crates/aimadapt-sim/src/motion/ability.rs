@@ -7,7 +7,7 @@
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
 
-use super::{BotState, Motion, between};
+use super::{BotState, Motion, between, is_zero};
 use crate::rng::Rng;
 
 /// A bot's movement abilities, and the settings for using them.
@@ -78,6 +78,10 @@ pub struct Ability {
     /// The player must be within half of this of the way the bot faces
     /// (`AIMaxTargFOV`).
     pub max_angle_deg: f32,
+    /// Health the bot loses each time it uses this ability (a negative `HealthRestore`
+    /// in KovaaK's). A use that takes its last health makes it leave as a timeout.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub health_cost: f32,
 }
 
 impl Default for Ability {
@@ -104,6 +108,7 @@ impl Default for Ability {
             min_distance: 0.0,
             max_distance: 0.0,
             max_angle_deg: 360.0,
+            health_cost: 0.0,
         }
     }
 }
@@ -134,6 +139,7 @@ impl Abilities {
             check(fine(a.end_factor, 0.0, 10.0), "an end factor");
             check(fine(a.min_distance, 0.0, 10_000.0) && fine(a.max_distance, 0.0, 10_000.0), "a distance");
             check(fine(a.max_angle_deg, 0.0, 360.0), "a view angle");
+            check(fine(a.health_cost, 0.0, 1.0e6), "a health cost");
         }
         p
     }
@@ -207,6 +213,8 @@ pub(super) struct AbilityState {
     /// Whether the current window is one in which it presses.
     willing: bool,
     uses: u32,
+    /// Health its uses have cost that the sim hasn't taken off yet.
+    owed: f32,
 }
 
 impl Default for AbilityState {
@@ -221,6 +229,7 @@ impl Default for AbilityState {
             window_end: 0.0,
             willing: false,
             uses: 0,
+            owed: 0.0,
         }
     }
 }
@@ -323,6 +332,12 @@ impl BotState {
         self.ab.uses
     }
 
+    /// The health its abilities have cost since this was last asked; asking sets it
+    /// back to 0. The sim takes it off the bot's health (see `Ability::health_cost`).
+    pub fn take_owed_health(&mut self) -> f32 {
+        std::mem::take(&mut self.ab.owed)
+    }
+
     /// Whether an ability is going on right now.
     pub fn using_ability(&self) -> bool {
         self.ab.active.is_some()
@@ -396,6 +411,7 @@ impl BotState {
         let a = &ab.list[i];
         self.ab.slots[i].have -= 1;
         self.ab.uses += 1;
+        self.ab.owed += a.health_cost;
         let dir = direction(m, a, view, pos);
         if a.duration_s > 0.0 {
             // Held: the horizontal speed every substep. Without `no_gravity` the climb

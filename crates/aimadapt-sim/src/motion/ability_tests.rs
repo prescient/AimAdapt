@@ -357,6 +357,9 @@ fn values_out_of_range_are_problems() {
         Ability { charge_s: f32::INFINITY, ..Ability::default() },
         Ability { max_angle_deg: 400.0, ..Ability::default() },
         Ability { end_factor: -1.0, ..Ability::default() },
+        Ability { health_cost: -1.0, ..Ability::default() },
+        Ability { health_cost: f32::NAN, ..Ability::default() },
+        Ability { health_cost: f32::INFINITY, ..Ability::default() },
     ] {
         assert!(!abilities(vec![bad.clone()]).problems().is_empty(), "{bad:?}");
     }
@@ -555,4 +558,46 @@ fn a_line_of_sight_is_enough_to_be_in_combat() {
     let out_only = Ability { in_combat: false, ..instant() };
     assert_eq!(uses(&with(out_only.clone()), Vec3::X, true), 0);
     assert!(uses(&with(out_only), Vec3::X, false) > 0);
+}
+
+/// Plan K15a: an ability with no cost stores no `health_cost` key (a stored scenario, and its
+/// fingerprint, stay as they were), and one with a cost keeps it through a save.
+#[test]
+fn a_health_cost_is_stored_only_when_there_is_one() {
+    let text = toml::to_string(&with(Ability { speed: 3.0, ..Ability::default() })).unwrap();
+    assert!(!text.contains("health_cost"), "{text}");
+    let costly = with(Ability { speed: 3.0, health_cost: 30.0, ..Ability::default() });
+    let text = toml::to_string(&costly).unwrap();
+    assert!(text.contains("health_cost = 30.0"), "{text}");
+    assert_eq!(toml::from_str::<Motion>(&text).unwrap(), costly);
+}
+
+/// Plan K15a: each use adds its cost to what the bot owes, and asking for it clears it.
+#[test]
+fn each_use_adds_its_cost_to_what_the_bot_owes() {
+    let hop = Ability { charge_s: 0.3, duration_s: 0.0, speed: 2.0, health_cost: 25.0, ..Ability::default() };
+    let free = Ability { charge_s: 0.3, speed: 2.0, ..Ability::default() };
+    for (a, per_use) in [(hop, 25.0), (free, 0.0)] {
+        let m = with(a);
+        let mut seen = Vec::new();
+        let mut last = 0;
+        let mut owed = 0.0;
+        // Ask after every frame, as the sim does: what is owed is the cost of the uses of that frame.
+        let mut rng = Rng::new(7);
+        let walls = arena();
+        let mut s = BotState::new(&m, &mut rng, START, Vec3::X);
+        let mut p = START;
+        for i in 0..360 {
+            s.step_seen(&m, &mut rng, &walls, &mut p, 0.5, 0.0, i as f32 * DT, DT, true);
+            let now = s.take_owed_health();
+            owed += now;
+            if s.ability_uses() != last {
+                seen.push(now);
+                last = s.ability_uses();
+            }
+            assert_eq!(s.take_owed_health(), 0.0, "asking clears it");
+        }
+        assert!(seen.len() >= 2 && seen.iter().all(|c| *c == per_use), "{seen:?}");
+        assert_eq!(owed, per_use * s.ability_uses() as f32);
+    }
 }

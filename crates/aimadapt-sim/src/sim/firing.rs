@@ -115,11 +115,7 @@ impl Sim {
         let now = self.elapsed();
         // Invincible bots (KovaaK's `InvincibleBots`, on the scenario or on the bot's
         // character) take the hit but lose no health.
-        let invincible = self
-            .current
-            .world
-            .as_ref()
-            .is_some_and(|w| w.invincible || t_kind(w, self.targets[i].kind).is_some_and(|k| k.invincible));
+        let invincible = is_invincible(self.current.world.as_ref(), self.targets[i].kind);
         let t = &mut self.targets[i];
         let dealt = if invincible { amount } else { amount.min(t.health) };
         if !invincible {
@@ -183,6 +179,12 @@ impl Sim {
             .max_by(|a, b| aim.dot(a.1.pos.normalize()).total_cmp(&aim.dot(b.1.pos.normalize())))
             .map(|(i, _)| i)
     }
+}
+
+/// Whether a bot of `kind` takes hits without losing health: the world's
+/// `invincible`, or its kind's. The same bots pay no health for an ability.
+pub(super) fn is_invincible(world: Option<&World>, kind: Option<u32>) -> bool {
+    world.is_some_and(|w| w.invincible || t_kind(w, kind).is_some_and(|k| k.invincible))
 }
 
 /// The kind of bot a target is, if the world has several.

@@ -1,5 +1,6 @@
 //! How targets move each step.
 
+use super::firing::is_invincible;
 use super::*;
 
 impl Sim {
@@ -21,17 +22,7 @@ impl Sim {
             };
             if t.lifetime > 0.0 || drained {
                 if drained || t.age >= t.lifetime {
-                    let t = self.targets.swap_remove(i);
-                    self.stats.timeouts += 1;
-                    self.telemetry.targets.push(t.record(now, Outcome::TimedOut));
-                    events.push(Event::TimedOut { id: t.id });
-                    self.pending.push(now + t.respawn_s);
-                    if let Some((value, _, _)) = t.track.value {
-                        timed_out.push(value);
-                    }
-                    if t.track.value.is_none() {
-                        timed_out.push(f32::NAN);
-                    }
+                    self.leave_as_timeout(i, now, events, &mut timed_out);
                     continue;
                 }
                 let k = t.age / t.lifetime;
@@ -50,11 +41,23 @@ impl Sim {
                     !blocked(&self.walls, to_bot, t.pos.length())
                 };
                 b.step_seen(m, &mut self.rng, &self.bot_walls, &mut t.pos, t.radius, half, now, dt, seen);
+                // An ability that costs health takes it at the use. That isn't a hit: it
+                // restarts no regen delay and counts as no damage. Bots that can't die
+                // pay nothing, as with shots.
+                let owed = b.take_owed_health();
+                let spent = owed > 0.0 && !is_invincible(self.current.world.as_ref(), t.kind);
+                if spent {
+                    t.health -= owed;
+                }
                 (t.yaw, t.pitch) = angles(t.pos);
                 t.distance = t.pos.length();
                 // Angular speed, for tracking telemetry.
                 let dyaw = (t.yaw - yaw + 540.0).rem_euclid(360.0) - 180.0;
                 t.rate = [dyaw / dt.max(1e-6), (t.pitch - pitch) / dt.max(1e-6)];
+                if spent && t.health <= 1e-4 {
+                    self.leave_as_timeout(i, now, events, &mut timed_out);
+                    continue;
+                }
                 i += 1;
                 continue;
             }
@@ -84,6 +87,21 @@ impl Sim {
                 }
             }
         }
+    }
+}
+
+impl Sim {
+    /// A target goes away by itself: its lifetime ran out, it drained away or an
+    /// ability spent its last health. It counts as a timeout, with no kill, score or
+    /// damage, and its slot fills again after its respawn delay. `timed_out` gets the
+    /// value of its track (NaN for none), for `move_targets` to settle afterwards.
+    fn leave_as_timeout(&mut self, i: usize, now: f32, events: &mut Vec<Event>, timed_out: &mut Vec<f32>) {
+        let t = self.targets.swap_remove(i);
+        self.stats.timeouts += 1;
+        self.telemetry.targets.push(t.record(now, Outcome::TimedOut));
+        events.push(Event::TimedOut { id: t.id });
+        self.pending.push(now + t.respawn_s);
+        timed_out.push(t.track.value.map_or(f32::NAN, |(value, _, _)| value));
     }
 }
 

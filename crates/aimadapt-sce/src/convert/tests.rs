@@ -1335,3 +1335,101 @@ fn the_crouch_note_is_for_a_walker_that_would_change_when_it_crouches() {
     let pack = "HasJetpack=true\nJetpackThrust=1500.0";
     assert!(notes(0.0, pack, HOP).iter().all(|n| !n.contains("jetpack")), "{:?}", notes(0.0, pack, HOP));
 }
+
+// Plan K15a: a negative `HealthRestore` on a movement ability is a health cost.
+
+/// A hop that costs health.
+fn hop(restore: &str) -> String {
+    dasher(&format!("UpVelocity=400.0\nHealthRestore={restore}"))
+}
+
+fn cost_of(text: &str) -> f32 {
+    let w = imported(text).scenario.world.unwrap();
+    w.motion.unwrap().abilities.unwrap().list[0].health_cost
+}
+
+/// A negative `HealthRestore` imports as the cost, in health points like `MaxHealth`. Healing and
+/// no restore are no cost, and healing is still refused with the setting named.
+#[test]
+fn a_negative_health_restore_is_the_abilitys_cost() {
+    assert_eq!(cost_of(&hop("-30.0")), 30.0);
+    assert_eq!(cost_of(&hop("-12.5")), 12.5);
+    assert_eq!(cost_of(&hop("0.0")), 0.0);
+    assert_eq!(cost_of(&dasher("UpVelocity=400.0")), 0.0);
+    assert_eq!(reasons(&hop("20.0")), vec!["a movement ability the trainer can't play yet (Zip: HealthRestore=20.0)"]);
+}
+
+/// A cost on a bot that can't die was never measured, so the file is refused: the scenario's
+/// `InvincibleBots` or the character's own.
+#[test]
+fn a_cost_on_a_bot_that_cant_die_is_refused() {
+    let why = "a movement ability the trainer can't play yet (Zip: HealthRestore=-30.0 on a bot that can't die)";
+    let scenario = hop("-30.0").replace("ScorePerKill=1.0", "ScorePerKill=1.0\nInvincibleBots=true");
+    assert_eq!(reasons(&scenario), vec![why]);
+    let character = hop("-30.0").replace(
+        "MaxHealth=1.0\nMaxSpeed=0.0\nMainBBType",
+        "InvincibleBots=true\nMaxHealth=1.0\nMaxSpeed=0.0\nMainBBType",
+    );
+    assert_eq!(reasons(&character), vec![why]);
+    // Invincible bots with no cost still play, and a cost on a bot that can die does.
+    let free = hop("0.0").replace("ScorePerKill=1.0", "ScorePerKill=1.0\nInvincibleBots=true");
+    assert!(reasons(&free).is_empty());
+    assert!(reasons(&hop("-30.0")).is_empty());
+}
+
+/// A cost on an ability that doesn't move the bot is refused: such an ability isn't played, so the
+/// cost would be silently left out.
+#[test]
+fn a_cost_on_an_ability_that_moves_nothing_is_refused() {
+    let text = dasher("AbilityDuration=0.2\nHealthRestore=-30.0");
+    assert_eq!(
+        reasons(&text),
+        vec![
+            "a movement ability the trainer can't play yet (Zip: HealthRestore=-30.0 on an ability that doesn't move the bot)"
+        ]
+    );
+}
+
+/// The two combinations with a cost that nobody checked in KovaaK's each get a note, and only they do.
+#[test]
+fn a_cost_with_regen_or_with_bot_lives_gets_a_note() {
+    let regen_note = "a bot that pays health for an ability and also regenerates or drains health";
+    let lives_note = "a bot that pays health for an ability, with bot lives";
+    let notes = |text: &str| {
+        let n = imported(text).notes;
+        (n.iter().any(|n| n.contains(regen_note)), n.iter().any(|n| n.contains(lives_note)))
+    };
+    let regen = |text: String| {
+        text.replace(
+            "MaxHealth=1.0\nMaxSpeed=0.0\nMainBBType",
+            "MaxHealth=1.0\nHealthRegenPerSec=4.0\nMaxSpeed=0.0\nMainBBType",
+        )
+    };
+    let lives = |text: String| {
+        text.replace("AddedBots=Dot.bot;Dot.bot;Dot.bot", "AddedBots=Dot.bot")
+            .replace("BotTeams=2;2;2", "BotTeams=2\nBotMaxLives=3")
+    };
+    assert_eq!(notes(&hop("-30.0")), (false, false));
+    assert_eq!(notes(&regen(hop("-30.0"))), (true, false));
+    assert_eq!(notes(&lives(hop("-30.0"))), (false, true));
+    assert_eq!(notes(&lives(regen(hop("-30.0")))), (true, true));
+    // The same settings with no cost give neither.
+    assert_eq!(notes(&regen(hop("0.0"))), (false, false));
+    assert_eq!(notes(&lives(hop("0.0"))), (false, false));
+    // A drain counts as regen too.
+    let drain = hop("-30.0").replace(
+        "MaxHealth=1.0\nMaxSpeed=0.0\nMainBBType",
+        "MaxHealth=1.0\nHealthRegenPerSec=-4.0\nMaxSpeed=0.0\nMainBBType",
+    );
+    assert_eq!(notes(&drain), (true, false));
+    // Each note is one line of plain text. Both of these once had a run of spaces in the middle,
+    // where the string's line break in the source wasn't escaped.
+    let all = imported(&lives(regen(hop("-30.0")))).notes;
+    assert!(all.iter().all(|n| !n.contains("  ") && !n.contains('\n')), "{all:?}");
+}
+
+/// A scenario with a cost plays with no score for a timeout, as every imported scenario does.
+#[test]
+fn an_imported_timeout_scores_nothing() {
+    assert_eq!(imported(&hop("-30.0")).scenario.scoring.per_timeout, 0.0);
+}

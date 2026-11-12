@@ -23,7 +23,7 @@ fn read(name: &str) -> Sce {
 #[test]
 fn finds_every_fixture() {
     let files = find_files(&[fixtures()]);
-    assert_eq!(files.len(), 10);
+    assert_eq!(files.len(), 11);
     assert!(files.iter().all(|f| f.extension().unwrap() == "sce"));
 }
 
@@ -396,6 +396,7 @@ fn git_keeps_the_fixtures_bytes() {
         "Box Row",
         "Stair Court",
         "Jump Court",
+        "Costly Hop",
     ] {
         assert!(!crlf(name), "{name} was given CRLF line ends");
     }
@@ -501,6 +502,51 @@ fn kinds_start_at_their_own_height_and_bots_fall_and_step_onto_the_floor() {
         let t = of(&sim, kind);
         assert!((t.pos.y - (floor + radius)).abs() < 0.03, "kind {kind}: {}", t.pos.y);
     }
+}
+
+/// Plan K15a on one made-up file: a ball with 90 health hops straight up and pays 30 health for each
+/// hop. It imports with the cost, and with no shots fired its balls leave by themselves, on their third
+/// hop: timeouts, no kills and no score. A shot of 30 at a ball after its first hop kills it for good.
+#[test]
+fn a_ball_that_pays_health_to_hop_leaves_by_itself() {
+    let i = import(&path("Costly Hop")).unwrap();
+    let s = i.scenario;
+    assert!(s.problems().is_empty());
+    assert!(i.notes.iter().all(|n| !n.contains("pays health")), "{:?}", i.notes);
+    let w = s.world.as_ref().unwrap();
+    assert_eq!(s.targets.health, 90.0);
+    assert!((s.targets.respawn_delay_s - 1.0).abs() < 1e-6);
+    let ab = w.motion.as_ref().unwrap().abilities.as_ref().unwrap();
+    assert_eq!((ab.list.len(), ab.list[0].health_cost, ab.list[0].up_speed, ab.list[0].speed), (1, 30.0, 4.0, 0.0));
+    // Imported scenarios give nothing for a timeout.
+    assert_eq!(s.scoring.per_timeout, 0.0);
+
+    let mut sim = started(s.clone());
+    let dt = 1.0 / 120.0;
+    for _ in 0..(15.0 / dt) as usize {
+        sim.step(dt, idle());
+    }
+    let stats = sim.stats();
+    assert!(stats.timeouts >= 3, "balls went away by themselves: {stats:?}");
+    assert_eq!((stats.kills, stats.hits, stats.damage_done), (0, 0, 0.0));
+    assert_eq!(sim.score(), 0.0);
+
+    // Shot once its first hop has taken 30 of its health, a ball dies of a shot of 60: a kill with
+    // its damage counted, where a ball that leaves by itself gives none.
+    let mut strong = s;
+    strong.weapon.damage = 60.0;
+    let mut sim = started(strong);
+    for _ in 0..(6.0 / dt) as usize {
+        let weak = sim.targets().first().filter(|t| t.health <= 60.0).map(|t| t.pos);
+        let input =
+            Input { aim: weak.unwrap_or(Vec3::Y).normalize(), fire_pressed: weak.is_some(), fire_held: weak.is_some() };
+        sim.step(dt, input);
+        if sim.stats().kills > 0 {
+            break;
+        }
+    }
+    assert_eq!((sim.stats().kills, sim.stats().damage_done), (1, 60.0), "{:?}", sim.stats());
+    assert!(sim.score() > 0.0);
 }
 
 /// Plan K6b on one made-up file: a hopping ball with an air jump, a pogo and buffered jumps, a ball

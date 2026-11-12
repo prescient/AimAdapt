@@ -6,7 +6,7 @@ use aimadapt_sim::motion::{Abilities, Ability};
 
 use super::{UU_PER_M, push_once};
 use crate::inventory::Gap;
-use crate::scenario::{ABILITY_KINDS, BotChoice};
+use crate::scenario::{ABILITY_KINDS, BotChoice, BotSlot};
 use crate::settings::Section;
 
 pub(super) fn is_kind(a: &Section, kind: usize) -> bool {
@@ -23,7 +23,8 @@ pub(super) fn movement<'a, 'b>(c: &'a BotChoice<'b>) -> impl Iterator<Item = &'b
 type Unplayed = fn(&Section) -> bool;
 
 const UNPLAYED: &[(&str, Unplayed)] = &[
-    ("HealthRestore", |a| a.f32_or("HealthRestore", 0.0) != 0.0),
+    // Healing. A negative value is a cost, which plays (see [`costs_health`]).
+    ("HealthRestore", |a| a.f32_or("HealthRestore", 0.0) > 0.0),
     ("Hurtbox", |a| a.is("Hurtbox")),
     ("AIMinSelfHealth", |a| a.f32_or("AIMinSelfHealth", 0.0) > 0.0),
     ("AIMaxSelfHealth", |a| a.f32_or("AIMaxSelfHealth", 100.0) < 100.0),
@@ -38,10 +39,32 @@ const UNPLAYED: &[(&str, Unplayed)] = &[
     ("AIDamageReaction", |a| a.is("AIDamageReaction")),
 ];
 
+/// Whether a movement ability costs the bot health each time it uses it (a negative
+/// `HealthRestore`).
+fn costs_health(a: &Section) -> bool {
+    a.f32_or("HealthRestore", 0.0) < 0.0
+}
+
 /// Reasons a target's abilities can't be played yet. A target's melee ability (a
 /// knockback) isn't played: only helper bots push, see [`super::helpers`]. Weapon
-/// abilities are reported with the file's other gaps.
-pub(super) fn reasons(c: &BotChoice, reasons: &mut Vec<Gap>) {
+/// abilities are reported with the file's other gaps. `ch` is the bot's character and
+/// `top_invincible` whether the scenario's `InvincibleBots` is on.
+pub(super) fn reasons(c: &BotChoice, ch: &Section, top_invincible: bool, reasons: &mut Vec<Gap>) {
+    for a in movement(c).filter(|a| costs_health(a)) {
+        // A bot that can't die was not measured paying for an ability. Nor was a cost on an
+        // ability that doesn't move the bot: the bot only gets abilities for those that do.
+        let why = if top_invincible || ch.is("InvincibleBots") {
+            Some("on a bot that can't die")
+        } else if !launches(a) {
+            Some("on an ability that doesn't move the bot")
+        } else {
+            None
+        };
+        if let Some(why) = why {
+            let detail = format!("{}: HealthRestore={} {why}", a.name(), a.str("HealthRestore").trim());
+            push_once(reasons, Gap::planned("a movement ability the trainer can't play yet", detail));
+        }
+    }
     // Whether a bot that is told not to dodge still dashes wasn't measured in KovaaK's.
     if c.bot.is("NoDodging") {
         for a in movement(c).filter(|a| launches(a)) {
@@ -72,6 +95,33 @@ fn launches(a: &Section) -> bool {
 /// Whether a bot has a movement ability that changes its speed or sends it up.
 pub(super) fn moves(c: &BotChoice) -> bool {
     movement(c).any(launches)
+}
+
+/// Notes for combinations of a health cost that nobody checked in KovaaK's. `slots` are
+/// the target slots and `kill_limit` is the run's limit from bot lives, 0 for none.
+pub(super) fn cost_notes(slots: &[&BotSlot], kill_limit: u32, notes: &mut Vec<String>) {
+    let mut note = |text: &str| {
+        if !notes.iter().any(|n| n == text) {
+            notes.push(text.into());
+        }
+    };
+    for c in slots.iter().flat_map(|s| &s.choices) {
+        if !movement(c).any(costs_health) {
+            continue;
+        }
+        if c.character.is_some_and(|ch| ch.f32_or("HealthRegenPerSec", 0.0) != 0.0) {
+            note(
+                "a bot that pays health for an ability and also regenerates or drains health: the cost is played \
+                 as not restarting the wait before that; that hasn't been checked against KovaaK's",
+            );
+        }
+        if kill_limit > 0 {
+            note(
+                "a bot that pays health for an ability, with bot lives: a bot that dies of the cost is played as a \
+                 timeout that uses up no life; that hasn't been checked against KovaaK's",
+            );
+        }
+    }
 }
 
 /// The longest time and distance the trainer allows. More than an hour or 10 km is
@@ -130,5 +180,7 @@ fn ability(a: &Section) -> Ability {
         // No limit unless the file sets one.
         max_distance: far("AIMaxTargDist"),
         max_angle_deg: a.f32_or("AIMaxTargFOV", 360.0).clamp(0.0, 360.0),
+        // In health points, like `MaxHealth`: a cost of 40 takes 40 off a bot of 100.
+        health_cost: (-a.f32_or("HealthRestore", 0.0)).max(0.0),
     }
 }
