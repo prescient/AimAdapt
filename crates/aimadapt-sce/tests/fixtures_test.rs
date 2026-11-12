@@ -23,7 +23,7 @@ fn read(name: &str) -> Sce {
 #[test]
 fn finds_every_fixture() {
     let files = find_files(&[fixtures()]);
-    assert_eq!(files.len(), 9);
+    assert_eq!(files.len(), 10);
     assert!(files.iter().all(|f| f.extension().unwrap() == "sce"));
 }
 
@@ -387,7 +387,16 @@ fn git_keeps_the_fixtures_bytes() {
     for name in ["Drifting Pair", "Old Room"] {
         assert!(crlf(name), "{name} lost its CRLF line ends");
     }
-    for name in ["Dash Lane", "Still Wall", "Floor Keeper", "Ledge Kicker", "Last Lives", "Box Row", "Stair Court"] {
+    for name in [
+        "Dash Lane",
+        "Still Wall",
+        "Floor Keeper",
+        "Ledge Kicker",
+        "Last Lives",
+        "Box Row",
+        "Stair Court",
+        "Jump Court",
+    ] {
         assert!(!crlf(name), "{name} was given CRLF line ends");
     }
 }
@@ -491,5 +500,49 @@ fn kinds_start_at_their_own_height_and_bots_fall_and_step_onto_the_floor() {
     for (kind, radius) in [(0, 0.2), (1, 0.6), (2, 0.85)] {
         let t = of(&sim, kind);
         assert!((t.pos.y - (floor + radius)).abs() < 0.03, "kind {kind}: {}", t.pos.y);
+    }
+}
+
+/// Plan K6b on one made-up file: a hopping ball with an air jump, a pogo and buffered jumps, a ball
+/// with a jetpack (a delay, a tank and a refill that works only on the ground) and a flier flown by
+/// its jump and crouch keys that rises on both. Each import comes through with its settings, and in
+/// play the hopper and the jetpack bot leave the floor and come back to it while the flier stays up.
+#[test]
+fn bots_jump_use_jetpacks_and_fly_by_keys() {
+    let i = import(&path("Jump Court")).unwrap();
+    let s = i.scenario;
+    assert!(s.problems().is_empty());
+    assert_eq!(i.notes.len(), 1, "{:?}", i.notes);
+    let w = s.world.as_ref().unwrap();
+    assert_eq!(w.kinds.len(), 3);
+    let m = |k: usize| w.kinds[k].motion.as_ref().expect("every kind moves");
+    let hopper = m(0);
+    assert!(hopper.pogo && hopper.buffered_jumps);
+    assert_eq!((hopper.jump_speed, hopper.air_jumps, hopper.air_jump_speed), ([3.0, 3.0], 1, 3.5));
+    assert_eq!((hopper.step_up, hopper.dodges[0].jump_chance, hopper.dodges[0].jump_s), (0.75, 0.6, [0.6, 1.2]));
+    let j = m(1).jetpack.as_ref().expect("a jetpack");
+    assert_eq!(
+        (j.thrust, j.max_up, j.delay_s, j.fuel_s, j.refill_per_s, j.refill_in_air),
+        (15.0, 2.5, 0.4, 2.5, 0.5, false)
+    );
+    let glider = m(2);
+    assert!(glider.flight.as_ref().unwrap().up_on_both && glider.jetpack.is_none());
+    let d = &glider.dodges[0];
+    assert_eq!((d.fly_by_keys, d.jump_chance, d.crouch_chance, d.crouch_s), (true, 0.5, 0.5, [0.4, 0.8]));
+
+    let mut sim = Sim::new(s, 9);
+    while sim.phase() == Phase::Countdown {
+        sim.step(0.05, idle());
+    }
+    let mut range = [(f32::MAX, f32::MIN); 3];
+    for _ in 0..(20.0 * 120.0) as usize {
+        sim.step(1.0 / 120.0, idle());
+        for t in sim.targets() {
+            let r = &mut range[t.kind().unwrap() as usize];
+            *r = (r.0.min(t.pos.y), r.1.max(t.pos.y));
+        }
+    }
+    for (kind, (lo, hi)) in range.into_iter().enumerate() {
+        assert!(hi - lo > 0.4, "kind {kind} moved up and down: {lo}..{hi}");
     }
 }

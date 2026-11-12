@@ -406,6 +406,11 @@ pub struct WorldMesh {
 }
 
 impl World {
+    /// How each kind of bot moves, for the kinds that do.
+    pub fn motions(&self) -> impl Iterator<Item = &Motion> {
+        self.motion.iter().chain(self.kinds.iter().filter_map(|k| k.motion.as_ref()))
+    }
+
     /// Problems with the values, in plain words.
     pub fn problems(&self) -> Vec<String> {
         let mut p = Vec::new();

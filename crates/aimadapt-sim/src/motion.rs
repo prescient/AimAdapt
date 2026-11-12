@@ -18,8 +18,12 @@ use crate::rng::Rng;
 mod ability;
 #[cfg(test)]
 mod ability_tests;
+mod jump;
+#[cfg(test)]
+mod jump_tests;
 use ability::AbilityState;
 pub use ability::{Abilities, Ability};
+use jump::Keys;
 
 /// Unreal's default terminal velocity, m/s.
 const TERMINAL: f32 = 40.0;
@@ -40,6 +44,18 @@ const VOID: f32 = 100.0;
 /// Whether a value is unset, so it stays out of the file (and the fingerprint).
 fn is_zero(v: &f32) -> bool {
     *v == 0.0
+}
+
+fn is_zero_pair(v: &[f32; 2]) -> bool {
+    *v == [0.0, 0.0]
+}
+
+fn is_false(v: &bool) -> bool {
+    !*v
+}
+
+fn is_true(v: &bool) -> bool {
+    *v
 }
 
 /// A bot's movement: its character's physics and its dodge profiles.
@@ -69,6 +85,13 @@ pub struct Motion {
     pub jump_speed: [f32; 2],
     pub air_jumps: u32,
     pub air_jump_speed: f32,
+    /// A bot that lands with the jump key held jumps again (KovaaK's `CanPogoJump`).
+    #[serde(skip_serializing_if = "is_false")]
+    pub pogo: bool,
+    /// A press made in the air with no air jump left is remembered, and jumps at the
+    /// landing if the key is still held (`AllowBufferedJumps`).
+    #[serde(skip_serializing_if = "is_false")]
+    pub buffered_jumps: bool,
     /// Fastest fall, m/s; 0 for Unreal's 40.
     pub terminal_speed: f32,
     /// Speed multipliers while strafing and while backing off.
@@ -114,6 +137,8 @@ impl Default for Motion {
             jump_speed: [4.2, 4.2],
             air_jumps: 0,
             air_jump_speed: 0.0,
+            pogo: false,
+            buffered_jumps: false,
             terminal_speed: 0.0,
             strafe_mult: 1.0,
             back_mult: 1.0,
@@ -138,16 +163,48 @@ pub struct Flight {
     pub down_speed: f32,
     pub up_accel: f32,
     pub down_accel: f32,
+    /// With both the jump and the crouch key down it rises instead of staying put
+    /// (`IsFlyUpOnJumpAndCrouch`). Only for a dodge profile that flies by keys.
+    #[serde(skip_serializing_if = "is_false")]
+    pub up_on_both: bool,
 }
 
 /// A jetpack: upward acceleration (m/s²) while thrusting, up to a climbing speed
-/// (m/s), with this much air control.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+/// (m/s), with this much air control. It thrusts while the jump key is held, once its
+/// activation delay has passed and while the tank has fuel.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Jetpack {
     pub thrust: f32,
     pub max_up: f32,
     pub air_control: f32,
+    /// Seconds between a press on the ground and the thrust; a press in the air thrusts
+    /// at once. 0 for no delay.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub delay_s: f32,
+    /// The tank in seconds of thrust; 0 or less for an endless one.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub fuel_s: f32,
+    /// Seconds of fuel gained per second while it isn't thrusting.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub refill_per_s: f32,
+    /// Whether the tank refills in the air. When not, only on the ground with the key up.
+    #[serde(skip_serializing_if = "is_true")]
+    pub refill_in_air: bool,
+}
+
+impl Default for Jetpack {
+    fn default() -> Self {
+        Jetpack {
+            thrust: 0.0,
+            max_up: 0.0,
+            air_control: 0.0,
+            delay_s: 0.0,
+            fuel_s: 0.0,
+            refill_per_s: 0.0,
+            refill_in_air: true,
+        }
+    }
 }
 
 /// Which way a strafe or an advance starts.
@@ -191,6 +248,15 @@ pub struct Dodge {
     /// Fliers switch between up and down this often, with a pause between.
     pub up_down_s: [f32; 2],
     pub up_down_pause_s: [f32; 2],
+    /// A flier flown by keys instead: the jump key flies it up and a crouch key down
+    /// (`AlterateJumpCrouchInput` off). Then `up_down_s` does nothing.
+    #[serde(skip_serializing_if = "is_false")]
+    pub fly_by_keys: bool,
+    /// Every so often (`crouch_s`) the crouch key goes down with this chance.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub crouch_chance: f32,
+    #[serde(skip_serializing_if = "is_zero_pair")]
+    pub crouch_s: [f32; 2],
     /// Changes strafe direction when hit.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hit_turn: Option<HitTurn>,
@@ -220,6 +286,9 @@ impl Default for Dodge {
             jump_s: [0.5, 1.0],
             up_down_s: [0.5, 1.0],
             up_down_pause_s: [0.0, 0.0],
+            fly_by_keys: false,
+            crouch_chance: 0.0,
+            crouch_s: [0.0, 0.0],
             hit_turn: None,
             blocked: None,
         }
@@ -274,8 +343,8 @@ pub struct BotState {
     blocked_for: f32,
     blocked_limit: f32,
     hurt: bool,
-    /// Seconds of jetpack thrust left.
-    thrust_left: f32,
+    /// The jump key and what hangs on it: a jetpack's tank, a flier's crouch key.
+    keys: Keys,
     /// The spawn point's right, for bots that don't face the player.
     spawn_right: Vec3,
     /// Where it appeared, to go back to if it falls out of the map.
@@ -304,6 +373,12 @@ fn start(rng: &mut Rng, s: Start) -> f32 {
 }
 
 impl Motion {
+    /// Whether the bot flies or its dodge profiles press the jump key: the bots whose play
+    /// follows the jump key's rules (see `jump`).
+    pub fn works_keys(&self) -> bool {
+        self.flight.is_some() || self.dodges.iter().any(|d| d.jump_chance > 0.0)
+    }
+
     /// Where a bot that appears at `pos` starts if a floor is within its step-up height
     /// below its feet: standing on it. A capsule (a ball when `half` is 0) of `radius` has
     /// its feet `half + radius` below its middle. None when there's no floor that near, or
@@ -343,7 +418,7 @@ impl BotState {
             blocked_for: 0.0,
             blocked_limit: 0.0,
             hurt: false,
-            thrust_left: 0.0,
+            keys: Keys::new(m),
             spawn_right: spawn_right.normalize_or(Vec3::X),
             home,
             ab: AbilityState::default(),
@@ -351,6 +426,9 @@ impl BotState {
         s.dodge = if m.random_dodges { pick(rng, &m.dodges) } else { 0 };
         s.next_dodge = between(rng, m.change_dodge_s);
         s.begin_dodge(m, rng);
+        if let Some(d) = m.dodges.get(s.dodge) {
+            s.decide_at_birth(m, d, rng);
+        }
         // Last, so a bot without abilities draws the same numbers as before.
         if let Some(ab) = &m.abilities {
             s.ab = AbilityState::new(ab, rng);
@@ -367,6 +445,7 @@ impl BotState {
         self.next_fore = self.advance_time(d, rng, self.fore);
         self.next_jump = between(rng, d.jump_s);
         self.next_up = between(rng, d.up_down_s);
+        self.begin_crouch(m, d, rng);
         if let Some(b) = &d.blocked {
             self.blocked_limit = between(rng, b.reaction_s);
         }
@@ -465,46 +544,7 @@ impl BotState {
         if !d.advance {
             self.fore = wants;
         }
-        if m.flight.is_some() {
-            self.next_up -= dt;
-            if self.next_up <= 0.0 {
-                let pause = between(rng, d.up_down_pause_s);
-                if self.up != 0.0 && pause > 0.0 {
-                    self.up_resume = -self.up;
-                    self.up = 0.0;
-                    self.next_up = pause;
-                } else {
-                    self.up = if self.up == 0.0 { self.up_resume } else { -self.up };
-                    self.next_up = between(rng, d.up_down_s).max(0.01);
-                }
-            }
-        } else if d.jump_chance > 0.0 {
-            self.next_jump -= dt;
-            if self.next_jump <= 0.0 {
-                self.next_jump = between(rng, d.jump_s);
-                if rng.next_f32() < d.jump_chance {
-                    self.jump(m, rng);
-                    // A jetpack thrusts until the next time it decides.
-                    if m.jetpack.is_some() {
-                        self.thrust_left = self.next_jump.max(0.05);
-                    }
-                }
-            }
-        }
-    }
-
-    fn jump(&mut self, m: &Motion, rng: &mut Rng) {
-        if m.gravity <= 0.0 {
-            return; // with nothing to bring it down, a jump would never end
-        }
-        if self.grounded {
-            self.vel.y = between(rng, m.jump_speed);
-            self.grounded = false;
-            self.air_jumps_left = m.air_jumps;
-        } else if self.air_jumps_left > 0 && m.air_jump_speed > 0.0 {
-            self.vel.y = m.air_jump_speed;
-            self.air_jumps_left -= 1;
-        }
+        self.drive(m, &d, rng, dt);
     }
 
     /// Moves the bot for `dt` seconds: a capsule of `radius` with a middle segment of
@@ -610,7 +650,7 @@ impl BotState {
                 }
             }
             if floor && !self.grounded {
-                self.air_jumps_left = m.air_jumps;
+                self.land(m, rng);
             }
             self.grounded = floor && self.vel.y <= 0.01;
             if self.grounded {
@@ -651,7 +691,7 @@ impl BotState {
         let flying = m.flight.is_some();
         let on_ground = self.grounded || flying;
         let mut v = Vec3::new(self.vel.x, 0.0, self.vel.z);
-        let thrusting = self.thrust_left > 0.0 && m.jetpack.is_some();
+        let thrusting = self.jetpack_thrusts(m, h);
         let air_control = match &m.jetpack {
             Some(j) if thrusting => j.air_control,
             _ => m.air_control,
@@ -674,27 +714,9 @@ impl BotState {
         self.vel.x = v.x;
         self.vel.z = v.z;
         if let Some(f) = &m.flight {
-            let (goal, a) = if self.up > 0.0 {
-                (f.up_speed, f.up_accel)
-            } else if self.up < 0.0 {
-                (-f.down_speed, f.down_accel)
-            } else {
-                (0.0, f.up_accel.max(f.down_accel))
-            };
-            let step = a.max(0.0) * h;
-            self.vel.y += (goal - self.vel.y).clamp(-step, step);
+            self.fly_vertically(m, f, h);
         } else {
-            self.vel.y -= m.gravity * h;
-            if let Some(j) = &m.jetpack
-                && self.thrust_left > 0.0
-            {
-                self.thrust_left -= h;
-                if self.vel.y < j.max_up {
-                    self.vel.y = (self.vel.y + j.thrust * h).min(j.max_up.max(self.vel.y));
-                }
-            }
-            let terminal = if m.terminal_speed > 0.0 { m.terminal_speed } else { TERMINAL };
-            self.vel.y = self.vel.y.max(-terminal);
+            self.fall_or_thrust(m, thrusting, h);
         }
     }
 }
@@ -922,7 +944,7 @@ mod tests {
         let m = Motion {
             gravity: 1.0,
             jump_speed: [0.0, 0.0],
-            jetpack: Some(Jetpack { thrust: 2.0, max_up: 0.5, air_control: 1.0 }),
+            jetpack: Some(Jetpack { thrust: 2.0, max_up: 0.5, air_control: 1.0, ..Jetpack::default() }),
             dodges: vec![hop],
             ..strafer()
         };
@@ -955,7 +977,13 @@ mod tests {
     fn fliers_go_up_and_down_on_their_own_timer() {
         let bob = Dodge { strafe: false, up_down_s: [0.5, 0.5], ..Dodge::default() };
         let m = Motion {
-            flight: Some(Flight { up_speed: 2.0, down_speed: 2.0, up_accel: 100.0, down_accel: 100.0 }),
+            flight: Some(Flight {
+                up_speed: 2.0,
+                down_speed: 2.0,
+                up_accel: 100.0,
+                down_accel: 100.0,
+                ..Flight::default()
+            }),
             dodges: vec![bob],
             ..strafer()
         };

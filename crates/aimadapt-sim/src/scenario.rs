@@ -31,6 +31,16 @@ fn off_in_fingerprint<T: PartialEq + Default>(v: &T) -> bool {
     FINGERPRINTING.with(std::cell::Cell::get) && *v == T::default()
 }
 
+/// FNV-1a: stable across Rust versions, unlike `DefaultHasher`.
+fn fnv(text: &str) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in text.bytes() {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0100_0000_01b3);
+    }
+    format!("{h:016x}")
+}
+
 impl Range {
     pub const fn fixed(v: f32) -> Self {
         Range(v, v)
@@ -494,8 +504,25 @@ impl Scenario {
     }
 
     /// A short fingerprint of everything that affects play, so harder or easier
-    /// variants of a scenario with the same name are told apart in history.
+    /// variants of a scenario with the same name are told apart in history: its
+    /// settings and, for a scenario that uses a rule the sim has changed since, a mark
+    /// for the change (see `rule_marks`).
     pub fn fingerprint(&self) -> String {
+        fnv(&(self.settings_text() + self.rule_marks()))
+    }
+
+    /// Marks for the rules the sim has changed since scenarios were first stored. A rule
+    /// change leaves a scenario's settings as they were, so without a mark its scores from
+    /// before would count as the same version. Only a scenario that uses the rule gets the
+    /// mark, and the rest keep their fingerprints.
+    fn rule_marks(&self) -> &'static str {
+        // Plan K6b: jumps, jetpacks and fliers are played by a jump key.
+        let keys = self.world.as_ref().is_some_and(|w| w.motions().any(crate::motion::Motion::works_keys));
+        if keys { "\n# rules: jump key" } else { "" }
+    }
+
+    /// The settings that go into the fingerprint, as text.
+    fn settings_text(&self) -> String {
         let mut s = self.clone();
         s.description.clear();
         s.author.clear();
@@ -503,13 +530,7 @@ impl Scenario {
         FINGERPRINTING.with(|f| f.set(true));
         let text = s.to_toml();
         FINGERPRINTING.with(|f| f.set(false));
-        // FNV-1a: stable across Rust versions, unlike `DefaultHasher`.
-        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-        for b in text.bytes() {
-            h ^= u64::from(b);
-            h = h.wrapping_mul(0x0100_0000_01b3);
-        }
-        format!("{h:016x}")
+        text
     }
 
     /// Everything wrong with the values, in plain words. Empty when valid.
@@ -752,6 +773,36 @@ mod tests {
         c.targets.radius = 0.25;
         assert_eq!(a.fingerprint(), b.fingerprint());
         assert_ne!(a.fingerprint(), c.fingerprint());
+    }
+
+    /// Bug (plan K6b): the fingerprint covered only a scenario's stored settings. When the
+    /// sim began to play jumps, jetpacks and fliers by a jump key, a scenario with such
+    /// bots played differently but was stored the same, so scores from before the change
+    /// counted as the same version. A scenario whose bots fly or press the jump key now
+    /// has a mark for the rule in its fingerprint, and every other scenario keeps the
+    /// fingerprint its settings give.
+    #[test]
+    fn a_rule_change_restarts_only_the_scenarios_that_use_the_rule() {
+        use crate::motion::{Dodge, Flight, Motion};
+        use crate::world::{World, WorldKind};
+        let with = |world: World| Scenario { world: Some(world), ..Scenario::default() };
+        let of_settings = |s: &Scenario| fnv(&s.settings_text());
+        let jumper = Motion { dodges: vec![Dodge { jump_chance: 0.5, ..Dodge::default() }], ..Motion::default() };
+        let flier = Motion { flight: Some(Flight::default()), ..Motion::default() };
+        let walker = Motion { max_speed: 3.0, dodges: vec![Dodge::default()], ..Motion::default() };
+        for m in [jumper.clone(), flier] {
+            let s = with(World { motion: Some(m), ..World::default() });
+            assert_ne!(s.fingerprint(), of_settings(&s));
+        }
+        // A second kind that jumps counts too.
+        let second = WorldKind { motion: Some(jumper), ..WorldKind::default() };
+        let s = with(World { motion: Some(walker.clone()), kinds: vec![second], ..World::default() });
+        assert_ne!(s.fingerprint(), of_settings(&s));
+        // Bots that walk or stand still, and scenarios without a world, are untouched.
+        for s in [with(World { motion: Some(walker), ..World::default() }), with(World::default()), Scenario::default()]
+        {
+            assert_eq!(s.fingerprint(), of_settings(&s));
+        }
     }
 
     /// Bug: easy and hard were only compared when both were written, so a file that

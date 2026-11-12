@@ -13,8 +13,8 @@ A scenario is refused when it uses something the trainer doesn't model, so every
 | K3 Helper bots and knockback | 32d5397 | 107 of 225, all 34 Novice benchmarks |
 | K4 Lives, time score and efficiency | 783b0d7 | 111 of 225 |
 | K5 Hitbox shapes | cfb7fd1 | 111 of 225 |
-| K6a Where bots appear and stand | | 111 of 225 |
-| K6b The jump key | | |
+| K6a Where bots appear and stand | 7736860 | 111 of 225 |
+| K6b The jump key | | 111 of 225 |
 | K15 Ability and helper setups K2 and K3 refuse | | |
 | K7 Armed bots that never fire, invincible characters | | |
 | K8 Bots that destroy themselves | | |
@@ -250,6 +250,17 @@ What gets built in K6b, the jump key:
 - `aimadapt-sce`: reads `CanPogoJump`, `AllowBufferedJumps`, `JetpackActivationDelay`, `JetpackFullFuelTime`, `JetpackFuelIncPerSec`, `JetpackFuelRegensInAir`, `AlterateJumpCrouchInput`, `IsFlyUpOnJumpAndCrouch`, `CrouchInAirFrequency`, `MinCrouchTime` and `MaxCrouchTime`. A bot counts as moving when it can jump (either form of the jump speed, and gravity) or has a jetpack it uses. The note about the jetpack's guessed hold time goes, and the crouch note is kept only where a crouch would change a walking bot.
 - Tests: a regression test for each of the three bugs (a jump at every decision to hold, a thrust of one window, flyers with alternate off bobbing), one test per rule above, a made-up fixture, and the fingerprints of fixtures that already play.
 
+K6b is done. After it, 111 of the 225 files still play, and no file started or stopped playing. 24 files lost a note: the one about a jetpack's guessed hold time is gone (19 files), and no playing file keeps the crouch note (6 had it), because no walking bot in them changes when it crouches.
+
+63 playing files changed, so bests set on them here start again. 61 have a bot that jumps, uses a jetpack or flies. The other 2 have a bot with a jump chance that can't jump (no jump speed, or no gravity): it plays as before, but the decision it makes as it appears draws a random number, so a seed lays the run out differently. The remaining 48 keep their fingerprints.
+
+Two things were settled in review, each with a regression test:
+
+- The importer leaves out settings that can't act. Pogo and buffered jumps are stored only for a bot that jumps off the ground, and a flier's key settings only for a flier. Stored wherever the file had them, they changed 20 files whose play is the same.
+- A scenario's fingerprint covered only its stored settings. A change to the sim's rules leaves those as they were, so 3 files whose bots play differently now would have kept their bests. The fingerprint has a mark for such a change, given only to scenarios that use the rule: a scenario whose bots fly, or whose dodge profiles have a jump chance, carries the jump key's mark. A later rule change adds its own mark in the same place (`Scenario::rule_marks`).
+
+All of this is checked by the tests and the made-up Jump Court fixture, and the three bug tests were also run against the code before K6b, where they fail. No real file was played in the engine and looked at.
+
 ### K15. Ability and helper setups K2 and K3 refuse
 
 Added on 11 November 2026, after the recount that followed K3. It runs after K6, because 23 of the files that don't play need it and 7 of them need nothing else.
@@ -349,13 +360,17 @@ These rows are filled in as packages land. A row leaves the table when a test ma
 | Overkill under damage efficiency | Damage done stops at the bot's health left, and the shot's full damage counts as possible | No |
 | The beam's damage possible | Its damage for every tick it fires, on target or off, as the run file writes it | No |
 | Damage efficiency with no shots fired | No cut, as with the accuracy multiplier | No |
-| A character with no `Gravity` key | A moving bot gets gravity 1.0, and a bot that never moves doesn't fall | No: every installed character profile has the key |
+| A character with no `Gravity` key | A moving bot gets gravity 1.0 (so a flyer without the key falls when no key is down), and a bot that never moves doesn't fall | No: every installed character profile has the key |
 | A bot without gravity that appears within its `StepUpHeight` of a floor | Left where it appears | No: measured on bots with gravity |
 | A walking bot that meets a step within its `StepUpHeight` | Not built: only the moment a bot appears is | No |
 | Kinds that differ in `BlockedSpawnRadius` | Every kind uses the first kind's | No: 1 playing file |
 | `JetpackFuelRegensInAir` off | The tank refills only while the bot is on the ground with the jump key up | Partly: one bot with the key held on the floor never refilled |
 | The wait after a jetpack's tank runs dry | 0.25 s from the moment it runs dry, whatever the key does in that time | Partly: about 0.26 s on film with the key held throughout |
 | `JetpackFullFuelTime` of 0 or less | An endless tank | No: no installed file has it |
+| A jetpack with no `JetpackActivationDelay` key | No delay: it thrusts at once (only a delay written as 0 never thrusts) | No: every playing jetpack character has the key |
+| A jetpack with no fuel keys | An endless tank when `JetpackFullFuelTime` is missing, no refill when `JetpackFuelIncPerSec` is, and a refill in the air when `JetpackFuelRegensInAir` is | No: every playing jetpack character has all three |
+| A jetpack bot with air jumps, pressing in the air | The press makes an air jump and starts the thrust | No: no playing file has both |
+| A bot with a jump chance that appears standing | It decides as it appears, and jumps at once if the key is down | Partly: measured on bots that came down from their spawn points |
 | A jetpack bot's press in the air, with `AllowBufferedJumps` | Buffered like any other bot's: a jump at the landing if the key is still held | No |
 | The press that made an air jump, with `AllowBufferedJumps` | Not buffered for the landing | No: the film fits both readings equally well |
 | `JumpVelocityMin` below `JumpVelocityMax` | Each jump draws a speed evenly between the two | Partly: a 200 to 800 bot jumped to a different height each time, and the spread wasn't fitted |

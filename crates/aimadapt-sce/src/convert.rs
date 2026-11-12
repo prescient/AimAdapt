@@ -174,10 +174,7 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
                     .into(),
             );
         }
-        if characters.iter().any(|ch| ch.is("HasJetpack")) {
-            notes.push("bots' jetpacks thrust whenever they'd jump; how long they hold it is a guess".into());
-        }
-        if characters.iter().any(|ch| ch.is("CanCrouch")) && crouches(&targets) {
+        if crouches(&targets) {
             notes.push("bots don't crouch yet".into());
         }
     } else if all_hidden(&world, radius) {
@@ -549,35 +546,68 @@ fn player_eye(player: Option<&Section>, start: Vec3, meshes: &[WorldMesh]) -> Ve
 
 /// Whether a bot moves, unless `NoDodging` keeps it still: it runs (`MaxSpeed`),
 /// flies up and down (`IsFlyer` with a flight speed: its dodge profile's jumps and
-/// crouches move it), jumps (a jump speed and a dodge profile that jumps), or has a
-/// movement ability that dashes or launches it.
+/// crouches move it), jumps (a jump speed, gravity to bring it down and a dodge profile
+/// that jumps), uses a jetpack, or has a movement ability that dashes or launches it.
 fn moves(c: &BotChoice, ch: &Section) -> bool {
     if c.bot.is("NoDodging") {
         return false;
     }
-    let flies =
-        ch.is("IsFlyer") && (ch.f32_or("FlightVelocityUp", 0.0) > 0.0 || ch.f32_or("FlightVelocityDown", 0.0) > 0.0);
-    let jumps =
-        ch.f32_or("JumpVelocityMax", 0.0) > 0.0 && c.dodges.iter().any(|(d, _)| d.f32_or("JumpFrequency", 0.0) > 0.0);
-    ch.f32_or("MaxSpeed", 0.0) > 0.0 || flies || jumps || abilities::moves(c)
+    let flies = flies(ch);
+    let wants_jump = c.dodges.iter().any(|(d, _)| d.f32_or("JumpFrequency", 0.0) > 0.0);
+    let jumps = wants_jump && ch.f32_or("Gravity", 1.0) > 0.0 && jump_range(ch).is_some_and(|r| r[1] > 0.0);
+    let jetpack = wants_jump && has_jetpack(ch);
+    ch.f32_or("MaxSpeed", 0.0) > 0.0 || flies || jumps || jetpack || abilities::moves(c)
 }
 
-/// Whether any bot's dodge profile crouches.
+/// A character's jump speed range in units a second, `[lowest, highest]`: from
+/// `JumpVelocityMin` and `JumpVelocityMax` when it has them, else `JumpVelocity` twice.
+/// None when the file sets neither form. An installed profile has one form, and a
+/// range is always two equal numbers; with a real range each jump picks between the two.
+fn jump_range(ch: &Section) -> Option<[f32; 2]> {
+    let (lo, hi) = (ch.f32("JumpVelocityMin"), ch.f32("JumpVelocityMax"));
+    match (lo, hi) {
+        (_, Some(hi)) if hi > 0.0 => Some([lo.unwrap_or(0.0).clamp(0.0, hi), hi]),
+        _ => ch.f32("JumpVelocity").map(|v| [v.max(0.0); 2]),
+    }
+}
+
+/// Whether the character flies: `IsFlyer` with a flight speed up or down.
+fn flies(ch: &Section) -> bool {
+    ch.is("IsFlyer") && (ch.f32_or("FlightVelocityUp", 0.0) > 0.0 || ch.f32_or("FlightVelocityDown", 0.0) > 0.0)
+}
+
+/// Whether the character has a jetpack that ever thrusts. KovaaK's never thrusts with an
+/// activation delay of exactly 0 (the file's value: a missing key leaves the jetpack on,
+/// thrusting at once).
+fn has_jetpack(ch: &Section) -> bool {
+    ch.is("HasJetpack") && ch.f32("JetpackActivationDelay") != Some(0.0)
+}
+
+/// Whether a bot that walks and whose dodge profile crouches would change when it does:
+/// its height or its speed. Such a bot plays standing, so it gets a note.
 fn crouches(slots: &[&BotSlot]) -> bool {
-    slots
-        .iter()
-        .flat_map(|s| &s.choices)
-        .flat_map(|c| &c.dodges)
-        .any(|(d, _)| d.f32_or("CrouchOnGroundFrequency", 0.0) > 0.0 || d.f32_or("CrouchInAirFrequency", 0.0) > 0.0)
+    slots.iter().flat_map(|s| &s.choices).any(|c| {
+        let Some(ch) = c.character else { return false };
+        let crouching = c.dodges.iter().any(|(d, _)| {
+            d.f32_or("CrouchOnGroundFrequency", 0.0) > 0.0 || d.f32_or("CrouchInAirFrequency", 0.0) > 0.0
+        });
+        let changes = ch.f32("CrouchHeightModifier").is_some_and(|h| h != 1.0)
+            || ch.f32("MaxCrouchSpeed").is_some_and(|s| s < ch.f32_or("MaxSpeed", 0.0));
+        !ch.is("IsFlyer") && ch.is("CanCrouch") && crouching && changes
+    })
 }
 
 /// A moving bot's character physics and dodge profiles, in meters and seconds.
 fn bot_motion(c: &BotChoice, ch: &Section) -> Motion {
     let cm = |k: &str, default: f32| ch.f32_or(k, default).max(0.0) / UU_PER_M;
-    let (lo, hi) = (ch.f32_or("JumpVelocityMin", 0.0), ch.f32_or("JumpVelocityMax", 0.0));
-    let jump = if hi > 0.0 { [lo.clamp(0.0, hi), hi] } else { [ch.f32_or("JumpVelocity", 420.0).max(0.0); 2] };
-    let flies =
-        ch.is("IsFlyer") && (ch.f32_or("FlightVelocityUp", 0.0) > 0.0 || ch.f32_or("FlightVelocityDown", 0.0) > 0.0);
+    let jump = jump_range(ch).unwrap_or([420.0; 2]);
+    let flies = flies(ch);
+    // The settings for a landing act only on a bot that jumps off the ground. Left out
+    // for the others, they don't change a scenario they can't touch.
+    let hops = !flies
+        && jump[1] > 0.0
+        && ch.f32_or("Gravity", 1.0) > 0.0
+        && c.dodges.iter().any(|(d, _)| d.f32_or("JumpFrequency", 0.0) > 0.0);
     // A terminal speed of a few centimeters a second isn't a real limit.
     let terminal = ch.f32_or("TerminalVelocity", 0.0);
     let total: f32 = c.dodges.iter().map(|(_, w)| w.max(0.0)).sum();
@@ -595,25 +625,33 @@ fn bot_motion(c: &BotChoice, ch: &Section) -> Motion {
         jump_speed: jump.map(|v| v / UU_PER_M),
         air_jumps: ch.f32_or("AirJumpCount", 0.0).clamp(0.0, 100.0) as u32,
         air_jump_speed: cm("AirJumpVelocity", 0.0),
+        pogo: hops && ch.is("CanPogoJump"),
+        buffered_jumps: hops && ch.is("AllowBufferedJumps"),
         terminal_speed: if terminal >= 10.0 { terminal / UU_PER_M } else { 0.0 },
         strafe_mult: ch.f32_or("StrafeSpeedMult", 1.0).max(0.0),
         back_mult: ch.f32_or("BackSpeedMult", 1.0).max(0.0),
-        jetpack: ch.is("HasJetpack").then(|| Jetpack {
+        jetpack: has_jetpack(ch).then(|| Jetpack {
             thrust: cm("JetpackThrust", 6000.0),
             max_up: cm("JetpackMaxZVelocity", 400.0),
             air_control: ch.f32_or("JetpackAirControlWithThrust", 0.25).clamp(0.0, 1.0),
+            delay_s: ch.f32_or("JetpackActivationDelay", 0.0).max(0.0),
+            // A tank of 0 or none is endless.
+            fuel_s: ch.f32_or("JetpackFullFuelTime", 0.0).max(0.0),
+            refill_per_s: ch.f32_or("JetpackFuelIncPerSec", 0.0).max(0.0),
+            refill_in_air: ch.bool("JetpackFuelRegensInAir").unwrap_or(true),
         }),
         flight: flies.then(|| Flight {
             up_speed: cm("FlightVelocityUp", 0.0),
             down_speed: cm("FlightVelocityDown", 0.0),
             up_accel: cm("FlightAccelUp", 800.0),
             down_accel: cm("FlightAccelDown", 800.0),
+            up_on_both: ch.is("IsFlyUpOnJumpAndCrouch"),
         }),
         bounce_off_walls: ch.is("BounceOffWalls"),
         bump_bots: !ch.is("DisableCharacterCollision"),
         still_until_hurt: c.bot.is("StandStillUntilHurt"),
         faces_player: !c.bot.is("NoAiming"),
-        dodges: c.dodges.iter().map(|(d, w)| dodge(d, if total > 0.0 { *w } else { 1.0 })).collect(),
+        dodges: c.dodges.iter().map(|(d, w)| dodge(d, ch, if total > 0.0 { *w } else { 1.0 })).collect(),
         change_dodge_s: [
             c.bot.f32_or("DodgeProfileMinChangeTime", 0.0).max(0.0),
             c.bot.f32_or("DodgeProfileMaxChangeTime", 0.0).max(0.0),
@@ -639,8 +677,10 @@ fn still_motion(c: &BotChoice, ch: &Section) -> Motion {
     }
 }
 
-/// One dodge profile: when the bot strafes, advances, jumps and turns.
-fn dodge(d: &Section, weight: f32) -> Dodge {
+/// One dodge profile: when the bot strafes, advances, jumps, crouches and turns. Only a
+/// flier (see `ch`, its character) is flown by keys, and its crouch needs a character
+/// that can crouch; a walker's profile leaves both out.
+fn dodge(d: &Section, ch: &Section, weight: f32) -> Dodge {
     let pair = |a: &str, b: &str, da: f32, db: f32| [d.f32_or(a, da).max(0.0), d.f32_or(b, db).max(0.0)];
     let start = |key: &str, minus: &str| {
         let v = d.str(key);
@@ -653,6 +693,10 @@ fn dodge(d: &Section, weight: f32) -> Dodge {
         }
     };
     let blocked = d.f32_or("BlockedMovementPercent", 0.0).clamp(0.0, 1.0);
+    // A missing key flies up and down on the toggle times, as every flier did before.
+    let fly_by_keys = flies(ch) && d.bool("AlterateJumpCrouchInput") == Some(false);
+    let crouch_chance =
+        if fly_by_keys && ch.is("CanCrouch") { d.f32_or("CrouchInAirFrequency", 0.0).clamp(0.0, 1.0) } else { 0.0 };
     Dodge {
         weight: weight.max(0.0),
         strafe: d.bool("ToggleLeftRight").unwrap_or(true),
@@ -672,6 +716,9 @@ fn dodge(d: &Section, weight: f32) -> Dodge {
         jump_s: pair("MinJumpTime", "MaxJumpTime", 0.3, 0.6),
         up_down_s: pair("ToggleUpDownMinTime", "ToggleUpDownMaxTime", 0.2, 0.5),
         up_down_pause_s: pair("UpDownSwapPauseMinTime", "UpDownSwapPauseMaxTime", 0.0, 0.0),
+        fly_by_keys,
+        crouch_chance,
+        crouch_s: if crouch_chance > 0.0 { pair("MinCrouchTime", "MaxCrouchTime", 0.3, 0.6) } else { [0.0, 0.0] },
         hit_turn: d.is("DamageReactionChangesDirection").then(|| HitTurn {
             chance: 1.0 - d.f32_or("DamageReactionChanceToIgnore", 0.0).clamp(0.0, 1.0),
             delay_s: pair("DamageReactionMinimumDelay", "DamageReactionMaximumDelay", 0.125, 0.25),

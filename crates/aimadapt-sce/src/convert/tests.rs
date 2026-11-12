@@ -231,13 +231,14 @@ fn a_bots_gravity_is_800_units_a_second_squared() {
             .replace("MainBBType=Spheroid", &format!("MainBBType=Spheroid\n{setting}JumpVelocityMax=256.0"))
             .replace("[Map Data]", "[Dodge Profile]\nName=Hop\nJumpFrequency=1.0\n[Map Data]");
         let world = convert(&Sce::parse(&text), "box.sce", "0").unwrap().scenario.world.unwrap();
-        world.motion.expect("a jumper moves").gravity
+        world.motion.map(|m| m.gravity)
     };
-    assert!((gravity("Gravity=1.0\n") - 8.0).abs() < 1e-4);
-    assert!((gravity("Gravity=0.3\n") - 2.4).abs() < 1e-4);
+    assert!((gravity("Gravity=1.0\n").unwrap() - 8.0).abs() < 1e-4);
+    assert!((gravity("Gravity=0.3\n").unwrap() - 2.4).abs() < 1e-4);
     // A character without the setting has a gravity of 1.
-    assert!((gravity("") - 8.0).abs() < 1e-4);
-    assert_eq!(gravity("Gravity=0.0\n"), 0.0);
+    assert!((gravity("").unwrap() - 8.0).abs() < 1e-4);
+    // With none a jump would never end, so a bot whose only movement is jumping doesn't move.
+    assert_eq!(gravity("Gravity=0.0\n"), None);
 }
 
 /// Bots of several kinds: each keeps its own size, health, color and movement,
@@ -1177,4 +1178,160 @@ fn step_up_height_is_read_for_walkers_with_gravity() {
     assert_eq!(still_bot("Gravity=1.0\nStepUpHeight=75.0\n").unwrap().step_up, 0.75);
     assert_eq!(still_bot("Gravity=1.0\nStepUpHeight=-30.0\n").unwrap().step_up, 0.0);
     assert_eq!(still_bot("Gravity=1.0\n").unwrap().step_up, 0.0, "no key, no step");
+}
+
+/// Made up for the jump key's tests: the bots' character, with `speed` as its `MaxSpeed`
+/// and these other settings, has one dodge profile with these settings.
+fn dotted(speed: f32, character: &str, dodge: &str) -> String {
+    VOLUME_SCE
+        .replace("CharacterProfile=Dot Ball", "CharacterProfile=Dot Ball\nDodgeProfileNames=Dodge")
+        .replace("MaxSpeed=0.0\nMainBBType", &format!("MaxSpeed={speed}\n{character}\nMainBBType"))
+        .replace("[Map Data]", &format!("[Dodge Profile]\nName=Dodge\n{dodge}\n[Map Data]"))
+}
+
+fn imported_motion(text: &str) -> Option<Motion> {
+    convert(&Sce::parse(text), "box.sce", "0").unwrap().scenario.world.unwrap().motion
+}
+
+/// Whether the file's bots move by themselves, which is what the note about dodge
+/// profiles says.
+fn moves_by_itself(text: &str) -> bool {
+    let notes = convert(&Sce::parse(text), "box.sce", "0").unwrap().notes;
+    notes.iter().any(|n| n.starts_with("bots move by their dodge profiles"))
+}
+
+const HOP: &str = "JumpFrequency=0.5\nMinJumpTime=0.4\nMaxJumpTime=0.9";
+
+#[test]
+fn the_jump_settings_come_through() {
+    let m =
+        imported_motion(&dotted(0.0, "JumpVelocity=300.0\nCanPogoJump=true\nAllowBufferedJumps=true", HOP)).unwrap();
+    assert!(m.pogo && m.buffered_jumps);
+    assert_eq!(m.jump_speed, [3.0, 3.0]);
+    let m = imported_motion(&dotted(0.0, "JumpVelocity=300.0", HOP)).unwrap();
+    assert!(!m.pogo && !m.buffered_jumps, "off unless the file says so");
+    // A real range keeps both ends: each jump picks between them.
+    let m = imported_motion(&dotted(0.0, "JumpVelocityMin=200.0\nJumpVelocityMax=800.0", HOP)).unwrap();
+    assert_eq!(m.jump_speed, [2.0, 8.0]);
+}
+
+/// A bot jumps when its character has a jump speed (either form), gravity to bring it
+/// down and a dodge profile that jumps; a jetpack the bot uses counts too.
+#[test]
+fn a_bot_that_can_jump_or_use_a_jetpack_moves() {
+    assert!(moves_by_itself(&dotted(0.0, "JumpVelocity=300.0", HOP)), "the single speed counts");
+    assert!(moves_by_itself(&dotted(0.0, "JumpVelocityMax=300.0\nJumpVelocityMin=300.0", HOP)));
+    assert!(!moves_by_itself(&dotted(0.0, "JumpVelocity=300.0\nGravity=0.0", HOP)), "no gravity: a jump never ends");
+    assert!(!moves_by_itself(&dotted(0.0, "JumpVelocity=300.0", "JumpFrequency=0.0")), "no jump chance");
+    assert!(!moves_by_itself(&dotted(0.0, "JumpVelocity=0.0", HOP)), "no jump speed");
+    let pack = "HasJetpack=true\nJetpackThrust=1500.0";
+    assert!(moves_by_itself(&dotted(0.0, pack, HOP)), "a jetpack with the delay key missing thrusts at once");
+    assert!(moves_by_itself(&dotted(0.0, &format!("{pack}\nJetpackActivationDelay=0.3"), HOP)));
+    assert!(!moves_by_itself(&dotted(0.0, &format!("{pack}\nJetpackActivationDelay=0.3"), "JumpFrequency=0.0")));
+    // KovaaK's never thrusts with a delay of exactly 0, so it isn't used and the bot stays still.
+    assert!(!moves_by_itself(&dotted(0.0, &format!("{pack}\nJetpackActivationDelay=0.0"), HOP)));
+    assert!(moves_by_itself(&dotted(0.0, &format!("{pack}\nJetpackActivationDelay=0.001"), HOP)));
+}
+
+#[test]
+fn a_jetpacks_delay_tank_and_refill_come_through() {
+    let pack = "HasJetpack=true\nJetpackThrust=1500.0\nJetpackMaxZVelocity=250.0\nJetpackAirControlWithThrust=0.5";
+    let all = format!(
+        "{pack}\nJetpackActivationDelay=0.4\nJetpackFullFuelTime=2.5\nJetpackFuelIncPerSec=0.5\nJetpackFuelRegensInAir=false"
+    );
+    let j = imported_motion(&dotted(0.0, &all, HOP)).unwrap().jetpack.expect("a jetpack");
+    assert_eq!((j.thrust, j.max_up, j.air_control), (15.0, 2.5, 0.5));
+    assert_eq!((j.delay_s, j.fuel_s, j.refill_per_s, j.refill_in_air), (0.4, 2.5, 0.5, false));
+    // The keys missing: no delay, an endless tank and a refill in the air.
+    let j = imported_motion(&dotted(0.0, pack, HOP)).unwrap().jetpack.expect("a jetpack");
+    assert_eq!((j.delay_s, j.fuel_s, j.refill_per_s, j.refill_in_air), (0.0, 0.0, 0.0, true));
+    // A delay of exactly 0 leaves the jetpack out; the bot only hops.
+    let zero = format!("{pack}\nJetpackActivationDelay=0.0\nJumpVelocity=300.0");
+    let m = imported_motion(&dotted(0.0, &zero, HOP)).unwrap();
+    assert!(m.jetpack.is_none() && m.jump_speed == [3.0, 3.0]);
+}
+
+#[test]
+fn a_fliers_key_settings_come_through() {
+    let fly = "IsFlyer=true\nFlightVelocityUp=800.0\nFlightVelocityDown=600.0\nGravity=0.0";
+    let by_keys = "AlterateJumpCrouchInput=false\nJumpFrequency=0.5\nCrouchInAirFrequency=0.25\nMinCrouchTime=0.4\nMaxCrouchTime=0.9";
+    let m =
+        imported_motion(&dotted(0.0, &format!("{fly}\nCanCrouch=true\nIsFlyUpOnJumpAndCrouch=true"), by_keys)).unwrap();
+    assert!(m.flight.as_ref().unwrap().up_on_both);
+    let d = &m.dodges[0];
+    assert!(d.fly_by_keys);
+    assert_eq!((d.crouch_chance, d.crouch_s), (0.25, [0.4, 0.9]));
+    // A dodge profile with the key on, or without it, alternates, as every flier did before.
+    for dodge in ["AlterateJumpCrouchInput=true", "JumpFrequency=0.5"] {
+        let m = imported_motion(&dotted(0.0, &format!("{fly}\nCanCrouch=true"), dodge)).unwrap();
+        assert!(!m.dodges[0].fly_by_keys && !m.flight.unwrap().up_on_both, "{dodge}");
+    }
+    // The crouch needs a character that can crouch.
+    let m = imported_motion(&dotted(0.0, fly, by_keys)).unwrap();
+    assert_eq!((m.dodges[0].crouch_chance, m.dodges[0].crouch_s), (0.0, [0.0, 0.0]));
+}
+
+/// Bug (found in review of plan K6b): the settings for a landing were stored for every
+/// bot whose character has them, and a flier's key settings for every dodge profile that
+/// has them, though the first act only on a bot that jumps off the ground and the second
+/// only on a flier. A scenario they can't touch got a new fingerprint, and its bests
+/// started again for nothing.
+#[test]
+fn settings_that_cannot_act_are_left_out() {
+    let landing = "JumpVelocity=300.0|CanPogoJump=true|AllowBufferedJumps=true".replace('|', "\n");
+    let by_keys = "AlterateJumpCrouchInput=false|CrouchInAirFrequency=0.25".replace('|', "\n");
+    // A walker that never presses the jump key, one with no jump speed, one with nothing
+    // to bring it down, and a flier, which doesn't land.
+    let fly = "IsFlyer=true|FlightVelocityUp=800.0|Gravity=0.0".replace('|', "\n");
+    for (character, dodge) in [
+        (landing.clone(), "JumpFrequency=0.0"),
+        (landing.replace("300.0", "0.0"), HOP),
+        (format!("{landing}\nGravity=0.0"), HOP),
+        (format!("{fly}\n{landing}"), HOP),
+    ] {
+        let m = imported_motion(&dotted(600.0, &character, dodge)).unwrap();
+        assert!(!m.pogo && !m.buffered_jumps, "{character} with {dodge}");
+    }
+    // A walker's dodge profile isn't flown by keys and has no crouch key.
+    let m =
+        imported_motion(&dotted(600.0, &format!("{landing}\nCanCrouch=true"), &format!("{by_keys}\n{HOP}"))).unwrap();
+    assert!(m.pogo && m.buffered_jumps, "this one hops");
+    let d = &m.dodges[0];
+    assert!(!d.fly_by_keys);
+    assert_eq!((d.crouch_chance, d.crouch_s), (0.0, [0.0, 0.0]));
+}
+
+/// Bug: "bots don't crouch yet" was given to every file whose character could crouch
+/// and whose dodge profile crouched, though crouching changes nothing for a bot whose
+/// crouched height and speed are its standing ones. It stays for a walking bot that would
+/// change, and the note about a jetpack's guessed hold time is gone.
+#[test]
+fn the_crouch_note_is_for_a_walker_that_would_change_when_it_crouches() {
+    let notes = |speed: f32, character: &str, dodge: &str| {
+        convert(&Sce::parse(&dotted(speed, character, dodge)), "box.sce", "0").unwrap().notes
+    };
+    let note = "bots don't crouch yet";
+    let crouch = "CrouchOnGroundFrequency=0.5";
+    let can = "CanCrouch=true";
+    assert!(notes(600.0, &format!("{can}\nCrouchHeightModifier=0.5"), crouch).iter().any(|n| n == note), "lower");
+    assert!(notes(600.0, &format!("{can}\nMaxCrouchSpeed=300.0"), crouch).iter().any(|n| n == note), "slower");
+    assert!(
+        notes(600.0, &format!("{can}\nCrouchHeightModifier=0.5"), "CrouchInAirFrequency=0.5").iter().any(|n| n == note)
+    );
+    // Crouching changes nothing here.
+    assert!(
+        !notes(600.0, &format!("{can}\nCrouchHeightModifier=1.0\nMaxCrouchSpeed=600.0"), crouch).contains(&note.into())
+    );
+    assert!(!notes(600.0, can, crouch).contains(&note.into()), "no crouch height or speed given");
+    // It would change, but the bot can't crouch, doesn't crouch, or flies.
+    assert!(!notes(600.0, "CrouchHeightModifier=0.5", crouch).contains(&note.into()), "can't crouch");
+    assert!(
+        !notes(600.0, &format!("{can}\nCrouchHeightModifier=0.5"), "CrouchOnGroundFrequency=0.0")
+            .contains(&note.into())
+    );
+    let flier = format!("{can}\nCrouchHeightModifier=0.5\nIsFlyer=true\nFlightVelocityUp=300.0");
+    assert!(!notes(600.0, &flier, crouch).contains(&note.into()), "a flier");
+    // A jetpack gets no note of its own now.
+    let pack = "HasJetpack=true\nJetpackThrust=1500.0";
+    assert!(notes(0.0, pack, HOP).iter().all(|n| !n.contains("jetpack")), "{:?}", notes(0.0, pack, HOP));
 }

@@ -2333,3 +2333,36 @@ fn a_bot_without_gravity_or_that_flies_isnt_pulled_to_the_floor() {
     };
     assert_eq!(bot_y(&over_a_floor(flier, [0.0, 0.75, -10.0])), 0.75);
 }
+
+/// A jumper that appears standing on a floor (within its step-up height) with its key
+/// held jumps at once, and one that appears in the air only when it lands. Neither
+/// jumps again with the key held.
+#[test]
+fn a_jumper_that_appears_standing_with_the_key_held_jumps_at_once() {
+    let hopper = crate::motion::Motion {
+        gravity: 8.0,
+        step_up: 0.3,
+        jump_speed: [3.0, 3.0],
+        dodges: vec![crate::motion::Dodge {
+            strafe: false,
+            jump_chance: 1.0,
+            jump_s: [100.0, 100.0],
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let mut sim = over_a_floor(hopper.clone(), [0.0, 0.75, -10.0]);
+    assert!(grounded(&sim) && (bot_y(&sim) - 0.5).abs() < 0.01);
+    run_for(&mut sim, 0.1);
+    assert!(bot_y(&sim) > 0.6 && !grounded(&sim), "left the floor: {}", bot_y(&sim));
+    run_for(&mut sim, 3.0);
+    assert!(grounded(&sim), "back down, and no second jump with the key held");
+    // From the air: down first, then the one jump at the landing (about 0.8 s in).
+    let mut sim = over_a_floor(hopper, [0.0, 3.0, -10.0]);
+    run_for(&mut sim, 0.5);
+    assert!(bot_y(&sim) < 3.0 && !grounded(&sim));
+    run_for(&mut sim, 0.5);
+    assert!(bot_y(&sim) > 0.7 && !grounded(&sim), "up again after landing: {}", bot_y(&sim));
+    run_for(&mut sim, 3.0);
+    assert!(grounded(&sim), "and then stayed down");
+}
