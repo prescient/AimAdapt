@@ -599,6 +599,121 @@ fn on_a_floor(walls: Vec<crate::world::WorldMesh>, motion: Option<crate::motion:
     s
 }
 
+/// An imported scenario with one still bot that regenerates, a weapon that holds fire at `rate` shots a
+/// second for `damage` each, and a respawn so late that the first kill is the last thing that happens.
+fn healer(health: f32, regen: f32, delay: f32, rate: f32, damage: f32) -> Scenario {
+    let mut s = on_a_floor(Vec::new(), None);
+    s.timing.duration_s = 600.0;
+    s.weapon.trigger = Trigger::Hold;
+    s.weapon.fire_rate = rate;
+    s.weapon.damage = damage;
+    s.targets.health = health;
+    s.targets.regen_per_s = regen;
+    s.targets.regen_delay_s = delay;
+    s.targets.respawn_delay_s = 60.0;
+    s
+}
+
+/// Hits taken to kill the first bot with fire held on it, at `hz` frames a second, or `None` if it
+/// isn't dead after `limit_s`.
+fn hits_to_kill(s: Scenario, hz: f32, limit_s: f32) -> Option<u32> {
+    let mut sim = Sim::new(s, 1);
+    let at = sim.targets()[0].pos;
+    while sim.elapsed() < limit_s {
+        sim.step(1.0 / hz, shoot(at));
+        if sim.stats().kills == 1 {
+            return Some(sim.stats().hits);
+        }
+    }
+    None
+}
+
+/// Bug: imported bots healed continuously between shots, so a bot whose regen delay equals the shot
+/// interval couldn't be killed. KovaaK's heals in steps of a tenth of a second and checks the timers
+/// after the frame's shots, so a hit on the frame a countdown ends wins: 100 hits (measured there).
+#[test]
+fn imported_bots_with_a_delay_of_one_shot_interval_die_in_health_over_damage_hits() {
+    for hz in [60.0, 90.0, 120.0, 144.0, 240.0] {
+        for regen in [1000.0, 50.0] {
+            let hits = hits_to_kill(healer(100.0, regen, 0.01, 100.0, 1.0), hz, 30.0);
+            assert_eq!(hits, Some(100), "regen {regen} at {hz} frames a second");
+        }
+    }
+}
+
+/// With no delay a step lands every 0.1 s whatever the hits (KovaaK's: 190 hits, 913 hits; continuous
+/// healing gives 200 and 1000).
+#[test]
+fn imported_bots_with_no_delay_heal_in_steps_that_hits_dont_pause() {
+    for (regen, lo, hi) in [(50.0, 188, 196), (90.0, 900, 920)] {
+        for hz in [60.0, 120.0, 240.0] {
+            let hits = hits_to_kill(healer(100.0, regen, 0.0, 100.0, 1.0), hz, 60.0).unwrap_or(0);
+            assert!((lo..=hi).contains(&hits), "regen {regen} at {hz} frames a second: {hits} hits");
+        }
+    }
+}
+
+/// One step lands after each shot, or several (measured in KovaaK's: 33, 96 and 16 hits).
+#[test]
+fn imported_bots_heal_a_step_after_each_shot_or_several() {
+    for hz in [60.0, 120.0, 240.0] {
+        assert_eq!(hits_to_kill(healer(100.0, 20.0, 0.03, 20.0, 5.0), hz, 60.0), Some(33), "{hz} fps");
+        assert_eq!(hits_to_kill(healer(100.0, 40.0, 0.05, 10.0, 5.0), hz, 60.0), Some(96), "{hz} fps");
+        assert_eq!(hits_to_kill(healer(100.0, 40.0, 0.05, 2.0, 25.0), hz, 120.0), Some(16), "{hz} fps");
+    }
+}
+
+/// A delay shorter than the shot interval: a step lands on the first frame at or after the countdown's
+/// end that has no hit, so the count depends on the frame rate. KovaaK's gave 164 at 120 frames a
+/// second; this is pinned at 120 only.
+#[test]
+fn imported_bots_with_a_delay_under_the_interval_heal_when_a_frame_has_no_hit() {
+    let hits = hits_to_kill(healer(100.0, 20.0, 0.005, 100.0, 1.0), 120.0, 60.0).unwrap_or(0);
+    assert!((163..=167).contains(&hits), "{hits} hits");
+}
+
+/// When the countdown ends the bot gets one step at once, then one every 0.1 s.
+#[test]
+fn imported_bots_get_a_step_when_the_countdown_ends_then_one_every_tenth_of_a_second() {
+    let mut sim = Sim::new(healer(100.0, 50.0, 0.01, 100.0, 1.0), 1);
+    let at = sim.targets()[0].pos;
+    while sim.stats().hits < 10 {
+        sim.step(FRAME, shoot(at));
+    }
+    let last_hit = sim.elapsed();
+    assert!((sim.targets()[0].health - 90.0).abs() < 0.01, "{}", sim.targets()[0].health);
+    while sim.elapsed() < last_hit + 0.05 {
+        sim.step(FRAME, idle());
+    }
+    let h = sim.targets()[0].health;
+    assert!((h - 95.0).abs() < 0.01, "one step of 5 about 0.05 s after the last hit, got {h}");
+    while sim.elapsed() < last_hit + 0.12 {
+        sim.step(FRAME, idle());
+    }
+    let h = sim.targets()[0].health;
+    assert!((h - 100.0).abs() < 0.01, "full about 0.12 s after the last hit, got {h}");
+}
+
+/// Bug: the healing timers were read at the end of a frame and the shots at its start. On frames of
+/// uneven length a countdown could then run out one frame before the shot that should have restarted
+/// it, and a bot whose delay equals the shot interval got a step it never gets in KovaaK's. Both are
+/// read at the start of the frame now, so the shot that is due always comes first.
+#[test]
+fn uneven_frames_dont_let_a_step_in_before_the_shot_thats_due() {
+    // Frame lengths that go up and down, as a real frame rate does.
+    let lengths = [1.0 / 200.0, 1.0 / 90.0, 1.0 / 144.0, 1.0 / 60.0, 1.0 / 240.0, 1.0 / 110.0, 1.0 / 170.0];
+    for regen in [1000.0, 50.0] {
+        let mut sim = Sim::new(healer(100.0, regen, 0.01, 100.0, 1.0), 1);
+        let at = sim.targets()[0].pos;
+        let mut frame = 0;
+        while sim.stats().kills == 0 && sim.elapsed() < 30.0 {
+            sim.step(lengths[frame % lengths.len()], shoot(at));
+            frame += 1;
+        }
+        assert_eq!((sim.stats().kills, sim.stats().hits), (1, 100), "regen {regen}");
+    }
+}
+
 #[test]
 fn walls_stop_shots_but_clip_walls_dont() {
     let wall = |clip: bool| crate::world::WorldMesh {
@@ -2726,7 +2841,7 @@ fn the_cost_doesnt_restart_the_regen_delay() {
     while sim.elapsed() < 1.04 {
         sim.step(FRAME, idle());
     }
-    // Regen began about 1 s after the shot, not after the hop 0.05 s later (which would give 59).
-    let h = sim.targets()[0].health;
-    assert!(h > 61.0 && h < 66.0, "{h}");
+    // Imported bots heal in steps of a tenth of a second: one step of 10 (100 a second) came about 1 s
+    // after the shot, so 59 + 10. If the hop at 0.05 s had restarted the wait it would still be 59.
+    assert_eq!(sim.targets()[0].health, 69.0);
 }

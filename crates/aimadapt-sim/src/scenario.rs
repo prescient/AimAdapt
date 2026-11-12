@@ -291,9 +291,11 @@ pub struct Targets {
     /// Health restored per second: with a beam while the crosshair is off the
     /// target, with hitscan once `regen_delay_s` has passed since the last hit.
     /// Negative (imported KovaaK's scenarios) drains it once the delay has passed,
-    /// until the target goes as a timeout.
+    /// until the target goes as a timeout. An imported scenario (one with a world) heals with
+    /// hitscan in steps of a tenth of a second's regen, as KovaaK's does; the drain is smooth.
     pub regen_per_s: f32,
-    /// Seconds after the last hit before regen starts. 0 heals straight away.
+    /// Seconds after the last hit before regen starts. 0 heals straight away. With the steps of an
+    /// imported scenario, each hit starts the wait again and a delay of 0 is never paused.
     #[serde(skip_serializing_if = "off_in_fingerprint")]
     pub regen_delay_s: f32,
     pub color: String,
@@ -508,17 +510,30 @@ impl Scenario {
     /// settings and, for a scenario that uses a rule the sim has changed since, a mark
     /// for the change (see `rule_marks`).
     pub fn fingerprint(&self) -> String {
-        fnv(&(self.settings_text() + self.rule_marks()))
+        fnv(&(self.settings_text() + &self.rule_marks()))
     }
 
     /// Marks for the rules the sim has changed since scenarios were first stored. A rule
     /// change leaves a scenario's settings as they were, so without a mark its scores from
     /// before would count as the same version. Only a scenario that uses the rule gets the
     /// mark, and the rest keep their fingerprints.
-    fn rule_marks(&self) -> &'static str {
+    fn rule_marks(&self) -> String {
+        let mut marks = String::new();
         // Plan K6b: jumps, jetpacks and fliers are played by a jump key.
         let keys = self.world.as_ref().is_some_and(|w| w.motions().any(crate::motion::Motion::works_keys));
-        if keys { "\n# rules: jump key" } else { "" }
+        if keys {
+            marks += "\n# rules: jump key";
+        }
+        // Imported bots with a hitscan weapon heal in steps of a tenth of a second.
+        let heals = self.weapon.kind == WeaponKind::Hitscan
+            && self
+                .world
+                .as_ref()
+                .is_some_and(|w| self.targets.regen_per_s > 0.0 || w.kinds.iter().any(|k| k.regen_per_s > 0.0));
+        if heals {
+            marks += "\n# rules: heals in steps";
+        }
+        marks
     }
 
     /// The settings that go into the fingerprint, as text.
@@ -803,6 +818,42 @@ mod tests {
         {
             assert_eq!(s.fingerprint(), of_settings(&s));
         }
+    }
+
+    /// Bug: imported bots healed continuously between shots; they now heal in steps, and scenarios
+    /// whose bots regenerate under a hitscan weapon restart their bests with a second mark.
+    #[test]
+    fn healing_in_steps_marks_only_imported_hitscan_scenarios_with_regen() {
+        use crate::motion::{Dodge, Motion};
+        use crate::world::{World, WorldKind};
+        let of_settings = |s: &Scenario| fnv(&s.settings_text());
+        let world = |w: World, regen: f32| {
+            let mut s = Scenario { world: Some(w), ..Scenario::default() };
+            s.targets.regen_per_s = regen;
+            s
+        };
+        let regen_kind = |r: f32| WorldKind { regen_per_s: r, ..WorldKind::default() };
+        for s in [
+            world(World::default(), 10.0),
+            world(World { kinds: vec![regen_kind(0.0), regen_kind(5.0)], ..World::default() }, 0.0),
+        ] {
+            assert_ne!(s.fingerprint(), of_settings(&s));
+        }
+        let mut beam = world(World::default(), 10.0);
+        beam.weapon.kind = WeaponKind::Beam;
+        for s in [
+            world(World::default(), 0.0),
+            world(World::default(), -10.0),
+            Scenario { world: None, ..world(World::default(), 10.0) },
+            beam,
+        ] {
+            assert_eq!(s.fingerprint(), of_settings(&s));
+        }
+        let jumper = Motion { dodges: vec![Dodge { jump_chance: 0.5, ..Dodge::default() }], ..Motion::default() };
+        let jumps = world(World { motion: Some(jumper.clone()), ..World::default() }, 0.0);
+        assert_eq!(jumps.fingerprint(), fnv(&(jumps.settings_text() + "\n# rules: jump key")));
+        let both = world(World { motion: Some(jumper), ..World::default() }, 10.0);
+        assert_eq!(both.fingerprint(), fnv(&(both.settings_text() + "\n# rules: jump key\n# rules: heals in steps")));
     }
 
     /// Bug: easy and hard were only compared when both were written, so a file that

@@ -1,5 +1,6 @@
 //! Where new targets appear, and when.
 
+use super::firing::HEAL_STEP_S;
 use super::*;
 
 impl Sim {
@@ -173,6 +174,8 @@ impl Sim {
             slot,
             shape,
             regen,
+            // Healing timers go by the start of the frame (see `heal_in_steps`).
+            heal_at: self.frame_began + if regen.1 > 0.0 { regen.1 } else { HEAL_STEP_S },
             respawn_s,
         });
         events.push(Event::Spawned { id });

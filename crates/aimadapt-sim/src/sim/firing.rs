@@ -2,12 +2,20 @@
 
 use super::*;
 
+/// KovaaK's heals a bot in steps of a tenth of a second's regen (measured with test maps in
+/// KovaaK's 3.9.13).
+pub(super) const HEAL_STEP_S: f32 = 0.1;
+
 impl Sim {
     pub(super) fn fire_hitscan(&mut self, dt: f32, aim: Vec3, input: Input, events: &mut Vec<Event>) {
-        // Regen: a target heals once its regen delay has passed since it was last hit.
-        let now = self.elapsed();
-        for t in self.targets.iter_mut().filter(|t| t.regen.0 > 0.0 && now - t.last_hit_at >= t.regen.1) {
-            t.health = (t.health + t.regen.0 * dt).min(t.max_health);
+        // Regen: a target heals once its regen delay has passed since it was last hit. Imported
+        // scenarios heal in steps after the frame's shots instead (`heal_in_steps`).
+        let imported = self.current.world.is_some();
+        if !imported {
+            let now = self.elapsed();
+            for t in self.targets.iter_mut().filter(|t| t.regen.0 > 0.0 && now - t.last_hit_at >= t.regen.1) {
+                t.health = (t.health + t.regen.0 * dt).min(t.max_health);
+            }
         }
         let w = &self.scenario.weapon;
         let interval = if w.fire_rate > 0.0 { 1.0 / w.fire_rate } else { 0.0 };
@@ -35,6 +43,28 @@ impl Sim {
         self.cooldown -= dt;
         if !wants || trigger == Trigger::Click {
             self.cooldown = self.cooldown.max(0.0);
+        }
+        if imported {
+            self.heal_in_steps();
+        }
+    }
+
+    /// How an imported bot heals, as measured in KovaaK's: in lumps of a tenth of a second's regen.
+    /// With no delay a lump lands every 0.1 s whatever the hits. With a delay, each hit stops the
+    /// healing and starts the countdown (`damage` sets `heal_at`); when it runs out the bot gets a lump
+    /// at once, then one every 0.1 s. The timers are checked once a frame, after that frame's shots,
+    /// so a hit on the frame a countdown runs out wins and no lump lands.
+    ///
+    /// The timers are set and read by the game time at the start of the frame, as the fire loop's
+    /// cooldown is. A shot that is due by then has fired before this runs, so a bot whose delay is at
+    /// least the shot interval gets no lump under steady fire, however uneven the frames are.
+    fn heal_in_steps(&mut self) {
+        let began = self.frame_began;
+        for t in self.targets.iter_mut().filter(|t| t.regen.0 > 0.0) {
+            while t.heal_at <= began {
+                t.health = (t.health + t.regen.0 * HEAL_STEP_S).min(t.max_health);
+                t.heal_at += HEAL_STEP_S;
+            }
         }
     }
 
@@ -122,6 +152,9 @@ impl Sim {
             t.health -= dealt;
         }
         t.last_hit_at = now;
+        if t.regen.1 > 0.0 {
+            t.heal_at = self.frame_began + t.regen.1;
+        }
         if let (Some(b), Some(m)) = (&mut t.bot, self.current.world.as_ref().and_then(|w| w.motion_of(t.kind))) {
             b.on_hit(m, &mut self.rng, dealt, now);
         }

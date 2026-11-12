@@ -18,8 +18,8 @@ A scenario is refused when it uses something the trainer doesn't model, so every
 | K15a An ability that costs health | e3c7715 | 113 of 225 |
 | K15b Chasers that take time to arrive | 19f0673 | 116 of 225 |
 | K7 Armed bots that never fire, invincible characters | 399d081 | 132 of 225 |
-| Fix: spawn offsets follow the map's axes | | 132 of 225 |
-| Fix: regeneration between shots | | |
+| Fix: spawn offsets follow the map's axes | 4e0c441 | 132 of 225 |
+| Fix: regeneration between shots | | 132 of 225 |
 | K15 The rest: vertical dashes, damage reactions | | |
 | K8 Bots that destroy themselves | | |
 | K9 Heads | | |
@@ -394,6 +394,51 @@ Result: still 132 of 225, and 32 of the playing files changed, so their bests st
 
 The 32 were played in the sim without a window. Each runs its full length with no problem reported, a target is up in at least 95% of frames, and the bot that aims perfectly hits. None was watched in the game window after the fix.
 
+#### Bots that regenerate healed between shots
+
+A character's `HealthRegenPerSec` and `HealthRegenDelay` make its bots heal. The sim healed a hitscan target continuously: on every frame where the delay had passed since the last hit, before that frame's shots. In three of the playing files the delay is close to the weapon's shot interval and the regen is fast, and there the bot that aims perfectly never got a kill.
+
+Measured in KovaaK's 3.9.13 on 11 November 2026 with twelve test maps, at 120 frames a second. Each has one still ball dead ahead and a weapon that fires while the button is held and never misses. The ball comes back only after 60 s, so the hit count on screen at the kill is the hits it took.
+
+| Health | Regen per second | Delay | Shot interval, damage | Hits to kill | What it shows |
+|---|---|---|---|---|---|
+| 100 | 1000 | 0.01 s | 0.01 s, 1 | 100 | With the delay equal to the interval, no healing while every shot lands |
+| 100 | 50 | 0.01 s | 0.01 s, 1 | 100 | The same at a slower regen |
+| 100 | 1000 | 0.02 s | 0.01 s, 1 | 100 | No healing with a longer delay |
+| 100 | 1000 | 0.005 s | 0.01 s, 1 | Never (428 hits) | A full heal on each frame that has no shot |
+| 50 | 100 | 0.005 s | 0.01 s, 1 | Never (483 hits) | 10 health on each frame with no shot beats 5 damage in six frames |
+| 100 | 20 | 0.005 s | 0.01 s, 1 | 164 | 2 health on one frame in six: the rule below gives 164, other rules 103 to 125 |
+| 100 | 50 | 0 | 0.01 s, 1 | 190 | With no delay, 5 health every 0.1 s whatever the hits (190 to 195 by phase) |
+| 100 | 90 | 0 | 0.01 s, 1 | 913 | The steps are 0.1 s apart (910 to 919 by phase; 0.15 s would give 870, continuous healing 1000) |
+| 100 | 20 | 0.03 s | 0.05 s, 5 | 33 | One step of 2 after every shot (continuous healing gives 22, none 20) |
+| 100 | 20 | 0.045 s | 0.05 s, 5 | 20 | The delay ran out on the frame of the next shot, and the shot won |
+| 100 | 40 | 0.05 s | 0.1 s, 5 | 96 | Exactly one step of 4 per shot (continuous healing gives 33) |
+| 100 | 40 | 0.05 s | 0.5 s, 25 | 16 | Five steps of 4 between shots, 0.05, 0.15, 0.25, 0.35 and 0.45 s after the hit (four steps give 10, six give 76) |
+
+The rule that fits all twelve:
+
+- A bot heals in steps of a tenth of a second's worth, `HealthRegenPerSec` × 0.1 health at a time.
+- With a delay of 0 a step lands every 0.1 s all the time. Hits don't pause it.
+- With a delay above 0, each hit stops the healing and starts a countdown of the delay. When it runs out the bot gets one step at once, then one every 0.1 s until the next hit.
+- The timers are looked at once a frame, after the frame's shots. A hit on the frame where the countdown runs out starts it again, and no step lands. So a weapon whose shots all land is never healed against when the delay is at least its shot interval.
+- With a delay shorter than the shot interval, a step lands on the first frame at or after the countdown's end that has no hit. How often that happens depends on the frame rate.
+
+Not measured: where the steps of a bot with no delay fall (the hit counts fit any phase), negative regen, a beam, a bot that was never hit and lost health another way, and any frame rate but 120.
+
+What gets built:
+
+- `aimadapt-sim`: in a scenario with a world (an imported one) and a hitscan weapon, each regenerating target has a timer for its next step. A hit on a bot with a delay sets it to the delay after the start of the hit's frame. After each frame's shots, every step that was due by the start of the frame lands and the timer moves on 0.1 s. The start of the frame is the moment the weapon's cooldown goes by, so a shot that is due always fires before a step that is due. The sim's frame is the game's frame, so a delay shorter than the shot interval depends on the frame rate here as it does in KovaaK's.
+- Scenarios without a world keep the continuous rule, so the built-in scenarios play and score as before. The beam is unchanged (the importer makes none) and so is the drain.
+- The stored settings don't change, so the scenarios that use the rule get a mark in their fingerprint (`heals in steps`) and their bests start again. The jump key's mark stays as it was.
+
+Found in review of the build: the timers were first read at the end of a frame, while the weapon fires by the time left at its start. The game steps the sim with each frame's real length, and when a longer frame followed a hit's frame the countdown could run out one frame before the next shot. A bot with a delay of one shot interval then got a step it never gets in KovaaK's (with a regen of 1000, a full heal: 2999 hits and no kill in a test on frame lengths between 1/240 and 1/60 s). The timers are now set and read by the start of the frame, and the same test takes exactly 100 hits.
+
+Result: still 132 of 225. None started and none stopped. The 47 playing files whose bots regenerate have a new fingerprint, so their bests start again. All 47 have a held hitscan weapon. Their stored settings and notes are as they were, and the other 85 keep their fingerprints too.
+
+The 47 were played in the sim without a window, at 120 frames a second, by a bot that aims perfectly and holds fire, on the old rule and the new. Every file runs its full length with no problem reported. Idle runs are the same. With the bot shooting, 13 files give the same run, 30 give more kills, 3 the same kills with small changes in hits or score, and 1 fewer (299 to 149). That one has a delay shorter than its shot interval: it used to heal a little between shots and now gets a full step after each one, as the maps with one step per shot showed. The three files the bot could never get a kill in now give 149, 211 and 287, each at health over damage hits per kill. Five files give no kills on either rule. Their bots regenerate at or above the weapon's damage rate: four have no delay, and one gets a step after each shot that is larger than the shot's damage. The two playing files with a delay below the shot interval are not on a knife's edge: the step lands between shots at any frame rate above about 35 a second.
+
+A delay of 0 with low health is sensitive to where the steps fall. In the play above, 0.1 s is exactly 12 frames, and reading the timers one frame earlier or later moved one file's kills between 154 and 178. Real frames don't line up like that, and KovaaK's has the same sensitivity. None of the 47 was watched in the game window.
+
 ### K8. Bots that destroy themselves
 
 "Pressure" scenarios give each bot a weapon ability or a weapon that damages the bot itself after a delay, so a target that isn't shot in time goes away and counts against the player.
@@ -462,6 +507,11 @@ These rows are filled in as packages land. A row leaves the table when a test ma
 | A chasing helper in a stored world without a flight | K3's instant chaser, on the outer face of the clip slab at the point nearest its target | Wrong for a moving target (see K15). The importer no longer writes one |
 | `BlockAbilityOnStartDuration` on a helper's character | No hits for that long from the start of the run | No |
 | An ability's health cost on a bot that regenerates | The cost isn't a hit, so it doesn't restart the wait before the regen | No: no installed file has both |
+| The healing steps of a bot with no regen delay | Counted from the moment the bot appears: the first step 0.1 s after that | No: the measured hit counts fit any phase |
+| A regen delay shorter than the weapon's shot interval, at other frame rates | A step lands on the first frame at or after the countdown's end that has no hit, at any frame rate | No: measured at 120 frames a second only. Two playing files have such a delay, and in both the step lands between shots at any frame rate above about 35 a second |
+| A regenerating bot that hasn't been hit | Its first step is due one delay after it appears, then every 0.1 s. At full health a step does nothing | No: it matters only for a bot that loses health another way |
+| Negative regen (a drain) | Continuous, as before. Only healing goes in steps | No |
+| Healing against steady fire on frames of uneven length | A shot that is due fires before a step that is due, whatever the frame lengths: both go by the start of the frame | No: the three maps with a delay of at least the shot interval took exactly 100 hits on real frames, which vary a little. Larger swings weren't tried |
 | A bot that dies of its ability's cost, on a scenario with lives | It counts as a timeout and uses up no life, like a bot that drains away | No: no installed file has both |
 | A moving cuboid bot's box | Stays lined up with the map's axes as the bot moves and turns | No: measured on still bots |
 | `InvincibleBots` on a character | That character's bots can't die, whatever the scenario's own flag says | No |

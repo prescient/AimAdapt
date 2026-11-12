@@ -105,6 +105,10 @@ pub struct Target {
     shape: Shape,
     /// Health regenerated per second, and the seconds after a hit before it starts.
     regen: (f32, f32),
+    /// Game time at which the next step of healing is due. Only imported scenarios use it: they heal
+    /// in steps of `HEAL_STEP_S`, and a hit on a bot with a regen delay sets it to the delay after the
+    /// start of the hit's frame.
+    heal_at: f32,
     /// Seconds before a replacement appears.
     respawn_s: f32,
 }
@@ -441,6 +445,9 @@ pub struct Sim {
     bot_walls: Collider,
     /// Seconds since the countdown began.
     clock: f32,
+    /// Game time when the frame being stepped began. The fire loop goes by the time left at the start
+    /// of a frame, so the healing timers of imported bots are read at the same moment.
+    frame_began: f32,
     /// Seconds into the run up to which helper bots' kicks have been applied.
     pushed_to: f64,
     /// Where each chasing helper with a flight is and how fast it moves, in the order
@@ -538,6 +545,7 @@ impl Sim {
             walls,
             bot_walls,
             clock: 0.0,
+            frame_began: 0.0,
             pushed_to: 0.0,
             fliers,
             phase: Phase::Countdown,
@@ -695,6 +703,7 @@ impl Sim {
             return events;
         }
         let scale = self.time_scale();
+        self.frame_began = self.elapsed();
         if self.phase == Phase::Running {
             let dt = dt * scale;
             self.clock += dt;
