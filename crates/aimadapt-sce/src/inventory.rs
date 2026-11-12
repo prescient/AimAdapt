@@ -92,6 +92,9 @@ pub fn gaps(sce: &Sce) -> Vec<Gap> {
             gap("KovaaK's dynamic difficulty", key.into());
         }
     }
+    // Only the scenario's own switch counts here. Whether the player character's
+    // `InvinciblePlayer` also protects the player from a bot that fires wasn't measured,
+    // so a file with such a bot and only the character's switch on stays refused.
     let player_can_die = !top.is("InvinciblePlayer");
 
     // The player and their weapon.
@@ -106,9 +109,11 @@ pub fn gaps(sce: &Sce) -> Vec<Gap> {
         if p.is("ThirdPersonCamera") {
             gap("third-person camera", p.name().into());
         }
-        if p.is("InvinciblePlayer") || p.is("InvincibleBots") {
-            // Per-character overrides of the scenario's own switches.
-            gap("per-character invincibility", p.name().into());
+        // `InvinciblePlayer` on the player's character is no gap: nothing in the trainer
+        // hurts the player. `InvincibleBots` there is still refused, because what it does
+        // on the player's character wasn't measured. On a bot's own character it plays.
+        if p.is("InvincibleBots") {
+            gap("per-character invincibility", format!("{}: InvincibleBots=true on the player's character", p.name()));
         }
     }
     if !r.player_abilities.is_empty() {
@@ -136,7 +141,7 @@ pub fn gaps(sce: &Sce) -> Vec<Gap> {
                     gap("movement type", ch.str("MovementType").into());
                 }
             }
-            if shoots(c) && player_can_die {
+            if fires(c) && player_can_die {
                 gap("bots shoot back", c.bot.name().into());
             }
             // Melee and movement abilities are how bots push each other apart and
@@ -160,9 +165,10 @@ pub fn gaps(sce: &Sce) -> Vec<Gap> {
     out
 }
 
-/// Whether a bot is armed and uses its weapons (an empty `WeaponsProfileNames=;;;`
-/// list is no weapon).
-pub(crate) fn shoots(c: &crate::scenario::BotChoice) -> bool {
+/// Whether a bot has a weapon it is set to use: `UseWeapons` is on and a weapon that
+/// isn't empty is on the bot's `WeaponsProfileNames` or its character's
+/// `WeaponProfileNames` (an empty `WeaponsProfileNames=;;;` list is no weapon).
+pub(crate) fn armed(c: &crate::scenario::BotChoice) -> bool {
     c.bot.is("UseWeapons")
         && !c
             .bot
@@ -170,6 +176,12 @@ pub(crate) fn shoots(c: &crate::scenario::BotChoice) -> bool {
             .iter()
             .chain(c.character.map(|ch| ch.list("WeaponProfileNames")).unwrap_or_default().iter())
             .all(|w| w.is_empty())
+}
+
+/// Whether a bot shoots at the player. In KovaaK's 3.9.13 an armed bot that is told not
+/// to aim (`NoAiming`) never fired, and one that aims fired all the time.
+fn fires(c: &crate::scenario::BotChoice) -> bool {
+    armed(c) && !c.bot.is("NoAiming")
 }
 
 fn weapon_gaps(w: &Section, gap: &mut impl FnMut(&'static str, String)) {
@@ -246,6 +258,72 @@ mod tests {
         assert_eq!(
             features(&armed.replace("InvinciblePlayer=true", "InvinciblePlayer=false")),
             vec!["bots shoot back"]
+        );
+    }
+
+    /// K7: an armed bot told not to aim never fires in KovaaK's, so it is no gap. A bot
+    /// that aims, or says nothing about aiming, still is.
+    #[test]
+    fn armed_bots_that_do_not_aim_never_fire() {
+        let on_bot = BASE.replace(
+            "UseWeapons=false",
+            "UseWeapons=true
+WeaponsProfileNames=Pin;;",
+        );
+        let on_character = BASE.replace("UseWeapons=false", "UseWeapons=true").replace(
+            "Name=Orb
+",
+            "Name=Orb
+WeaponProfileNames=Pin;;
+",
+        );
+        for armed in [on_bot, on_character] {
+            let hurt = armed.replace("InvinciblePlayer=true", "InvinciblePlayer=false");
+            assert_eq!(features(&hurt), vec!["bots shoot back"], "{hurt}");
+            let quiet = hurt.replace(
+                "UseWeapons=true",
+                "UseWeapons=true
+NoAiming=true",
+            );
+            assert_eq!(features(&quiet), Vec::<&str>::new(), "{quiet}");
+            let aiming = hurt.replace(
+                "UseWeapons=true",
+                "UseWeapons=true
+NoAiming=false",
+            );
+            assert_eq!(features(&aiming), vec!["bots shoot back"], "{aiming}");
+        }
+    }
+
+    /// K7: `InvinciblePlayer` on the player's character is no gap. It doesn't make bots
+    /// that fire harmless (not measured), and `InvincibleBots` there is still a gap.
+    #[test]
+    fn the_players_character_may_be_invincible_but_not_make_bots_invincible() {
+        let hurt = BASE.replace("InvinciblePlayer=true", "InvinciblePlayer=false");
+        let own = hurt.replace(
+            "WeaponProfileNames=Pin;;",
+            "WeaponProfileNames=Pin;;
+InvinciblePlayer=true",
+        );
+        assert_eq!(features(&own), Vec::<&str>::new());
+        let armed = own.replace(
+            "UseWeapons=false",
+            "UseWeapons=true
+WeaponsProfileNames=Pin;;",
+        );
+        assert_eq!(features(&armed), vec!["bots shoot back"]);
+        let bots = hurt.replace(
+            "WeaponProfileNames=Pin;;",
+            "WeaponProfileNames=Pin;;
+InvincibleBots=true",
+        );
+        assert_eq!(
+            gaps(&Sce::parse(&bots)),
+            vec![Gap {
+                feature: "per-character invincibility",
+                detail: "Hero: InvincibleBots=true on the player's character".into(),
+                beyond_plan: true
+            }]
         );
     }
 

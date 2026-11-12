@@ -23,7 +23,7 @@ fn read(name: &str) -> Sce {
 #[test]
 fn finds_every_fixture() {
     let files = find_files(&[fixtures()]);
-    assert_eq!(files.len(), 11);
+    assert_eq!(files.len(), 12);
     assert!(files.iter().all(|f| f.extension().unwrap() == "sce"));
 }
 
@@ -438,6 +438,7 @@ fn git_keeps_the_fixtures_bytes() {
         "Stair Court",
         "Jump Court",
         "Costly Hop",
+        "Quiet Guns",
     ] {
         assert!(!crlf(name), "{name} was given CRLF line ends");
     }
@@ -588,6 +589,43 @@ fn a_ball_that_pays_health_to_hop_leaves_by_itself() {
     }
     assert_eq!((sim.stats().kills, sim.stats().damage_done), (1, 60.0), "{:?}", sim.stats());
     assert!(sim.score() > 0.0);
+}
+
+/// Plan K7 on one made-up file: two kinds of ball carry a gun but are told not to aim, and the player's
+/// own character is invincible while the scenario's switch is off. It imports with no note about weapons.
+/// The same text with the balls aiming is refused for "bots shoot back" (they would fire at a player the
+/// scenario doesn't protect), and imports again once the scenario makes the player invincible.
+#[test]
+fn armed_bots_that_do_not_aim_play_and_ones_that_aim_do_not() {
+    let i = import(&path("Quiet Guns")).unwrap();
+    assert!(i.scenario.problems().is_empty());
+    assert!(i.notes.iter().all(|n| !n.to_lowercase().contains("weapon")), "{:?}", i.notes);
+    let w = i.scenario.world.as_ref().unwrap();
+    assert_eq!(w.kinds.len(), 2);
+    assert_eq!(w.slots.len(), 2);
+
+    // In play it is plain target switching: two balls are up, and one goes down to the player's shots.
+    let mut sim = started(i.scenario.clone());
+    assert_eq!(sim.targets().len(), 2);
+    let aim = sim.targets()[0].pos.normalize();
+    for _ in 0..10 {
+        sim.step(0.2, Input { aim, fire_pressed: true, fire_held: true });
+        if sim.stats().kills > 0 {
+            break;
+        }
+    }
+    assert_eq!(sim.stats().kills, 1, "{:?}", sim.stats());
+    assert!(sim.score() > 0.0);
+
+    let text = std::fs::read_to_string(path("Quiet Guns")).unwrap();
+    assert_eq!(text.matches("NoAiming=true").count(), 2);
+    let convert = |text: &str| aimadapt_sce::convert::convert(&Sce::parse(text), "quiet.sce", "0");
+    let aiming = text.replace("NoAiming=true", "NoAiming=false");
+    // The bots' weapons are the only reason: the player's own character being invincible isn't one.
+    let refused = convert(&aiming).unwrap_err();
+    assert!(!refused.is_empty() && refused.iter().all(|g| g.feature == "bots shoot back"), "{refused:?}");
+    let protected = aiming.replace("InvinciblePlayer=false", "InvinciblePlayer=true");
+    assert!(convert(&protected).is_ok());
 }
 
 /// Plan K6b on one made-up file: a hopping ball with an air jump, a pogo and buffered jumps, a ball

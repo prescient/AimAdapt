@@ -17,7 +17,7 @@ use aimadapt_sim::world::{ChaseFlight, Pusher, WorldMesh, WorldSpawn};
 
 use super::abilities::is_kind;
 use super::{UU_PER_M, axes, push_once, rise};
-use crate::inventory::{Gap, shoots};
+use crate::inventory::{Gap, armed};
 use crate::map::{Map, Spawn};
 use crate::scenario::{BotChoice, Resolved};
 use crate::settings::Section;
@@ -196,7 +196,9 @@ fn read(
     check(a.f32("AIMaxTargDist").is_some_and(|v| v < 2.0 * radius), "AIMaxTargDist", a);
     check(!a.bool("AIUseInCombat").unwrap_or(true), "AIUseInCombat", a);
     check(c.bot.f32_or("UseAbilityFrequency", 0.0) < 1.0, "UseAbilityFrequency", c.bot);
-    if shoots(c) {
+    // A helper with a weapon wasn't measured, aiming or not: a helper's `NoAiming` means
+    // something else here (it pins the helper).
+    if armed(c) {
         refuse(reasons, format!("{who}: UseWeapons=true with a weapon"));
     }
     let every = period(

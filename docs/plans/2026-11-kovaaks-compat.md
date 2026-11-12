@@ -16,9 +16,9 @@ A scenario is refused when it uses something the trainer doesn't model, so every
 | K6a Where bots appear and stand | 7736860 | 111 of 225 |
 | K6b The jump key | 13f11d4 | 111 of 225 |
 | K15a An ability that costs health | e3c7715 | 113 of 225 |
-| K15b Chasers that take time to arrive | | 116 of 225 |
+| K15b Chasers that take time to arrive | 19f0673 | 116 of 225 |
+| K7 Armed bots that never fire, invincible characters | | 132 of 225 |
 | K15 The rest: vertical dashes, damage reactions | | |
-| K7 Armed bots that never fire, invincible characters | | |
 | K8 Bots that destroy themselves | | |
 | K9 Heads | | |
 | K10 Waypoint paths | | |
@@ -61,6 +61,8 @@ Expected count of playable files after each step, if the packages land in order:
 Recounted after K3, with 107 playing. That estimate took K2 and K3 to clear every ability file, and they didn't: 19 files still have a movement ability setting K2 refuses (most often a dash that can go up or down) and 6 have a helper setup K3 refuses. Those are now K15, which runs after K6. With it the expected counts are: K4 111, K5 111, K15 118, K7 and K8 144, K9 153, K10 160, K11 167, K12 175, K13 184 and K14 201. The other 24 need the "Later" list, or use the kill efficiency score, which has no result file to check a formula against.
 
 Of the 118 files that don't play after K3, 58 wait on a single package, 30 on two and 30 on three or more. Files each package is needed for, and the files it would unlock by itself: K7 and K8 44 and 22, K14 31 and 5, K10 28 and 3, K15 23 and 7, K9 21 and 5, K12 17 and 1, K13 15 and 5, K4 8 and 4, K11 8 and 3, K5 6 and none, the "Later" list 24 and 3.
+
+Recounted after K7, with 132 playing. K7 ran before the rest of K15 and made 16 files play. Of the 93 that don't play, 33 have one reason, 32 have two and 28 have three or more. Files each reason is on, and the files it blocks by itself: waypoint paths 28 and 4, player movement 25 and 5, heads 21 and 5, weapon abilities 19 and 6, map objects 17 and 1, a movement ability the rest of K15 covers 16 and 1, solid props 15 and 5, aim assist 11 and 1, aim down sights 9 and 1, several pellets per shot 8 and 3, player abilities 8 and none, bots that aim and fire 4 and none, `InvincibleBots` on the player's character 2 and none. K8 reaches 138 if it plays the six files that wait on weapon abilities alone.
 
 ## What is out of scope
 
@@ -341,8 +343,24 @@ Ordered by files unlocked for the work involved. Each starts by reading how the 
 
 ### K7. Armed bots that never fire, invincible characters
 
-- 12 of the 16 "armed bots" files give their bots a weapon and also tell them not to aim. They are target switching scenarios, and nothing in them hurts the player. Check in KovaaK's that such a bot never fires, then stop refusing them.
-- Invincibility set on a character: the player is invincible when the scenario or their own character says so. Bots are covered in K3.
+Runs before the rest of K15. That part needs a lot of measuring and would make 2 more files play, while 16 files are refused for nothing but the two reasons here.
+
+What the local files have: 16 are refused for armed bots, 11 of them for that alone. In 12 of the 16 every armed bot is also told not to aim (`NoAiming=true`); they are target switching scenarios. In the other 4 the bots aim, fire explosive projectiles at a player with 10000 health, and have other reasons too. 11 files are refused for invincibility set on a character, 5 of them for that alone. In those 5 the player's own character has `InvinciblePlayer=true` and no bot is armed. 2 files have `InvincibleBots=true` on the player's character, both with other reasons.
+
+Measured in KovaaK's 3.9.13 on 11 November 2026, with four test maps that copy a target switching scenario whose two bots carry a hitscan weapon:
+
+- Bots told not to aim never fired. Two maps (one as the file is, one with a tough player and a weapon knockback of 50) showed no tracer in 11 still frames over 49 s, and the view never moved.
+- The same bots told to aim fired all the time: a white tracer from each bot in all 10 frames over 36 s.
+- Not established: whether a bot's shots hurt the player. The default HUD shows neither the player's health nor the score, and a player with 100 health showed no death in 18 s under fire. So a file whose bots aim stays refused unless the scenario's own `InvinciblePlayer` is on, as before.
+- Not measured: `InvincibleBots` on the player's character. Its test map never showed a bot to shoot.
+
+What gets built:
+
+- A bot with a weapon that is told not to aim is no reason to refuse a file. It never fires, so it plays as a bot without a weapon. A helper bot with a weapon stays refused, aiming or not (no local file has one).
+- `InvinciblePlayer=true` on the player's character is no reason to refuse a file, because nothing in the trainer hurts the player. It doesn't make a file with bots that aim and fire play: whether the character's switch protects the player the way the scenario's does wasn't measured.
+- `InvincibleBots=true` on the player's character stays refused.
+
+Result: 132 of 225. The 116 files that played before keep their fingerprints, notes and stored settings. Four files are still refused for bots that aim and fire and two for `InvincibleBots` on the player's character, all six with other reasons too.
 
 ### K8. Bots that destroy themselves
 
@@ -350,7 +368,7 @@ Ordered by files unlocked for the work involved. Each starts by reading how the 
 
 - Read the 19 files: the delay, what starts it (a timer from spawn, or the first hit), and what the score does when a bot dies that way.
 - `aimadapt-sim`: a kind can have a fuse. The engine shows it only if KovaaK's does.
-- The four armed-bot files left over from K7 belong here.
+- The four armed-bot files left over from K7 belong here: their bots aim and fire.
 
 ### K9. Heads
 
@@ -415,6 +433,8 @@ These rows are filled in as packages land. A row leaves the table when a test ma
 | A bot that dies of its ability's cost, on a scenario with lives | It counts as a timeout and uses up no life, like a bot that drains away | No: no installed file has both |
 | A moving cuboid bot's box | Stays lined up with the map's axes as the bot moves and turns | No: measured on still bots |
 | `InvincibleBots` on a character | That character's bots can't die, whatever the scenario's own flag says | No |
+| A bot with a weapon that is told not to aim | It never fires, so it plays as a bot without a weapon | Partly: no shot in 49 s on two test maps whose bots carry a hitscan weapon. Other kinds of weapon weren't tried |
+| `InvinciblePlayer` on the player's character, with no bot that fires | Nothing to do: nothing in the trainer hurts the player | No |
 | `StandStillUntilHurt` on a bot that is pushed | The pushes move it only once it has been hurt | No |
 | A flier's vertical speed when it is lifted | The push is added to it like any other speed | No |
 | A target bouncing on a push cushion | Not copied: in KovaaK's it lost about 4% of its height per cycle, cause unknown | Open |
