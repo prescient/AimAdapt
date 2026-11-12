@@ -12,8 +12,9 @@ A scenario is refused when it uses something the trainer doesn't model, so every
 | K2 Dashes | fdf08f9 | 103 of 225, 31 of the 34 Novice benchmarks |
 | K3 Helper bots and knockback | 32d5397 | 107 of 225, all 34 Novice benchmarks |
 | K4 Lives, time score and efficiency | 783b0d7 | 111 of 225 |
-| K5 Hitbox shapes | | 111 of 225 |
-| K6 Standing and spawning details | | |
+| K5 Hitbox shapes | cfb7fd1 | 111 of 225 |
+| K6a Where bots appear and stand | | 111 of 225 |
+| K6b The jump key | | |
 | K15 Ability and helper setups K2 and K3 refuse | | |
 | K7 Armed bots that never fire, invincible characters | | |
 | K8 Bots that destroy themselves | | |
@@ -185,16 +186,69 @@ Done. After K5, 111 of the 225 files still play: no file started or stopped play
 
 ### K6. Standing and spawning details
 
-Small differences on files that already play.
+Small differences on files that already play. The package began as six short items: each kind's own start height and spawn offset, a bot's own `BlockSpawnFOV`, standing on a floor within the step-up height, crouching, the head's offset, and how long a jetpack holds its thrust. Measuring the jetpack showed that jumps and flyers were played wrongly too, so the package grew. It lands in two commits: where bots appear and stand (K6a), then the jump key (K6b).
 
-- Each kind of bot starts at its own height and spawn offset (all kinds use the first kind's now).
-- A bot's own `BlockSpawnFOV`.
-- Bots stand on a floor within their step-up height, as the player does.
-- Crouching bots (dodge profiles that crouch on the ground).
-- The head's offset on the player's eye height.
-- How long a jetpack bot holds its thrust, which is a guess today.
+Measured on 11 November 2026 with six test maps in KovaaK's 3.9.13 (`AimAdapt - K6 Test …`). Each put a row of red bots 3000 units in front of the player, and a screen recording at 60 frames a second gave every bot's height over time, to about 14 units. The counts below are over the 111 files that play.
 
-Each item is its own small change with a test. The ones that need a number from KovaaK's get a test map first.
+Start heights, offsets and standing:
+
+- Each kind of bot starts at its own height (K5's rule, on its own shape and size) and with its own `SpawnOffsetMin` and `SpawnOffsetMax`. Every kind uses the first kind's today. Among the kinds a player shoots at, start heights differ in 5 files and offsets in 3. Nothing to measure: it is K5's rule applied to each kind.
+- A bot that never moves still falls when its character has gravity. The trainer leaves it hanging where it appeared (1 file). A bug, fixed here.
+- A bot that appears with a floor within its `StepUpHeight` below its feet is put on that floor in its first frame (a gap of 250 with a step-up of 300). With the floor further down than that it falls at its gravity (a gap of 80 with a step-up of 75). 33 files have walking bots with a step-up height.
+- A bot's own `BlockSpawnFOV` doesn't keep it out of the player's view. With 30 degrees set on the bot and none on the player, 96 spawns in 67 s landed on every point of an arc in front of the player. The importer doesn't read the setting, and that stays.
+- Crouching on the ground changes nothing in these files. `CrouchHeightModifier` is 1.0 on every bot whose dodge profile crouches, and the one walking bot that crouches is as fast crouched as standing. A dodge profile's crouch matters only for a flyer (below). The note "bots don't crouch yet" stays for a walking bot whose crouch would change its height or its speed, and no playing file has one.
+- The head's offset on the player's eye height: no playing file sets `MainBBHeadOffset`, so it stays in the backlog.
+
+A dodge profile's jump settings work like a key. When the bot appears, and then every `MinJumpTime` to `MaxJumpTime` seconds, the bot decides with the chance `JumpFrequency` whether the jump key is down until its next decision. Two decisions in a row to hold it are one long hold. What the key does depends on the bot.
+
+Jumping (33 files):
+
+- A jump needs a press: the key going down while the bot stands on the ground. A bot told to hold the key in every window hopped once in 147 s. The trainer jumps at every decision to hold, so with a chance of one half it jumps about twice as often as KovaaK's. A bug, fixed here.
+- `CanPogoJump`: a bot that lands with the key held jumps again, at every landing.
+- `AllowBufferedJumps`: a press made in the air jumps at the landing, if the key is still held then.
+- With neither, a press in the air does nothing unless the bot has an air jump left. One exception: a bot that comes down from its spawn point with the key held jumps as it lands.
+- Air jumps (20 files): a press in the air makes an air jump while the bot has one left, and its upward speed becomes `AirJumpVelocity`. `AirJumpCount` is the number of air jumps per flight, and a landing refills it (checked with counts of 1, 2 and 3). A held key makes none. With `AllowBufferedJumps`, a press after the air jumps are used up is buffered for the landing: on a bot with one air jump, 28 of 70 jumps came at a landing.
+- The jump speed: a character has either `JumpVelocity` or, in its place, `JumpVelocityMin` and `JumpVelocityMax`. No installed profile has both, and the pair is always two equal numbers. Both forms give the same jump, and the importer already read both. A test bot with a real range (200 to 800) jumped to a different height each time.
+
+Jetpacks (18 files):
+
+- The jetpack thrusts for as long as the key is held. The trainer thrust for one window per decision, which was the guess the plan named.
+- `JetpackActivationDelay` passes between the press and the thrust when the press is made on the ground. A press in the air thrusts at once. A bot that lands with the key held keeps thrusting, with no new delay.
+- A delay of exactly 0 never thrusts. A delay of 0.001 thrusts at once. One playing kind has 0.
+- A kind with a jump speed jumps at a press on the ground, and the thrust follows after the delay. A press in the air only thrusts.
+- A climb is capped at `JetpackMaxZVelocity`. A fall isn't.
+- Fuel: the tank holds `JetpackFullFuelTime` seconds. It drains one second per second while the key is held, from the press on, the delay included. It refills by `JetpackFuelIncPerSec` per second whenever the jetpack isn't thrusting. When the tank runs dry the thrust stops and can't start again for about 0.26 s. After that it thrusts whenever the key is held and the tank isn't empty.
+- So a bot that keeps the key held after running dry sputters. With a refill of 1 or less it stays off until the key is let go. With 1.25 it thrusts in bursts of 0.065 s, with 1.5 in bursts of 0.13 s, and with 2 it is on and off for 0.26 s each. All four were seen.
+- `JetpackFuelRegensInAir` off: one bot thrust for 1.2 s on a 1.2 s tank, then never again in 144 s on the floor with the key held. Every playing kind with it off has a tank of 999 s or more, so the exact rule doesn't matter yet.
+
+Flyers (14 files):
+
+- `AlterateJumpCrouchInput` on: the bot flies up for one `ToggleUpDown` time and down for the next, starting upward, and holds still for the `UpDownSwapPause` time between the two. Its jump and crouch frequencies change nothing. The trainer plays every flyer this way.
+- Off: the toggle times do nothing. The jump key flies the bot up and a crouch key flies it down, each on its own windows, at the flight speeds. The crouch key is held with the chance `CrouchInAirFrequency` for `MinCrouchTime` to `MaxCrouchTime` at a time. It needs the character's `CanCrouch` and works without `CanCrouchInAir`. `CrouchOnGroundFrequency` does nothing to a flyer. Both keys together cancel, unless the character has `IsFlyUpOnJumpAndCrouch`, when it rises.
+- With no key down, a flyer without gravity stops at once. So the 11 dodge rows in 4 files with alternate off, no jumps and no crouches hover at one height in KovaaK's, where the trainer bobs them up and down. A bug, fixed here.
+- At a new press, and at a turnaround, the vertical speed starts from zero. `FlightAccelUp` applies while the bot gains speed upward and `FlightAccelDown` while it gains speed downward. The trainer carries the old speed through a turnaround.
+- A flyer whose character has gravity (3 files): with no key down it keeps its speed and falls under its gravity, and it stands on a floor. While a key is held, gravity doesn't act. It never jumps, whatever its jump speed.
+
+Not measured, and left as it is: `FlightObeysPitch` (15 playing kinds have it), whether a bot's own `BlockSpawnFOV` stops other bots from appearing in that bot's view, and kinds that differ in `BlockedSpawnRadius` (1 file, where every kind uses the first kind's).
+
+What gets built in K6a, where bots appear and stand:
+
+- `aimadapt-sim`: a kind of bot can have its own rise (how much higher or lower than the first kind it starts) and its own pair of spawn offsets. A spawn draws the same random numbers in the same order as before, so worlds without these keep their seeds' layouts.
+- `aimadapt-sce`: each kind gets K5's start height on its own character, and its own offsets when they differ from the first kind's.
+- A bot that never moves, isn't a flyer and has a `Gravity` above 0 in its character gets the physics of a pushed bot: it falls and stands. Before, only scenarios with helper bots did that.
+- `StepUpHeight` is read for bots with gravity that don't fly. When such a bot appears with a floor within that height below its feet, it starts on the floor. Only the moment a bot appears is built: KovaaK's wasn't measured on a walking bot that meets a step.
+- Tests: a regression test for each of the two bugs (every kind at the first kind's height and offsets, a still bot with gravity hanging in the air), the step-up on both sides of its limit, a made-up fixture, and the fingerprints of fixtures that already play.
+
+K6a is done. After it, 111 of the 225 files still play: no file started or stopped playing, and no note changed. 38 playing files changed, so bests set on them here start again. 33 have a bot with a step-up height, kinds differ in start height in 5 and in offsets in 3, and some files are in two of those groups. One of the 33 is the file with the still bot that now falls: its bots have a top speed but are told never to dodge, and every one of its spawn points has a floor under it, so they land. In one file two characters that differ only in their offsets are two kinds now. All of this is checked by the tests and the made-up Stair Court fixture. No real file was played in the engine and looked at.
+
+What gets built in K6b, the jump key:
+
+- `aimadapt-sim`: each bot has a jump key, decided when it appears and at the end of every jump window. Only dodge profiles with a jump chance draw random numbers for it, so files without jumps keep their seeds' layouts.
+- Jumpers: a press on the ground jumps. A press in the air makes an air jump while one is left, and is buffered otherwise when the character has buffered jumps. A landing with the key held jumps for a pogo jumper, for a buffered press, and for the first landing after the bot appeared.
+- Jetpacks: the activation delay, thrust for as long as the key is held, and the tank with its 0.25 s wait after running dry. A jetpack with a delay of exactly 0 is left out by the importer, so that kind only hops.
+- Flyers: a dodge profile with alternate off flies by the jump key and a crouch key. For every flyer the vertical speed starts from zero at a new input. With no input a flyer without gravity stops, and one with gravity falls.
+- `aimadapt-sce`: reads `CanPogoJump`, `AllowBufferedJumps`, `JetpackActivationDelay`, `JetpackFullFuelTime`, `JetpackFuelIncPerSec`, `JetpackFuelRegensInAir`, `AlterateJumpCrouchInput`, `IsFlyUpOnJumpAndCrouch`, `CrouchInAirFrequency`, `MinCrouchTime` and `MaxCrouchTime`. A bot counts as moving when it can jump (either form of the jump speed, and gravity) or has a jetpack it uses. The note about the jetpack's guessed hold time goes, and the crouch note is kept only where a crouch would change a walking bot.
+- Tests: a regression test for each of the three bugs (a jump at every decision to hold, a thrust of one window, flyers with alternate off bobbing), one test per rule above, a made-up fixture, and the fingerprints of fixtures that already play.
 
 ### K15. Ability and helper setups K2 and K3 refuse
 
@@ -295,3 +349,18 @@ These rows are filled in as packages land. A row leaves the table when a test ma
 | Overkill under damage efficiency | Damage done stops at the bot's health left, and the shot's full damage counts as possible | No |
 | The beam's damage possible | Its damage for every tick it fires, on target or off, as the run file writes it | No |
 | Damage efficiency with no shots fired | No cut, as with the accuracy multiplier | No |
+| A character with no `Gravity` key | A moving bot gets gravity 1.0, and a bot that never moves doesn't fall | No: every installed character profile has the key |
+| A bot without gravity that appears within its `StepUpHeight` of a floor | Left where it appears | No: measured on bots with gravity |
+| A walking bot that meets a step within its `StepUpHeight` | Not built: only the moment a bot appears is | No |
+| Kinds that differ in `BlockedSpawnRadius` | Every kind uses the first kind's | No: 1 playing file |
+| `JetpackFuelRegensInAir` off | The tank refills only while the bot is on the ground with the jump key up | Partly: one bot with the key held on the floor never refilled |
+| The wait after a jetpack's tank runs dry | 0.25 s from the moment it runs dry, whatever the key does in that time | Partly: about 0.26 s on film with the key held throughout |
+| `JetpackFullFuelTime` of 0 or less | An endless tank | No: no installed file has it |
+| A jetpack bot's press in the air, with `AllowBufferedJumps` | Buffered like any other bot's: a jump at the landing if the key is still held | No |
+| The press that made an air jump, with `AllowBufferedJumps` | Not buffered for the landing | No: the film fits both readings equally well |
+| `JumpVelocityMin` below `JumpVelocityMax` | Each jump draws a speed evenly between the two | Partly: a 200 to 800 bot jumped to a different height each time, and the spread wasn't fitted |
+| The jump key when a bot changes dodge profile | Keeps its state, and the new profile's first decision comes one of its windows later | No |
+| A dodge profile with no `AlterateJumpCrouchInput` key | Alternate on, as the trainer played every flyer before K6 | No: no playing flyer's profile lacks it |
+| A flyer with gravity and `AlterateJumpCrouchInput` on | Falls during the swap pause | No: no installed file has one |
+| A flyer with gravity, crouch key held | Flies down at the flight speed, as without gravity | No |
+| `FlightObeysPitch` | Not read | No: 15 playing kinds have it |

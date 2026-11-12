@@ -23,7 +23,7 @@ fn read(name: &str) -> Sce {
 #[test]
 fn finds_every_fixture() {
     let files = find_files(&[fixtures()]);
-    assert_eq!(files.len(), 8);
+    assert_eq!(files.len(), 9);
     assert!(files.iter().all(|f| f.extension().unwrap() == "sce"));
 }
 
@@ -387,7 +387,7 @@ fn git_keeps_the_fixtures_bytes() {
     for name in ["Drifting Pair", "Old Room"] {
         assert!(crlf(name), "{name} lost its CRLF line ends");
     }
-    for name in ["Dash Lane", "Still Wall", "Floor Keeper", "Ledge Kicker", "Last Lives", "Box Row"] {
+    for name in ["Dash Lane", "Still Wall", "Floor Keeper", "Ledge Kicker", "Last Lives", "Box Row", "Stair Court"] {
         assert!(!crlf(name), "{name} was given CRLF line ends");
     }
 }
@@ -434,4 +434,62 @@ fn a_slot_with_lives_ends_on_its_last_kill_and_pays_for_the_time_left() {
     assert!(sim.elapsed() < 10.0, "it ended on the kills, not the clock: {}", sim.elapsed());
     assert!((sim.score() - (100.0 - sim.elapsed())).abs() < 1e-3, "{} at {} s", sim.score(), sim.elapsed());
     assert!(sim.score() > 90.0);
+}
+
+/// Plan K6a on one made-up file: a small and a large ball, each with its own start height and
+/// spawn offsets, drop from above a floor and come to rest on it (they don't move by themselves,
+/// but their character has gravity), and a walker whose feet appear 0.5 m above the floor, within
+/// its step-up height, is on the floor in its first frame.
+#[test]
+fn kinds_start_at_their_own_height_and_bots_fall_and_step_onto_the_floor() {
+    let i = import(&path("Stair Court")).unwrap();
+    let s = i.scenario;
+    assert!(s.problems().is_empty());
+    assert_eq!(i.notes.len(), 1, "{:?}", i.notes);
+    let w = s.world.as_ref().unwrap();
+    assert_eq!((s.targets.count, w.kinds.len()), (3, 3));
+    let (pebble, boulder, strider) = (&w.kinds[0], &w.kinds[1], &w.kinds[2]);
+    // The first kind's start height is the spawn point's; Boulder (R 60, H 120) starts 0.8 m
+    // above a pebble (R 20, H 40), and a 1.7 m walker 1.3 m above it.
+    assert_eq!((pebble.rise, pebble.offsets), (0.0, None));
+    assert!((boulder.rise - 0.8).abs() < 1e-4 && (strider.rise - 1.3).abs() < 1e-4);
+    // The world's offsets are the pebble's (1 m wide, to the side); the others say their own.
+    assert_eq!((w.offset_min, w.offset_max), ([-0.5, 0.0, 0.0], [0.5, 0.0, 0.0]));
+    assert_eq!(boulder.offsets, Some([[-3.0, 0.0, 0.0], [3.0, 0.5, -1.0]]));
+    assert_eq!(strider.offsets, Some([[0.0; 3]; 2]));
+    // Both balls fall with no speed of their own; the walker has a step-up height.
+    for ball in [pebble, boulder] {
+        let m = ball.motion.as_ref().expect("a still ball with gravity falls");
+        assert_eq!((m.max_speed, m.gravity, m.step_up), (0.0, 8.0, 0.0));
+    }
+    let walker = strider.motion.as_ref().unwrap();
+    assert_eq!((walker.max_speed, walker.step_up), (3.0, 0.75));
+    assert_eq!((pebble.spawns.clone(), boulder.spawns.clone(), strider.spawns.clone()), (vec![0], vec![2], vec![1]));
+
+    // The floor's top, 1 m below the player's eye.
+    let floor = w.meshes[0].positions.iter().map(|p| p[1]).fold(f32::MIN, f32::max);
+    assert!((floor + 1.0).abs() < 1e-4, "{floor}");
+    let mut sim = Sim::new(s, 5);
+    let of = |sim: &Sim, kind: u32| sim.targets().iter().find(|t| t.kind() == Some(kind)).unwrap().clone();
+    // At the start: the balls are in the air (spawn point 3 m above the floor, plus their rise,
+    // and the pebble's 0.2 m radius), the walker already on the floor.
+    let (a, b, c) = (of(&sim, 0), of(&sim, 1), of(&sim, 2));
+    assert!((a.pos.y - (floor + 3.0 + 0.4)).abs() < 1e-3, "{}", a.pos.y);
+    // The boulder's own offset lifts it by up to 0.5 m more, never lowers it.
+    let lifted = b.pos.y - (floor + 3.0 + 1.2);
+    assert!((-1e-3..=0.5 + 1e-3).contains(&lifted), "{}", b.pos.y);
+    assert!((c.pos.y - (floor + 0.85)).abs() < 0.03, "{}", c.pos.y);
+    // The pebble's offset runs along the spawn point's own axes, up to 0.5 m each way.
+    assert!(a.pos.x.abs() <= 0.5 + 1e-4 && (a.pos.z + 8.0).abs() < 1e-4, "{}", a.pos);
+    // After the countdown they fall and come to rest on the floor, a radius above it.
+    while sim.phase() == Phase::Countdown {
+        sim.step(0.05, idle());
+    }
+    for _ in 0..(4.0 * 120.0) as usize {
+        sim.step(1.0 / 120.0, idle());
+    }
+    for (kind, radius) in [(0, 0.2), (1, 0.6), (2, 0.85)] {
+        let t = of(&sim, kind);
+        assert!((t.pos.y - (floor + radius)).abs() < 0.03, "kind {kind}: {}", t.pos.y);
+    }
 }

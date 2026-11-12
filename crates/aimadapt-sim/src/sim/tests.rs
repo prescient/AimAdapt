@@ -2170,3 +2170,166 @@ fn a_default_world_serialises_without_the_score_rules() {
     bad.world.as_mut().unwrap().time_score = f32::NAN;
     assert!(!bad.problems().is_empty());
 }
+
+// Plan K6a: where bots appear and stand.
+
+/// A world with a point spawn at (0, -1, -10) and two kinds of bot, one slot each. Nothing
+/// has a motion, so a bot stays where it appears. The first kind has none of the K6a
+/// fields; `second` is the other.
+fn two_kinds(second: crate::world::WorldKind) -> Sim {
+    use crate::world::WorldKind;
+    let mut s = on_a_floor(Vec::new(), None);
+    s.targets.count = 2;
+    let w = s.world.as_mut().unwrap();
+    w.kinds = vec![WorldKind { health: 1.0, ..Default::default() }, WorldKind { health: 1.0, ..second }];
+    w.slots = vec![vec![(0, 1.0)], vec![(1, 1.0)]];
+    Sim::new(s, 3)
+}
+
+fn kind_pos(sim: &Sim, kind: u32) -> Vec3 {
+    sim.targets().iter().find(|t| t.kind() == Some(kind)).unwrap().pos
+}
+
+/// Bug (plan K6): every kind of bot started at the first kind's height. A kind's `rise`
+/// puts it that much higher (or lower) than the first kind from the same spawn point. A
+/// world whose kinds have none spawns exactly where it did (the imported fixtures'
+/// pinned fingerprints and the layouts of their seeds cover that too).
+#[test]
+fn a_kind_with_a_rise_starts_that_much_higher() {
+    let sim = two_kinds(crate::world::WorldKind { rise: 0.5, ..Default::default() });
+    assert_eq!(kind_pos(&sim, 0), Vec3::new(0.0, -1.0, -10.0));
+    assert_eq!(kind_pos(&sim, 1), Vec3::new(0.0, -0.5, -10.0));
+    let sim = two_kinds(crate::world::WorldKind { rise: -0.25, ..Default::default() });
+    assert_eq!(kind_pos(&sim, 1), Vec3::new(0.0, -1.25, -10.0));
+    let sim = two_kinds(crate::world::WorldKind::default());
+    assert_eq!(kind_pos(&sim, 1), kind_pos(&sim, 0));
+}
+
+/// Bug (plan K6): every kind of bot used the first kind's spawn offsets. A kind with its
+/// own pair uses it, along the spawn point's axes, and the first kind keeps the world's.
+#[test]
+fn a_kind_with_its_own_offsets_uses_them() {
+    let sim =
+        two_kinds(crate::world::WorldKind { offsets: Some([[1.0, 0.5, 0.0], [1.0, 0.5, 0.0]]), ..Default::default() });
+    assert_eq!(kind_pos(&sim, 0), Vec3::new(0.0, -1.0, -10.0));
+    assert_eq!(kind_pos(&sim, 1), Vec3::new(1.0, -0.5, -10.0));
+    // The world's offsets are for the kinds that don't say.
+    let mut s = on_a_floor(Vec::new(), None);
+    s.targets.count = 2;
+    let w = s.world.as_mut().unwrap();
+    (w.offset_min, w.offset_max) = ([0.0, 0.0, 2.0], [0.0, 0.0, 2.0]);
+    w.kinds = vec![
+        crate::world::WorldKind { health: 1.0, ..Default::default() },
+        crate::world::WorldKind { health: 1.0, offsets: Some([[0.0; 3], [0.0; 3]]), ..Default::default() },
+    ];
+    w.slots = vec![vec![(0, 1.0)], vec![(1, 1.0)]];
+    let sim = Sim::new(s, 3);
+    assert_eq!(kind_pos(&sim, 0), Vec3::new(0.0, -1.0, -8.0));
+    assert_eq!(kind_pos(&sim, 1), Vec3::new(0.0, -1.0, -10.0));
+}
+
+/// A kind's own offsets and rise draw the same random numbers as the world's, so a
+/// world that doesn't use them keeps its layout, and one that does moves only the
+/// bot of that kind.
+#[test]
+fn a_kinds_rise_and_offsets_draw_no_extra_random_numbers() {
+    let mut spawns = Vec::new();
+    for second in [
+        crate::world::WorldKind::default(),
+        crate::world::WorldKind { rise: 0.4, offsets: Some([[0.0, 0.0, 0.0], [3.0, 0.0, 0.0]]), ..Default::default() },
+    ] {
+        let mut s = on_a_floor(Vec::new(), None);
+        s.targets.count = 2;
+        let w = s.world.as_mut().unwrap();
+        w.offset_max = [3.0, 0.0, 0.0];
+        w.kinds = vec![
+            crate::world::WorldKind { health: 1.0, ..Default::default() },
+            crate::world::WorldKind { health: 1.0, ..second },
+        ];
+        w.slots = vec![vec![(0, 1.0)], vec![(1, 1.0)]];
+        let mut sim = Sim::new(s, 11);
+        // A third, fourth, ... bot, from the same stream.
+        let mut seen = vec![kind_pos(&sim, 0), kind_pos(&sim, 1)];
+        for _ in 0..4 {
+            sim.step(FRAME, Input { aim: kind_pos(&sim, 0).normalize(), fire_pressed: true, fire_held: false });
+            seen.push(kind_pos(&sim, 0));
+        }
+        spawns.push(seen);
+    }
+    // Kind 0 follows the same stream in both worlds.
+    let first = |v: &Vec<Vec3>| v.iter().enumerate().filter(|(i, _)| *i != 1).map(|(_, p)| *p).collect::<Vec<_>>();
+    assert_eq!(first(&spawns[0]), first(&spawns[1]));
+}
+
+/// One ball of radius 0.5 with `motion` appears at `at` over a floor at y = 0 (which
+/// stops it).
+fn over_a_floor(motion: crate::motion::Motion, at: [f32; 3]) -> Sim {
+    let floor = crate::world::WorldMesh {
+        positions: vec![[-30.0, 0.0, -30.0], [30.0, 0.0, -30.0], [30.0, 0.0, 5.0], [-30.0, 0.0, 5.0]],
+        triangles: vec![[0, 1, 2], [0, 2, 3]],
+        ..Default::default()
+    };
+    let mut s = no_countdown(builtin("builtin:static-grid"));
+    s.targets.count = 1;
+    s.targets.radius = 0.5;
+    s.targets.height = 1.0;
+    s.world = Some(crate::world::World {
+        spawns: vec![crate::world::WorldSpawn { pos: at, ..Default::default() }],
+        meshes: vec![floor],
+        motion: Some(motion),
+        ..Default::default()
+    });
+    Sim::new(s, 1)
+}
+
+fn bot_y(sim: &Sim) -> f32 {
+    sim.targets()[0].pos.y
+}
+
+fn grounded(sim: &Sim) -> bool {
+    sim.targets()[0].bot.as_ref().unwrap().grounded
+}
+
+/// A bot that doesn't move by itself but has gravity (what the importer gives a still
+/// bot whose character has some) falls from where it appeared and rests on the floor.
+#[test]
+fn a_still_bot_with_gravity_falls_and_rests_on_the_floor() {
+    let still = crate::motion::Motion { gravity: 8.0, ..Default::default() };
+    let mut sim = over_a_floor(still, [0.0, 3.0, -10.0]);
+    assert_eq!(bot_y(&sim), 3.0);
+    run_for(&mut sim, 1.0);
+    assert!((bot_y(&sim) - 0.5).abs() < 0.01 && grounded(&sim), "{}", bot_y(&sim));
+}
+
+/// A bot that appears with a floor within its step-up height below its feet starts on
+/// it, grounded, in its first frame. With the floor further down it starts in the air
+/// and falls. A ball's feet are 0.5 below its middle, so at 0.75 the floor is 0.25 down.
+#[test]
+fn a_bot_starts_on_a_floor_within_its_step_up_height() {
+    let walker = |step_up: f32| crate::motion::Motion { gravity: 8.0, step_up, ..Default::default() };
+    let sim = over_a_floor(walker(0.3), [0.0, 0.75, -10.0]);
+    assert!((bot_y(&sim) - 0.5).abs() < 0.01 && grounded(&sim), "{}", bot_y(&sim));
+    let mut sim = over_a_floor(walker(0.2), [0.0, 0.75, -10.0]);
+    assert_eq!((bot_y(&sim), grounded(&sim)), (0.75, false));
+    run_for(&mut sim, 1.0);
+    assert!((bot_y(&sim) - 0.5).abs() < 0.01 && grounded(&sim), "it fell onto the floor: {}", bot_y(&sim));
+    // Just within the limit counts; no step-up means no pull.
+    let sim = over_a_floor(walker(0.26), [0.0, 0.75, -10.0]);
+    assert!((bot_y(&sim) - 0.5).abs() < 0.01 && grounded(&sim));
+    assert_eq!(bot_y(&over_a_floor(walker(0.0), [0.0, 0.75, -10.0])), 0.75);
+}
+
+/// The step-up pull is for bots that fall and walk: one with no gravity stays where it
+/// appeared, and so does one that flies.
+#[test]
+fn a_bot_without_gravity_or_that_flies_isnt_pulled_to_the_floor() {
+    let float = crate::motion::Motion { gravity: 0.0, step_up: 0.3, ..Default::default() };
+    assert_eq!(bot_y(&over_a_floor(float, [0.0, 0.75, -10.0])), 0.75);
+    let flier = crate::motion::Motion {
+        gravity: 8.0,
+        step_up: 0.3,
+        flight: Some(crate::motion::Flight { up_speed: 2.0, down_speed: 2.0, ..Default::default() }),
+        ..Default::default()
+    };
+    assert_eq!(bot_y(&over_a_floor(flier, [0.0, 0.75, -10.0])), 0.75);
+}

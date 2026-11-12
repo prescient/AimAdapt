@@ -1058,3 +1058,123 @@ fn unverified_score_combinations_get_a_note() {
     assert!(notes("ScoreMultAccuracy=true").is_empty());
     assert!(notes("ScorePerTime=1.0").is_empty());
 }
+
+// Plan K6a: where bots appear and stand.
+
+/// [`VOLUME_SCE`] with its bot's character given `dot` extra settings and a second kind of bot,
+/// `Big`, whose character is a ball with `big` as its hitbox and extra settings (health 1 and
+/// no speed, like the first).
+fn with_big_kind(dot: &str, big: &str) -> String {
+    VOLUME_SCE
+        .replace("AddedBots=Dot.bot;Dot.bot;Dot.bot", "AddedBots=Dot.bot;Big.bot")
+        .replace("BotTeams=2;2;2", "BotTeams=2;2")
+        .replace("MainBBType=Spheroid", &format!("{dot}MainBBType=Spheroid"))
+        .replace(
+            "[Map Data]",
+            &format!(
+                "[Bot Profile]\nName=Big\nCharacterProfile=Big Ball\n[Character Profile]\nName=Big Ball\n\
+                 MaxHealth=1.0\nMaxSpeed=0.0\n{big}[Map Data]"
+            ),
+        )
+}
+
+const BIG_HITBOX: &str = "MainBBType=Spheroid\nMainBBRadius=60.0\nMainBBHeight=120.0\n";
+
+/// Bug (plan K6): every kind of bot started at the first kind's height. Each kind starts
+/// its own K5 height above its spawn point, so a kind's `rise` is how much higher (or
+/// lower) it starts than the first kind.
+#[test]
+fn each_kind_of_bot_starts_at_its_own_height() {
+    let near = |got: f32, want: f32| assert!((got - want).abs() < 0.005, "{got} != {want}");
+    // Dot starts 0.4 m above its spawn point (R 20, H 40); Big 1.2 m, so 0.8 m higher.
+    let w = import_ok(&with_big_kind("", BIG_HITBOX)).scenario.world.unwrap();
+    assert_eq!(w.kinds.len(), 2);
+    near(w.spawns[0].pos[1], first_spawn_height(VOLUME_SCE));
+    assert_eq!(w.kinds[0].rise, 0.0);
+    near(w.kinds[1].rise, 0.8);
+    // A smaller second kind starts lower.
+    let small = "MainBBType=Spheroid\nMainBBRadius=10.0\nMainBBHeight=20.0\n";
+    near(import_ok(&with_big_kind("", small)).scenario.world.unwrap().kinds[1].rise, -0.2);
+    // A flat spheroid starts twice its radius up (K5), a tall capsule its height.
+    let flat = "MainBBType=Spheroid\nMainBBRadius=60.0\nMainBBHeight=30.0\n";
+    near(import_ok(&with_big_kind("", flat)).scenario.world.unwrap().kinds[1].rise, 0.8);
+    let capsule = "MainBBType=Cylindrical\nMainBBRadius=20.0\nMainBBHeight=180.0\n";
+    near(import_ok(&with_big_kind("", capsule)).scenario.world.unwrap().kinds[1].rise, 1.4);
+}
+
+/// Bug (plan K6): every kind of bot used the first kind's `SpawnOffsetMin` and
+/// `SpawnOffsetMax`. A kind keeps its own pair only when it differs from the world's.
+#[test]
+fn a_kind_has_its_own_spawn_offsets_only_when_they_differ() {
+    let offsets = |min: &str, max: &str| format!("SpawnOffsetMin={min}\nSpawnOffsetMax={max}\n");
+    let dot = offsets("X=0.000 Y=-50.000 Z=0.000", "X=0.000 Y=50.000 Z=0.000");
+    let same = import_ok(&with_big_kind(&dot, &format!("{BIG_HITBOX}{dot}"))).scenario.world.unwrap();
+    assert_eq!((same.kinds[0].offsets, same.kinds[1].offsets), (None, None));
+    // The world's are the first kind's, in the sim's axes and meters.
+    assert_eq!((same.offset_min, same.offset_max), ([-0.5, 0.0, 0.0], [0.5, 0.0, 0.0]));
+    // Big's own: Unreal x is forward (sim -z), y right (sim x), z up (sim y).
+    let own = offsets("X=100.000 Y=0.000 Z=0.000", "X=200.000 Y=0.000 Z=50.000");
+    let w = import_ok(&with_big_kind(&dot, &format!("{BIG_HITBOX}{own}"))).scenario.world.unwrap();
+    assert_eq!(w.kinds[0].offsets, None);
+    assert_eq!(w.kinds[1].offsets, Some([[0.0, 0.0, -1.0], [0.0, 0.5, -2.0]]));
+    assert_eq!((w.offset_min, w.offset_max), (same.offset_min, same.offset_max));
+    // A first kind with none, and a second with some.
+    let w = import_ok(&with_big_kind("", &format!("{BIG_HITBOX}{own}"))).scenario.world.unwrap();
+    assert_eq!(w.kinds[1].offsets, Some([[0.0, 0.0, -1.0], [0.0, 0.5, -2.0]]));
+}
+
+/// Bug (plan K6): two characters that differ only in their spawn offsets were merged into
+/// one kind, so the second's offsets were lost.
+#[test]
+fn characters_that_differ_only_in_spawn_offsets_are_two_kinds() {
+    let same_hitbox = "MainBBType=Spheroid\nMainBBRadius=20.0\nMainBBHeight=40.0\n";
+    let none = import_ok(&with_big_kind("", same_hitbox)).scenario.world.unwrap();
+    assert!(none.kinds.is_empty(), "alike in everything: one kind, so the world has no list");
+    for (key, value) in
+        [("SpawnOffsetMin", "X=0.000 Y=-30.000 Z=0.000"), ("SpawnOffsetMax", "X=0.000 Y=0.000 Z=30.000")]
+    {
+        let w = import_ok(&with_big_kind("", &format!("{same_hitbox}{key}={value}\n"))).scenario.world.unwrap();
+        assert_eq!(w.kinds.len(), 2, "{key}");
+        assert_eq!(w.slots, vec![vec![(0, 1.0)], vec![(1, 1.0)]]);
+    }
+}
+
+/// [`VOLUME_SCE`] with `extra` character settings on its bot, which doesn't move on its own.
+fn still_bot(extra: &str) -> Option<aimadapt_sim::motion::Motion> {
+    let text = VOLUME_SCE.replace("MainBBType=Spheroid", &format!("{extra}MainBBType=Spheroid"));
+    import_ok(&text).scenario.world.unwrap().motion
+}
+
+/// Bug (plan K6): a bot that never moves hung in the air where it appeared, though its
+/// character has gravity and KovaaK's lets it fall. It gets the physics of a pushed bot,
+/// with no speed, when the character isn't a flyer and has a `Gravity` above 0. The key
+/// has to be there: a character without it stays as it was.
+#[test]
+fn a_still_bot_with_gravity_falls() {
+    let m = still_bot("Gravity=1.0\n").expect("a still bot with gravity falls");
+    assert_eq!((m.max_speed, m.gravity), (0.0, 8.0));
+    assert!(m.dodges.is_empty() && m.flight.is_none() && m.abilities.is_none());
+    assert!((still_bot("Gravity=0.5\n").unwrap().gravity - 4.0).abs() < 1e-4);
+    assert_eq!(still_bot("Gravity=0.0\n"), None, "nothing pulls it down");
+    assert_eq!(still_bot(""), None, "no Gravity key: as before");
+    assert_eq!(still_bot("Gravity=1.0\nIsFlyer=true\n"), None, "a still flyer stays still");
+    // Falling isn't moving by a dodge profile: no note for it.
+    let text = VOLUME_SCE.replace("MainBBType=Spheroid", "Gravity=1.0\nMainBBType=Spheroid");
+    assert!(import_ok(&text).notes.is_empty());
+}
+
+/// `StepUpHeight` is read for bots with gravity that don't fly, in meters.
+#[test]
+fn step_up_height_is_read_for_walkers_with_gravity() {
+    let walker = |extra: &str| {
+        still_bot(&format!("MaxSpeed=300.0\nStepUpHeight=75.0\n{extra}")).expect("a walker has a motion").step_up
+    };
+    assert_eq!(walker("Gravity=1.0\n"), 0.75);
+    assert_eq!(walker(""), 0.75, "gravity is 1 when the key is missing");
+    assert_eq!(walker("Gravity=0.0\n"), 0.0, "no gravity, nothing to step down");
+    assert_eq!(walker("IsFlyer=true\nFlightVelocityUp=800.0\nGravity=1.0\n"), 0.0, "a flyer");
+    // A still bot that falls carries it too; a negative one is none.
+    assert_eq!(still_bot("Gravity=1.0\nStepUpHeight=75.0\n").unwrap().step_up, 0.75);
+    assert_eq!(still_bot("Gravity=1.0\nStepUpHeight=-30.0\n").unwrap().step_up, 0.0);
+    assert_eq!(still_bot("Gravity=1.0\n").unwrap().step_up, 0.0, "no key, no step");
+}

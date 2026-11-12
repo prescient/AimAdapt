@@ -230,6 +230,14 @@ pub struct WorldKind {
     /// The spawn points it may use, as indices into the world's; empty for any.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub spawns: Vec<u32>,
+    /// How much higher (or, below 0, lower) than the first kind this kind starts above
+    /// its spawn point, in meters: the difference of their start heights.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub rise: f32,
+    /// This kind's own spawn offsets, `[min, max]` as the world's `offset_min` and
+    /// `offset_max`, when they differ from the world's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offsets: Option<[[f32; 3]; 2]>,
 }
 
 impl Default for WorldKind {
@@ -246,6 +254,8 @@ impl Default for WorldKind {
             invincible: false,
             motion: None,
             spawns: Vec::new(),
+            rise: 0.0,
+            offsets: None,
         }
     }
 }
@@ -516,18 +526,22 @@ impl World {
     /// [`World::spawn_pos`], with the right-hand direction of the spawn point it
     /// picked (where a bot that doesn't face the player strafes).
     pub fn spawn_point(&self, rng: &mut Rng, others: &[Vec3], radius: f32, aim: Vec3) -> (Vec3, Vec3) {
-        self.spawn_point_in(rng, others, radius, aim, &[])
+        self.spawn_point_in(rng, others, radius, aim, None)
     }
 
-    /// [`World::spawn_point`] among the spawn points `allowed` (indices; empty for all).
+    /// [`World::spawn_point`] for a bot of `kind` (none for the world's one kind): among
+    /// the spawn points the kind may use, with its own offsets and rise if it has them.
     pub fn spawn_point_in(
         &self,
         rng: &mut Rng,
         others: &[Vec3],
         radius: f32,
         aim: Vec3,
-        allowed: &[u32],
+        kind: Option<&WorldKind>,
     ) -> (Vec3, Vec3) {
+        let allowed = kind.map_or(&[][..], |k| &k.spawns[..]);
+        let [offset_min, offset_max] = kind.and_then(|k| k.offsets).unwrap_or([self.offset_min, self.offset_max]);
+        let rise = Vec3::Y * kind.map_or(0.0, |k| k.rise);
         let usable: Vec<&WorldSpawn> = if allowed.is_empty() {
             self.spawns.iter().collect()
         } else {
@@ -559,10 +573,10 @@ impl World {
                 }
             }
             for i in 0..3 {
-                let (lo, hi) = (self.offset_min[i], self.offset_max[i]);
+                let (lo, hi) = (offset_min[i], offset_max[i]);
                 offset += Vec3::from_array(point.axes[i]) * (lo + (hi - lo) * rng.next_f32());
             }
-            pos = self.out_of_walls(Vec3::from_array(point.pos) + offset, radius);
+            pos = self.out_of_walls(Vec3::from_array(point.pos) + offset + rise, radius);
             right = Vec3::from_array(point.axes[0]);
             let apart = if self.cluster {
                 // Near one that's up (the first can go anywhere), without overlapping.

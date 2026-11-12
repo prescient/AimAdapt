@@ -37,6 +37,11 @@ const LEDGE_DROP: f32 = 0.5;
 /// No floor within this far below is a drop out of the map, meters.
 const VOID: f32 = 100.0;
 
+/// Whether a value is unset, so it stays out of the file (and the fingerprint).
+fn is_zero(v: &f32) -> bool {
+    *v == 0.0
+}
+
 /// A bot's movement: its character's physics and its dodge profiles.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -54,6 +59,10 @@ pub struct Motion {
     pub braking_friction_factor: f32,
     /// m/s², downward. 0 for bots that float.
     pub gravity: f32,
+    /// A bot with gravity that appears with a floor this far below its feet or less
+    /// starts standing on it (KovaaK's `StepUpHeight`), in meters. 0 for none.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub step_up: f32,
     /// How much of its acceleration it has in the air, 0–1.
     pub air_control: f32,
     /// A jump's upward speed, m/s: picked between the two.
@@ -100,6 +109,7 @@ impl Default for Motion {
             braking: 20.0,
             braking_friction_factor: 2.0,
             gravity: 9.8,
+            step_up: 0.0,
             air_control: 0.05,
             jump_speed: [4.2, 4.2],
             air_jumps: 0,
@@ -290,6 +300,21 @@ fn start(rng: &mut Rng, s: Start) -> f32 {
                 -1.0
             }
         }
+    }
+}
+
+impl Motion {
+    /// Where a bot that appears at `pos` starts if a floor is within its step-up height
+    /// below its feet: standing on it. A capsule (a ball when `half` is 0) of `radius` has
+    /// its feet `half + radius` below its middle. None when there's no floor that near, or
+    /// for a bot that doesn't fall or that flies: it stays where it appeared.
+    pub fn spawn_floor(&self, walls: &Collider, pos: Vec3, half: f32, radius: f32) -> Option<Vec3> {
+        if self.step_up <= 0.0 || self.gravity <= 0.0 || self.flight.is_some() {
+            return None;
+        }
+        let feet = half + radius;
+        let floor = walls.ray(pos, Vec3::NEG_Y, feet + self.step_up)?;
+        Some(pos - Vec3::Y * (floor - feet).max(0.0))
     }
 }
 

@@ -51,6 +51,7 @@ impl Sim {
                 break;
             }
         }
+        let mut on_floor_at_spawn = false;
         let (pos, right) = match &self.current.world {
             // Imported scenarios: the map's spawn points, kept apart by distance, out
             // of walls and where the player's view allows.
@@ -59,13 +60,22 @@ impl Sim {
                 let (shape, radius, height) = chosen
                     .as_ref()
                     .map_or((self.scenario.targets.shape, tc.radius, tc.height), |k| (k.shape, k.radius, k.height));
-                let allowed = chosen.as_ref().map_or(&[][..], |k| &k.spawns[..]);
-                let (pos, right) = w.spawn_point_in(&mut self.rng, &others, radius, self.last_aim, allowed);
-                if w.motion_of(kind).is_some() {
-                    // A moving bot also leaves any other wall it starts in.
-                    (self.bot_walls.lift_out(pos, half_segment(shape, radius, height), radius), right)
-                } else {
-                    (pos, right)
+                let (pos, right) = w.spawn_point_in(&mut self.rng, &others, radius, self.last_aim, chosen.as_ref());
+                match w.motion_of(kind) {
+                    // A moving bot also leaves any other wall it starts in, and starts on a
+                    // floor that is within its step-up height below its feet.
+                    Some(m) => {
+                        let half = half_segment(shape, radius, height);
+                        let pos = self.bot_walls.lift_out(pos, half, radius);
+                        match m.spawn_floor(&self.bot_walls, pos, half, radius) {
+                            Some(on_floor) => {
+                                on_floor_at_spawn = true;
+                                (on_floor, right)
+                            }
+                            None => (pos, right),
+                        }
+                    }
+                    None => (pos, right),
                 }
             }
             None => {
@@ -119,7 +129,11 @@ impl Sim {
             (regen, respawn_s) = ((k.regen_per_s, k.regen_delay_s), k.respawn_delay_s);
         }
         let bot = match self.current.world.as_ref().and_then(|w| w.motion_of(kind)) {
-            Some(m) => Some(BotState::new(m, &mut self.rng, pos, right)),
+            Some(m) => {
+                let mut b = BotState::new(m, &mut self.rng, pos, right);
+                b.grounded = on_floor_at_spawn;
+                Some(b)
+            }
             None => None,
         };
         self.targets.push(Target {

@@ -269,7 +269,8 @@ struct Bots<'a> {
 }
 
 /// The target slots' bots. With `pushed` (the file has helper bots) every bot gets a
-/// motion, since a bot has to have one to fall or be pushed.
+/// motion, since a bot has to have one to fall or be pushed. Without it, a bot that
+/// doesn't move gets one only if it falls (a walker's character with gravity).
 fn bots<'a>(target_slots: &[&BotSlot<'a>], other_team: u32, pushed: bool, reasons: &mut Vec<Gap>) -> Bots<'a> {
     let mut kinds: Vec<(&Section, Option<Motion>)> = Vec::new();
     let mut slots: Vec<Vec<(u32, f32)>> = Vec::new();
@@ -294,7 +295,10 @@ fn bots<'a>(target_slots: &[&BotSlot<'a>], other_team: u32, pushed: bool, reason
                 let detail = format!("a flying target that doesn't move by itself: {}", ch.name());
                 push_once(reasons, Gap { feature: "helper bots", detail, beyond_plan: true });
             }
-            let m = if moves { Some(bot_motion(c, ch)) } else { pushed.then(|| still_motion(c, ch)) };
+            // A bot that stays put still falls when its character has gravity (the key has
+            // to be there: a character without it hangs where it appeared, as it always did).
+            let falls = !ch.is("IsFlyer") && ch.f32("Gravity").is_some_and(|g| g > 0.0);
+            let m = if moves { Some(bot_motion(c, ch)) } else { (pushed || falls).then(|| still_motion(c, ch)) };
             let k = match kinds.iter().position(|(k, km)| same_kind(k, ch) && *km == m) {
                 Some(k) => k,
                 None => {
@@ -328,7 +332,13 @@ fn add_kinds(
     sizes: impl Iterator<Item = (Shape, f32, f32)>,
     spawn_characters: &[Vec<String>],
 ) -> Result<(), Vec<Gap>> {
+    // The world starts every bot at the first kind's height and offsets; the others
+    // keep what differs.
+    let first = kinds.first().map(|(ch, _)| *ch);
     for ((ch, m), (shape, radius, height)) in kinds.iter().zip(sizes) {
+        let own = spawn_offsets(ch);
+        let offsets = (own != [world.offset_min, world.offset_max]).then_some(own);
+        let rise = first.map_or(0.0, |f| spawn_rise(ch) - spawn_rise(f));
         let spawns: Vec<u32> = spawn_characters
             .iter()
             .enumerate()
@@ -351,6 +361,8 @@ fn add_kinds(
             invincible: ch.is("InvincibleBots"),
             motion: m.clone(),
             spawns: if all { Vec::new() } else { spawns },
+            rise,
+            offsets,
         });
     }
     Ok(())
@@ -577,6 +589,8 @@ fn bot_motion(c: &BotChoice, ch: &Section) -> Motion {
         braking: cm("BrakingDeceleration", 2048.0),
         braking_friction_factor: ch.f32_or("BrakingFrictionFactor", 2.0).max(0.0),
         gravity: ch.f32_or("Gravity", 1.0).max(0.0) * GRAVITY_M_S2,
+        // Only a walker with gravity has a floor to step down onto at spawn.
+        step_up: if ch.is("IsFlyer") || ch.f32_or("Gravity", 1.0) <= 0.0 { 0.0 } else { cm("StepUpHeight", 0.0) },
         air_control: ch.f32_or("AirControl", 0.05).clamp(0.0, 1.0),
         jump_speed: jump.map(|v| v / UU_PER_M),
         air_jumps: ch.f32_or("AirJumpCount", 0.0).clamp(0.0, 100.0) as u32,
@@ -684,7 +698,7 @@ fn same_hitbox(a: &Section, b: &Section) -> bool {
 }
 
 /// Whether two characters play the same: the same one, or alike in hitbox, health,
-/// regen, color and respawn time.
+/// regen, color, respawn time and spawn offsets.
 fn same_kind(a: &Section, b: &Section) -> bool {
     a.name() == b.name()
         || same_hitbox(a, b)
@@ -695,6 +709,8 @@ fn same_kind(a: &Section, b: &Section) -> bool {
                 "MinRespawnDelay",
                 "MaxRespawnDelay",
                 "InvincibleBots",
+                "SpawnOffsetMin",
+                "SpawnOffsetMax",
             ]
             .iter()
             .all(|k| a.str(k) == b.str(k))
@@ -753,6 +769,12 @@ fn spawn_rise(ch: &Section) -> f32 {
     } else {
         height
     }
+}
+
+/// A character's spawn offsets `[min, max]` in meters, in the sim's axes. Each axis is
+/// picked between the two values, so their order doesn't matter (ww5t writes min above max).
+fn spawn_offsets(ch: &Section) -> [[f32; 3]; 2] {
+    ["SpawnOffsetMin", "SpawnOffsetMax"].map(|k| (axes(ch.vec3(k).unwrap_or_default()) / UU_PER_M).to_array())
 }
 
 /// A box bot stays lined up with the map's axes, so it lines up with the sim's only when the
@@ -871,10 +893,7 @@ fn world(
         reasons.push(Gap::planned("the map has no spawn point the bots can use", ""));
         return None;
     }
-    // Each axis of the offset is picked between the two values, so their order
-    // doesn't matter (ww5t writes min above max).
-    let a = axes(bot.vec3("SpawnOffsetMin").unwrap_or_default()) / UU_PER_M;
-    let b = axes(bot.vec3("SpawnOffsetMax").unwrap_or_default()) / UU_PER_M;
+    let [a, b] = spawn_offsets(bot);
     if !skipped.is_empty() {
         notes.push(format!(
             "some walls aren't drawn yet ({}); they don't change where bots appear",
@@ -892,8 +911,8 @@ fn world(
     Some(World {
         spawns,
         pushers,
-        offset_min: a.to_array(),
-        offset_max: b.to_array(),
+        offset_min: a,
+        offset_max: b,
         blocked_radius: bot.f32_or("BlockedSpawnRadius", 0.0).max(0.0) / UU_PER_M,
         cluster: bot.is("InvertBlockedSpawn") && bot.f32_or("BlockedSpawnRadius", 0.0) > 0.0,
         meshes,
