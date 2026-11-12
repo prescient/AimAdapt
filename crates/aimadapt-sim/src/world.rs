@@ -128,21 +128,46 @@ impl Default for World {
     }
 }
 
+/// How a chasing pusher flies, as measured in KovaaK's. Each frame its velocity
+/// loses the share `drag` times the frame time, gains `accel` times the frame time
+/// along the line to its target, is cut to `max_speed`, and loses the part that
+/// points into its plane. So it trails a target that moves.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChaseFlight {
+    /// m/s².
+    pub accel: f32,
+    /// m/s.
+    pub max_speed: f32,
+    /// Per second.
+    pub drag: f32,
+}
+
 /// A helper bot: it kicks every target in reach on a fixed schedule from the start
-/// of the run, whether anything is in reach or not. Its reach is a sphere of `radius`
-/// whose centre is `radius` ahead of it along `facing`.
+/// of the run (or from `start_s`), whether anything is in reach or not. Its reach is
+/// a sphere of `radius` whose centre is `radius` ahead of it along `facing`, or
+/// along the line to its target for a chaser with a flight.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Pusher {
-    /// Meters, in the world's frame: where a pinned pusher is, or a point on the
-    /// plane a chasing one slides on.
+    /// Meters, in the world's frame: where a pinned pusher is, a point on the plane
+    /// a chasing one slides on, and where a chaser with a flight starts.
     pub pos: [f32; 3],
     /// A unit vector: the way a pinned pusher faces, or the plane's normal pointing
     /// toward the targets for a chasing one.
     pub facing: [f32; 3],
-    /// It flies at the nearest target and is stopped by the plane, so it is always
-    /// at the point of the plane nearest the target.
+    /// It flies at the nearest target and is stopped by the plane it slides on.
+    /// Without a `flight` it arrives at once, so it is always at the point of the
+    /// plane nearest the target.
     pub chases: bool,
+    /// How a chaser flies. Absent, it arrives at once (worlds written by hand, and
+    /// scenarios stored before flights). Only valid on a pusher that chases.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub flight: Option<ChaseFlight>,
+    /// Seconds from the start of the run before the first kick; a chaser flies
+    /// during the wait.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub start_s: f32,
     /// The reach's radius, in meters.
     pub radius: f32,
     /// Seconds between kicks.
@@ -161,6 +186,8 @@ impl Default for Pusher {
             pos: [0.0; 3],
             facing: [0.0, 0.0, -1.0],
             chases: false,
+            flight: None,
+            start_s: 0.0,
             radius: 0.01,
             every_s: 0.02,
             push: 0.0,
@@ -174,17 +201,30 @@ impl Default for Pusher {
 const MAX_KICK: f32 = 1000.0;
 /// The shortest time between kicks.
 const MIN_EVERY_S: f32 = 0.005;
+/// The most a chaser may accelerate (m/s²), the fastest it may fly (m/s) and the
+/// most drag it may have (per second). Real chasers are far under all three.
+const MAX_ACCEL: f32 = 1_000_000.0;
+const MAX_FLIGHT_SPEED: f32 = 10_000.0;
+const MAX_DRAG: f32 = 1000.0;
+/// The longest a pusher may wait before its first kick, in seconds.
+const MAX_START_S: f32 = 3600.0;
 
 impl Pusher {
     /// Problems with the values, in plain words.
     fn problems(&self) -> Vec<String> {
         let mut p = Vec::new();
-        let mut numbers =
-            self.pos.iter().chain(&self.facing).chain([&self.radius, &self.every_s, &self.push, &self.lift]);
+        let flight = self.flight.as_ref().map(|f| [f.accel, f.max_speed, f.drag]).unwrap_or_default();
+        let mut numbers = self
+            .pos
+            .iter()
+            .chain(&self.facing)
+            .chain([&self.radius, &self.every_s, &self.push, &self.lift, &self.start_s])
+            .chain(&flight);
         if numbers.any(|v| !v.is_finite()) {
             p.push("a helper bot has a value that isn't a number".into());
             return p;
         }
+        p.extend(self.timing_problems());
         if self.radius <= 0.0 {
             p.push("a helper bot's reach needs a radius above 0".into());
         }
@@ -200,10 +240,41 @@ impl Pusher {
         p
     }
 
+    /// Problems with the flight and the start delay. Numbers are already known to be
+    /// finite.
+    fn timing_problems(&self) -> Vec<String> {
+        let mut p = Vec::new();
+        if let Some(f) = &self.flight {
+            if !self.chases {
+                p.push("a helper bot that doesn't chase can't have a flight".into());
+            }
+            for (name, v, max) in [
+                ("acceleration", f.accel, MAX_ACCEL),
+                ("top speed", f.max_speed, MAX_FLIGHT_SPEED),
+                ("drag", f.drag, MAX_DRAG),
+            ] {
+                if v <= 0.0 || v > max {
+                    p.push(format!("a helper bot's flight needs a {name} above 0 and at most {max}"));
+                }
+            }
+        }
+        if !(0.0..=MAX_START_S).contains(&self.start_s) {
+            p.push(format!("a helper bot's start delay must be 0 to {MAX_START_S} s"));
+        }
+        p
+    }
+
     /// Whether a target's body, a vertical segment of half-length `half` around `mid`
     /// swollen by `radius`, overlaps the reach when the pusher is at `at`.
     pub fn reaches(&self, at: Vec3, mid: Vec3, radius: f32, half: f32) -> bool {
-        let centre = at + Vec3::from_array(self.facing) * self.radius;
+        self.reaches_along(at, Vec3::from_array(self.facing), mid, radius, half)
+    }
+
+    /// The same, with the reach's centre `radius` from `at` along the unit vector `dir`
+    /// instead of along `facing` (a chaser with a flight reaches along the line to its
+    /// target).
+    pub fn reaches_along(&self, at: Vec3, dir: Vec3, mid: Vec3, radius: f32, half: f32) -> bool {
+        let centre = at + dir * self.radius;
         let nearest = Vec3::new(mid.x, centre.y.clamp(mid.y - half, mid.y + half), mid.z);
         nearest.distance(centre) <= self.radius + radius
     }
@@ -874,5 +945,69 @@ mod tests {
         let back: World = toml::from_str(&toml::to_string(&w).unwrap()).unwrap();
         assert_eq!(back, w);
         assert!(toml::from_str::<World>("[[pushers]]\nspeed = 1.0").is_err(), "unknown fields are refused");
+    }
+
+    /// A pusher with no flight and no start delay stores neither (so scenarios stored
+    /// before them keep their fingerprints); set, both are kept and read back.
+    #[test]
+    fn a_flight_and_a_start_delay_are_left_out_at_their_defaults() {
+        let with = |p: Pusher| World { pushers: vec![p], motion: moving(), ..world() };
+        let plain = with(Pusher { chases: true, push: 1.5, ..Pusher::default() });
+        let text = toml::to_string(&plain).unwrap();
+        assert!(!text.contains("flight") && !text.contains("start_s"), "{text}");
+        assert_eq!(toml::from_str::<World>(&text).unwrap(), plain);
+        let flying = with(Pusher {
+            chases: true,
+            flight: Some(ChaseFlight { accel: 300.0, max_speed: 40.0, drag: 6.0 }),
+            start_s: 1.5,
+            ..Pusher::default()
+        });
+        let text = toml::to_string(&flying).unwrap();
+        assert!(text.contains("flight") && text.contains("start_s"), "{text}");
+        assert_eq!(toml::from_str::<World>(&text).unwrap(), flying);
+        assert!(flying.problems().is_empty(), "{:?}", flying.problems());
+    }
+
+    /// A flight is only valid on a chaser, with three numbers above 0 and not absurd,
+    /// and a start delay is 0 to an hour.
+    #[test]
+    fn a_flight_and_a_start_delay_with_bad_values_are_problems() {
+        let flight = |accel: f32, max_speed: f32, drag: f32| Some(ChaseFlight { accel, max_speed, drag });
+        let good = Pusher { chases: true, flight: flight(300.0, 40.0, 6.0), ..Pusher::default() };
+        let with = |p: Pusher| World { pushers: vec![p], motion: moving(), ..world() };
+        assert!(with(good.clone()).problems().is_empty());
+        let bad = [
+            ("can't have a flight", Pusher { chases: false, ..good.clone() }),
+            ("acceleration", Pusher { flight: flight(0.0, 40.0, 6.0), ..good.clone() }),
+            ("top speed", Pusher { flight: flight(300.0, -1.0, 6.0), ..good.clone() }),
+            ("drag", Pusher { flight: flight(300.0, 40.0, 0.0), ..good.clone() }),
+            ("acceleration", Pusher { flight: flight(1_000_001.0, 40.0, 6.0), ..good.clone() }),
+            ("top speed", Pusher { flight: flight(300.0, 10_001.0, 6.0), ..good.clone() }),
+            ("drag", Pusher { flight: flight(300.0, 40.0, 1000.5), ..good.clone() }),
+            ("a number", Pusher { flight: flight(f32::NAN, 40.0, 6.0), ..good.clone() }),
+            ("a number", Pusher { flight: flight(300.0, f32::INFINITY, 6.0), ..good.clone() }),
+            ("start delay", Pusher { start_s: -0.5, ..good.clone() }),
+            ("start delay", Pusher { start_s: 3600.5, ..good.clone() }),
+            ("a number", Pusher { start_s: f32::NAN, ..good.clone() }),
+        ];
+        for (word, p) in bad {
+            let problems = with(p.clone()).problems();
+            assert!(problems.iter().any(|m| m.contains(word)), "{p:?}: {problems:?}");
+        }
+        // The edges are fine, for a pinned pusher too (a start delay).
+        let edge = Pusher { flight: flight(1_000_000.0, 10_000.0, 1000.0), start_s: 3600.0, ..good.clone() };
+        assert!(with(edge).problems().is_empty());
+        let pinned = Pusher { start_s: 2.0, ..Pusher::default() };
+        assert!(with(pinned).problems().is_empty());
+    }
+
+    /// `reaches` is the reach along the facing, and `reaches_along` takes the direction.
+    #[test]
+    fn the_reach_can_point_along_any_direction() {
+        let p = Pusher { radius: 0.5, facing: [0.0, 1.0, 0.0], ..Pusher::default() };
+        let (at, ball) = (Vec3::ZERO, Vec3::new(1.3, 0.5, 0.0));
+        assert!(!p.reaches(at, ball, 0.5, 0.0));
+        assert!(!p.reaches_along(at, Vec3::Y, ball, 0.5, 0.0));
+        assert!(p.reaches_along(at, ball.normalize(), ball, 0.5, 0.0));
     }
 }

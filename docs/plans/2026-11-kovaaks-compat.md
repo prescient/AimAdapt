@@ -15,8 +15,8 @@ A scenario is refused when it uses something the trainer doesn't model, so every
 | K5 Hitbox shapes | cfb7fd1 | 111 of 225 |
 | K6a Where bots appear and stand | 7736860 | 111 of 225 |
 | K6b The jump key | 13f11d4 | 111 of 225 |
-| K15a An ability that costs health | | 113 of 225 |
-| K15b Chasers that take time to arrive | | |
+| K15a An ability that costs health | e3c7715 | 113 of 225 |
+| K15b Chasers that take time to arrive | | 116 of 225 |
 | K15 The rest: vertical dashes, damage reactions | | |
 | K7 Armed bots that never fire, invincible characters | | |
 | K8 Bots that destroy themselves | | |
@@ -322,6 +322,19 @@ What gets built in K15b:
 - Tests: a regression test for the instant chaser (a chaser trails a target that moves at a steady speed by the lag the law gives), the start delay, a top speed that binds, the refusals, the chasing fixture with made-up flight settings, and the fingerprints of fixtures that already play.
 - Expected: the 3 files start playing, which makes 116 of 225, and the 3 playing files with chasers change.
 
+K15b is done. After it, 116 of the 225 files play. The 3 expected files started and none stopped. Of the 113 that played before, 110 keep their fingerprints, their notes and their stored settings. The other 3 are the ones with chasers: their stored worlds gained the flight and nothing else, and bests on them start again. No local file is refused for its helper bots any more.
+
+Four things were settled in review:
+
+- A stored flight has no defaults. It names its acceleration, its top speed and its drag, and a flight with a key the trainer doesn't know is refused.
+- A start delay gets one note for each delay, however many helpers share it. Each of the 3 new files has four helpers with the same delay and showed four notes, one naming each helper.
+- The test that a chaser's path is the same at any frame length compared frames of 1/60 s and 1/240 s on gentle settings, and it still passed with the flight changed to one step per frame. It now compares 1/10 s and 1/240 s on a chaser with a high drag, to within 2%, and fails on that change.
+- What `BlockAbilityOnStartDuration` does for a helper wasn't measured. It plays as no hits for that long from the start of the run, and the note says so.
+
+The regression test was run against K15a's code, where it fails: the instant chaser holds the ball at 0.58 m from the first kick, and the test wants it to land. Ten changes were then made to the flight one at a time (no drag, a doubled drag, no top speed, no start delay, one step per frame, a start at the origin, not held to its plane, a kick from the nearest point of the plane, a reach along its facing, a reach behind its plane), and each fails a test.
+
+The six local files with chasers were played in the sim without a window: a target is up in every frame and the ball keeps moving. No imported scenario with a chaser was watched in the game window, here or next to KovaaK's. Two things from the films aren't modelled: the chaser's aim being a little late, and the frame rate entering when the top speed binds.
+
 ## Wave 2: beyond the backlog's plan
 
 Ordered by files unlocked for the work involved. Each starts by reading how the local files use the feature, so the package builds what scenarios need and leaves out what none of them use.
@@ -394,7 +407,10 @@ These rows are filled in as packages land. A row leaves the table when a test ma
 | Which targets a helper's hit reaches | Every target its hurtbox overlaps (and that it can see, when it needs sight) | No: it may hit only the target its AI has picked |
 | Several helpers with the same name | Each takes the next spawn point its character is allowed on, in file order | No |
 | A pinned helper's spawn delay | None: it hits from the start of the run | No |
-| A chasing helper's position (until K15b lands) | On the outer face of the clip slab, at the point nearest its target, with no travel time | Wrong for a moving target: six films show it trails (see K15) |
+| A chasing helper's aim | At where its target is now, with no delay | No: six films fit best with the aim 0.008 to 0.033 s late (see K15) |
+| A chasing helper whose top speed binds | The same at any frame rate | No: in KovaaK's the result changes with the frame rate (see K15). It binds in no local file |
+| A chasing helper in a stored world without a flight | K3's instant chaser, on the outer face of the clip slab at the point nearest its target | Wrong for a moving target (see K15). The importer no longer writes one |
+| `BlockAbilityOnStartDuration` on a helper's character | No hits for that long from the start of the run | No |
 | An ability's health cost on a bot that regenerates | The cost isn't a hit, so it doesn't restart the wait before the regen | No: no installed file has both |
 | A bot that dies of its ability's cost, on a scenario with lives | It counts as a timeout and uses up no life, like a bot that drains away | No: no installed file has both |
 | A moving cuboid bot's box | Stays lined up with the map's axes as the bot moves and turns | No: measured on still bots |

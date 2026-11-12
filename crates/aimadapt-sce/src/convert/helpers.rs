@@ -3,15 +3,17 @@
 //! and aren't scored, so they aren't targets; each becomes a [`Pusher`] in the world.
 //!
 //! Two kinds were measured in KovaaK's. A pinned one stays where it spawns and faces
-//! the way its spawn point does. A chasing one flies at its target, is stopped by an
-//! invisible slab the map puts between them, and so sits at the point of the slab
-//! nearest the target.
+//! the way its spawn point does. A chasing one flies at its target and is stopped by
+//! an invisible slab the map puts between them. It has a drag and an acceleration, so
+//! it trails a target that moves and takes time to cross to one that appears
+//! elsewhere; its character's `Acceleration`, `MaxSpeed` and `DragCoefficient` become
+//! the pusher's flight. Any helper may wait before its first hit (`BlockAbilityOnStartDuration`).
 
 use std::collections::HashMap;
 
 use aimadapt_sim::Vec3;
 use aimadapt_sim::collide::Collider;
-use aimadapt_sim::world::{Pusher, WorldMesh, WorldSpawn};
+use aimadapt_sim::world::{ChaseFlight, Pusher, WorldMesh, WorldSpawn};
 
 use super::abilities::is_kind;
 use super::{UU_PER_M, axes, push_once, rise};
@@ -20,8 +22,8 @@ use crate::map::{Map, Spawn};
 use crate::scenario::{BotChoice, Resolved};
 use crate::settings::Section;
 
-/// The flying speed (cm/s) from which a helper is taken to reach its target at once.
-const CHASER_SPEED: f32 = 10_000.0;
+/// The longest start delay the trainer allows, in seconds.
+const LONGEST_START_S: f32 = 3600.0;
 /// The longest swing the trainer models: a longer one hits once per entry.
 const LONGEST_SWING_S: f32 = 0.05;
 /// The shortest time between hits the trainer allows.
@@ -35,6 +37,10 @@ pub(super) struct Helper {
     /// Which of the helper slots with this character it is, counting from 0.
     nth: usize,
     chases: bool,
+    /// How a chaser flies, in meters, seconds and m/s.
+    flight: Option<ChaseFlight>,
+    /// Seconds from the start of the run before its first hit.
+    start_s: f32,
     /// Meters, m/s, m/s and seconds.
     radius: f32,
     push: f32,
@@ -72,7 +78,8 @@ fn period(tick: f32, reuse: f32, duration: f32, charge: f32, delay: f32) -> f32 
     every as f32
 }
 
-/// How a helper is held: pinned, or chasing its target. `None` for neither.
+/// How a helper is held: pinned, or chasing its target (flying at it, whatever its
+/// speed: every chaser follows the same law). `None` for neither.
 fn chases(c: &BotChoice, ch: &Section) -> Option<bool> {
     let no_dodging = c.bot.is("NoDodging");
     let speed = ch.f32_or("MaxSpeed", 0.0);
@@ -85,12 +92,39 @@ fn chases(c: &BotChoice, ch: &Section) -> Option<bool> {
         d.str("InitialForwardMovementState").trim().eq_ignore_ascii_case("Forward")
             && (!d.is("ToggleForwardBack") || d.f32_or("BackTimeMult", 1.0) <= 0.01)
     };
-    let chaser = !no_dodging
-        && ch.is("IsFlyer")
-        && speed >= CHASER_SPEED
-        && !c.dodges.is_empty()
-        && c.dodges.iter().all(|(d, _)| forward(d));
+    let chaser = !no_dodging && ch.is("IsFlyer") && !c.dodges.is_empty() && c.dodges.iter().all(|(d, _)| forward(d));
     chaser.then_some(true)
+}
+
+/// A chaser's flight, from its character: `Acceleration` and `MaxSpeed` (units/s² and
+/// units/s) in meters, and `DragCoefficient` as it is. One that is missing or 0 is
+/// refused, naming the helper and the setting.
+fn flight(who: &str, ch: &Section, reasons: &mut Vec<Gap>) -> Option<ChaseFlight> {
+    let mut get = |key: &str| {
+        let v = ch.f32_or(key, 0.0);
+        if v > 0.0 {
+            return v;
+        }
+        let was = if ch.str(key).trim().is_empty() { "missing".to_string() } else { ch.str(key).trim().to_string() };
+        refuse(reasons, format!("{who}: a chaser needs {key} above 0 on its character ({key} is {was})"));
+        0.0
+    };
+    let (accel, max_speed, drag) = (get("Acceleration"), get("MaxSpeed"), get("DragCoefficient"));
+    (accel > 0.0 && max_speed > 0.0 && drag > 0.0).then(|| ChaseFlight {
+        accel: accel / UU_PER_M,
+        max_speed: max_speed / UU_PER_M,
+        drag,
+    })
+}
+
+/// A helper's start delay: its character's `BlockAbilityOnStartDuration`, 0 without
+/// one. Refused above an hour.
+fn start_delay(who: &str, ch: &Section, reasons: &mut Vec<Gap>) -> f32 {
+    let s = ch.f32_or("BlockAbilityOnStartDuration", 0.0).max(0.0);
+    if s > LONGEST_START_S {
+        refuse(reasons, format!("{who}: BlockAbilityOnStartDuration={}", ch.str("BlockAbilityOnStartDuration").trim()));
+    }
+    s
 }
 
 /// Reads the file's helper slots: the helpers the trainer plays, and the reasons it
@@ -189,6 +223,8 @@ fn read(
         );
         refuse(reasons, detail);
     }
+    let flight = if held == Some(true) { flight(who, ch, reasons) } else { None };
+    let start_s = start_delay(who, ch, reasons);
     if reasons.len() > before {
         return None;
     }
@@ -196,11 +232,23 @@ fn read(
         notes.push(format!("the helper bot {who} pushes by nothing and is left out"));
         return None;
     }
+    if start_s > 0.0 {
+        // One note for each delay, however many helpers have it.
+        let note = format!(
+            "helper bots with BlockAbilityOnStartDuration={start_s} are played as making no hits for the first \
+             {start_s} s of the run; what KovaaK's does with it for a helper wasn't measured"
+        );
+        if !notes.contains(&note) {
+            notes.push(note);
+        }
+    }
     let offset = |key: &str| axes(ch.vec3(key).unwrap_or_default()) / UU_PER_M;
     Some(Helper {
         character,
         nth,
         chases: held == Some(true),
+        flight,
+        start_s,
         radius: radius / UU_PER_M,
         push: horizontal / UU_PER_M,
         lift: vertical / UU_PER_M,
@@ -286,6 +334,8 @@ pub(super) fn pushers(
             pos: pos.to_array(),
             facing: (-f.axes[2]).normalize_or(Vec3::NEG_Z).to_array(),
             chases: h.chases,
+            flight: h.flight.clone(),
+            start_s: h.start_s,
             radius: h.radius,
             every_s: h.every_s,
             push: h.push,

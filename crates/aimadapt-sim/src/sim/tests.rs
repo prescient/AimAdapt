@@ -1803,6 +1803,190 @@ fn a_chasing_pusher_under_a_clip_floor_holds_a_bot_up() {
     assert!(!touched && low > 0.75, "it stays up: {low}");
 }
 
+use crate::world::ChaseFlight;
+
+/// A chaser on the plane y = 0 (facing up) that starts at x = 0, 10 m ahead, with a
+/// reach too short to kick anything and no push.
+fn flier(accel: f32, max_speed: f32, drag: f32) -> Pusher {
+    Pusher {
+        pos: [0.0, 0.0, -10.0],
+        facing: [0.0, 1.0, 0.0],
+        chases: true,
+        flight: Some(ChaseFlight { accel, max_speed, drag }),
+        ..Default::default()
+    }
+}
+
+/// A sim with one ball at `at`, no gravity and one chaser with a flight.
+fn chased(at: [f32; 3], p: Pusher) -> Sim {
+    pushed(at, 0.0, Vec::new(), vec![p])
+}
+
+/// Where the first chaser is.
+fn place(sim: &Sim) -> Vec3 {
+    sim.fliers[0].unwrap().place
+}
+
+/// Steps `secs` seconds at 240 Hz with the ball moved by hand to (`speed` * time, `h`,
+/// -10) before each step, and returns how far the chaser is behind it along x.
+fn trail_behind(p: Pusher, speed: f32, h: f32, secs: f32) -> f32 {
+    let mut sim = chased([0.0, h, -10.0], p);
+    for i in 0..(secs * 240.0) as usize {
+        sim.targets[0].pos = Vec3::new(speed * i as f32 / 240.0, h, -10.0);
+        sim.step(FRAME, idle());
+    }
+    sim.targets[0].pos.x - place(&sim).x
+}
+
+/// A chaser trails a ball that moves steadily at v along a lane h from its plane, and
+/// once it keeps pace the line from it to the ball leans off the plane's normal by an
+/// angle with sin = drag * v / acceleration, so it is behind by h * tan(angle).
+#[test]
+fn a_chaser_trails_a_moving_ball_by_the_lag_the_law_gives() {
+    let (accel, v, h) = (100.0_f32, 5.0_f32, 5.0_f32);
+    for drag in [4.0_f32, 8.0] {
+        let want = h * (drag * v / accel).asin().tan();
+        let got = trail_behind(flier(accel, 50.0, drag), v, h, 6.0);
+        assert!((got - want).abs() < 0.05 * want, "drag {drag}: behind by {got} m, the law gives {want}");
+    }
+}
+
+/// A chaser starts at its pusher's position and needs time to cross to a far ball.
+#[test]
+fn a_chaser_starts_where_it_spawns_and_takes_time_to_arrive() {
+    let mut sim = chased([20.0, 5.0, -10.0], flier(20.0, 50.0, 1.0));
+    assert_eq!(place(&sim), Vec3::new(0.0, 0.0, -10.0));
+    run_for(&mut sim, 0.5);
+    let x = place(&sim).x;
+    assert!(x > 0.2 && x < 20.0, "on its way after 0.5 s: {x}");
+    assert!((place(&sim).y, place(&sim).z) == (0.0, -10.0), "it stays on its plane: {}", place(&sim));
+    run_for(&mut sim, 0.5);
+    assert!(place(&sim).x > x, "still going");
+}
+
+/// A low top speed binds: the chaser never flies faster, and it gets there.
+#[test]
+fn a_chasers_top_speed_binds_when_it_is_low() {
+    let mut sim = chased([100.0, 5.0, -10.0], flier(100.0, 3.0, 0.5));
+    let mut fastest: f32 = 0.0;
+    for _ in 0..480 {
+        sim.step(FRAME, idle());
+        fastest = fastest.max(sim.fliers[0].unwrap().vel.length());
+    }
+    assert!(fastest <= 3.0 + 1e-4, "{fastest} m/s");
+    assert!(fastest > 2.5, "it reaches its top speed: {fastest} m/s");
+}
+
+/// With no target alive the chaser has nothing to aim at and the drag brings it to a
+/// stop. Nothing is kicked.
+#[test]
+fn a_chaser_with_no_target_coasts_to_a_stop() {
+    let mut sim = chased([0.0, 3.0, -10.0], Pusher { radius: 50.0, push: 1.0, lift: 1.0, ..flier(100.0, 50.0, 2.0) });
+    sim.targets.clear();
+    sim.fliers[0].as_mut().unwrap().vel = Vec3::new(5.0, 0.0, 0.0);
+    run_for(&mut sim, 0.5);
+    assert!(sim.targets.is_empty());
+    let (slowed, x) = (sim.fliers[0].unwrap().vel.length(), place(&sim).x);
+    assert!(slowed < 5.0 && x > 0.5, "it coasts on: {slowed} m/s, x {x}");
+    run_for(&mut sim, 5.0);
+    assert!(sim.fliers[0].unwrap().vel.length() < 1e-3, "{}", sim.fliers[0].unwrap().vel);
+}
+
+/// The kick comes from where the chaser is: behind a ball it pushes it on along its
+/// way. A chaser with no flight is at the point of its plane nearest the ball and has
+/// no level push to give a ball straight above it.
+#[test]
+fn a_chasers_kick_comes_from_its_place() {
+    let behind = Pusher { pos: [-3.0, 0.0, -10.0], radius: 50.0, push: 2.0, ..flier(0.001, 50.0, 1.0) };
+    let mut sim = chased([0.0, 3.0, -10.0], behind.clone());
+    run_for(&mut sim, 0.03);
+    assert!((vel(&sim) - Vec3::new(2.0, 0.0, 0.0)).length() < 1e-3, "{}", vel(&sim));
+    // The same chaser arriving at once is under the ball and pushes it up only.
+    let mut sim = chased([0.0, 3.0, -10.0], Pusher { flight: None, ..behind });
+    run_for(&mut sim, 0.03);
+    assert!(vel(&sim).length() < 1e-4, "{}", vel(&sim));
+}
+
+/// The reach is a sphere centred a radius from the chaser along the line to its ball.
+/// This ball is in it, and would be out of reach if the sphere sat along the plane's
+/// normal.
+#[test]
+fn a_chasers_reach_points_at_the_ball() {
+    let p = Pusher { radius: 0.5, lift: 1.0, ..flier(0.001, 50.0, 1.0) };
+    let ball = Vec3::new(1.3, 0.5, -10.0);
+    assert!(!p.reaches(Vec3::new(0.0, 0.0, -10.0), ball, 0.5, 0.0), "out of reach along the normal");
+    let mut sim = chased(ball.to_array(), p.clone());
+    run_for(&mut sim, 0.03);
+    assert!(vel(&sim).y > 0.9, "kicked: {}", vel(&sim));
+    // Farther along the line it is out of reach: the centre is 0.5 from the chaser, the
+    // reach 1.0 with the ball's radius.
+    let mut sim = chased([1.6, 0.5, -10.0], p);
+    run_for(&mut sim, 0.03);
+    assert_eq!(vel(&sim), Vec3::ZERO);
+}
+
+/// A ball behind the plane is still skipped by a chaser with a flight.
+#[test]
+fn a_chaser_with_a_flight_ignores_a_ball_behind_its_plane() {
+    let mut sim = chased([0.0, -0.5, -10.0], Pusher { radius: 50.0, lift: 1.0, ..flier(0.001, 50.0, 1.0) });
+    run_for(&mut sim, 0.1);
+    assert_eq!(vel(&sim), Vec3::ZERO);
+}
+
+/// `start_s` holds the first kick back: none before it, the usual schedule after it.
+/// With 0 it is the schedule there always was.
+#[test]
+fn a_start_delay_holds_the_first_kick_back() {
+    let on = |p: Pusher, secs: f32| {
+        let mut sim = chased([0.0, 3.0, -10.0], p);
+        run_for(&mut sim, secs);
+        vel(&sim).length()
+    };
+    // Pinned, kicking every 0.1 s for 2 m/s, with a reach that holds the ball however
+    // far the kicks push it.
+    let ball = [0.0, 0.0, -7.0];
+    let pin = |start_s: f32, secs: f32| {
+        let mut sim = pushed(ball, 0.0, Vec::new(), vec![Pusher { start_s, radius: 50.0, ..pinned() }]);
+        run_for(&mut sim, secs);
+        vel(&sim).length()
+    };
+    assert_eq!(pin(0.55, 0.54), 0.0);
+    // Kicks at 0.6 and 0.7 are counted by 0.76 s (not the ones at 0.1 to 0.5).
+    assert!((pin(0.55, 0.76) - 4.0).abs() < 1e-3);
+    assert!((pin(0.0, 0.76) - 14.0).abs() < 1e-3, "7 kicks with no delay");
+    // A chaser flies during the wait and is kicked from where it is after it. It lifts 1.
+    let c = |start_s: f32| Pusher { radius: 100.0, lift: 1.0, every_s: 0.1, start_s, ..flier(10.0, 50.0, 1.0) };
+    assert_eq!(on(c(0.55), 0.54), 0.0);
+    assert!((on(c(0.55), 0.76) - 2.0).abs() < 1e-3);
+    assert!((on(c(0.0), 0.76) - 7.0).abs() < 1e-3);
+    // The count itself.
+    let k = |start_s: f32, before: f64, now: f64| {
+        super::pushing::kicks(&Pusher { start_s, every_s: 0.1, ..pinned() }, now, before)
+    };
+    assert_eq!(k(0.0, 0.05, 0.35), 3.0);
+    assert_eq!(k(0.55, 0.05, 0.35), 0.0);
+    assert_eq!(k(0.55, 0.35, 0.75), 2.0);
+    assert_eq!(k(0.55, 0.65, 0.75), 1.0);
+}
+
+/// The chaser's path doesn't depend much on the frame length: a long frame is flown in
+/// steps of 1/120 s at most, so frames of 1/10 s and of 1/240 s give the same place
+/// after a second. One step per 1/10 s frame would put it about a tenth further on.
+/// The top speed doesn't bind.
+#[test]
+fn a_chasers_path_is_the_same_for_different_step_lengths() {
+    let at = |frame: f32| {
+        let mut sim = chased([20.0, 5.0, -10.0], flier(40.0, 50.0, 8.0));
+        for _ in 0..(1.0 / frame).round() as usize {
+            sim.step(frame, idle());
+        }
+        place(&sim).x
+    };
+    let (coarse, fine) = (at(1.0 / 10.0), at(1.0 / 240.0));
+    assert!(fine > 1.0, "it has moved: {fine}");
+    assert!((coarse - fine).abs() < 0.02 * fine, "{coarse} m at 1/10 s, {fine} m at 1/240 s");
+}
+
 /// A bot with its own `invincible` flag takes hits and never dies while another kind
 /// in the same world does (a character with `InvincibleBots`).
 #[test]

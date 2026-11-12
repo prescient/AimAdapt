@@ -243,11 +243,12 @@ fn helpers_the_trainer_cant_play_name_the_setting() {
             ),
             "UseWeapons=true",
         ),
-        // Pinned means no aiming; chasing means a fast flier that always goes forward.
+        // Pinned means no aiming; chasing means a flier that always goes forward (the
+        // case below isn't a flier).
         (with("NoAiming=true", "NoAiming=false"), "neither pinned"),
         (
             with("NoAiming=true\nNoDodging=true", "NoAiming=false\nDodgeProfileNames=Rise")
-                .replace("MaxSpeed=0.0\nMainBBType=Cuboid", "MaxSpeed=5000.0\nIsFlyer=true\nMainBBType=Cuboid")
+                .replace("MaxSpeed=0.0\nMainBBType=Cuboid", "MaxSpeed=5000.0\nMainBBType=Cuboid")
                 .replace("[Map Data]", "[Dodge Profile]\nName=Rise\nInitialForwardMovementState=Forward\n[Map Data]"),
             "neither pinned",
         ),
@@ -284,31 +285,39 @@ fn helpers_the_trainer_cant_play_name_the_setting() {
     }
 }
 
+/// A clip slab between the helper (500, 0, 0) and the targets (1000, -200, 0).
+const SLAB: &str = ",\n {\"type\": \"brush\", \"name\": \"Clip\", \"mesh\": \"Cube\", \"location\": \"700, -500, -100\", \"rotation\": \"0, 0, 0\", \"scale\": \"0.5, 10, 2\"}";
+
+/// The helper file with a chasing helper in place of the pinned one, flying at 200 m/s
+/// at the most, with an acceleration of 400 m/s² and a drag of 6 a second, and with
+/// `slab` added to the map.
+fn chaser(slab: &str) -> String {
+    with("NoAiming=true\nNoDodging=true", "NoAiming=false\nDodgeProfileNames=Rise")
+        .replace(
+            "MaxSpeed=0.0\nMainBBType=Cuboid",
+            "MaxSpeed=20000.0\nAcceleration=40000.0\nDragCoefficient=6.0\nIsFlyer=true\nMainBBType=Cuboid",
+        )
+        .replace(
+            "[Map Data]",
+            "[Dodge Profile]\nName=Rise\nInitialForwardMovementState=Forward\nToggleForwardBack=true\nBackTimeMult=0.0\n[Map Data]",
+        )
+        .replace("\n]}", &format!("{slab}\n]}}"))
+}
+
 /// A chasing helper flies at its target, so it only plays when a wall that bots can't
 /// pass is between it and every place a target appears.
 #[test]
 fn a_chaser_needs_a_wall_between_it_and_the_targets() {
-    let chaser = |slab: &str| {
-        with("NoAiming=true\nNoDodging=true", "NoAiming=false\nDodgeProfileNames=Rise")
-            .replace("MaxSpeed=0.0\nMainBBType=Cuboid", "MaxSpeed=20000.0\nIsFlyer=true\nMainBBType=Cuboid")
-            .replace(
-                "[Map Data]",
-                "[Dodge Profile]\nName=Rise\nInitialForwardMovementState=Forward\nToggleForwardBack=true\nBackTimeMult=0.0\n[Map Data]",
-            )
-            .replace("\n]}", &format!("{slab}\n]}}"))
-    };
     let r = reasons(&chaser(""));
     assert!(r.iter().any(|g| g.feature == "helper bots" && g.detail.contains("no wall between")), "{r:?}");
-    // A clip slab between the helper (500, 0, 0) and the targets (1000, -200, 0).
-    let slab = ",\n {\"type\": \"brush\", \"name\": \"Clip\", \"mesh\": \"Cube\", \"location\": \"700, -500, -100\", \"rotation\": \"0, 0, 0\", \"scale\": \"0.5, 10, 2\"}";
+    let slab = SLAB;
     let p = import(&chaser(slab)).unwrap().scenario.world.unwrap().pushers;
     assert!(p[0].chases);
     // A slab the line doesn't cross doesn't count.
     let beside = slab.replace("-500, -100", "-500, 300");
     assert!(reasons(&chaser(&beside)).iter().any(|g| g.detail.contains("no wall between")));
-    // A slow flier, or one that comes back, isn't a chaser.
+    // A flier that comes back, or one that doesn't fly, isn't a chaser.
     for text in [
-        chaser(slab).replace("MaxSpeed=20000.0", "MaxSpeed=9000.0"),
         chaser(slab).replace("BackTimeMult=0.0", "BackTimeMult=0.5"),
         chaser(slab).replace("InitialForwardMovementState=Forward", "InitialForwardMovementState=Back"),
         chaser(slab).replace("IsFlyer=true", "IsFlyer=false"),
@@ -487,4 +496,106 @@ fn lives_beside_a_helper_count_only_the_target() {
     // Two targets with lives and a helper: several bots, as without the helper.
     let r = reasons(&with("ScorePerKill=1.0", "ScorePerKill=1.0\nBotMaxLives=0;1;1"));
     assert!(r.iter().any(|g| g.feature == "bots with a set number of lives" && g.detail.contains("several")), "{r:?}");
+}
+
+/// A chaser's flight settings become the pusher's flight, in meters. The old importer
+/// took only chasers faster than 100 m/s and played them as arriving at once; every
+/// chaser follows the same law, so a slow one imports too, and a pinned helper has no flight.
+#[test]
+fn a_chaser_of_any_speed_imports_with_its_flight() {
+    let flight = |text: &str| {
+        let p = import(text).unwrap().scenario.world.unwrap().pushers;
+        assert_eq!(p.len(), 1);
+        assert!(p[0].chases);
+        p[0].flight.clone().expect("a chaser has a flight")
+    };
+    let fast = flight(&chaser(SLAB));
+    assert_eq!((fast.accel, fast.max_speed, fast.drag), (400.0, 200.0, 6.0));
+    let slow = flight(&chaser(SLAB).replace("MaxSpeed=20000.0", "MaxSpeed=300.0"));
+    assert_eq!((slow.accel, slow.max_speed, slow.drag), (400.0, 3.0, 6.0));
+    // A pinned helper stores neither a flight nor a start delay.
+    let pinned = import(HELPER_SCE).unwrap().scenario;
+    assert_eq!(pinned.world.as_ref().unwrap().pushers[0].flight, None);
+    assert!(!pinned.to_toml().contains("flight") && !pinned.to_toml().contains("start_s"), "{}", pinned.to_toml());
+    // The flight is kept when the scenario is stored and read back.
+    let chasing = import(&chaser(SLAB)).unwrap().scenario;
+    assert!(chasing.to_toml().contains("flight"));
+    let back = aimadapt_sim::Scenario::from_toml(&chasing.to_toml()).unwrap();
+    assert_eq!(back.world.unwrap().pushers[0].flight, Some(fast));
+}
+
+/// A chaser with no `Acceleration`, `DragCoefficient` or `MaxSpeed` on its character, or
+/// one of them at 0, is refused, and the reason names the helper and the setting.
+#[test]
+fn a_chaser_without_its_flight_settings_is_refused() {
+    for (line, key) in [
+        ("Acceleration=40000.0", "Acceleration"),
+        ("DragCoefficient=6.0", "DragCoefficient"),
+        ("MaxSpeed=20000.0", "MaxSpeed"),
+    ] {
+        let zero = format!("{key}=0.0");
+        for text in [chaser(SLAB).replace(&format!("{line}\n"), ""), chaser(SLAB).replace(line, &zero)] {
+            let r = reasons(&text);
+            let named = |g: &&Gap| g.feature == "helper bots" && g.detail.contains(key) && g.detail.contains("Push");
+            assert!(r.iter().filter(named).count() == 1 && r.iter().all(|g| g.beyond_plan), "{key}: {r:?}");
+        }
+    }
+}
+
+/// A helper's `BlockAbilityOnStartDuration` becomes its start delay, with a note (one
+/// for the file, however many helpers have that delay); without one it stores nothing
+/// and gets no note. One over an hour is refused.
+#[test]
+fn a_start_delay_comes_from_the_characters_block_ability_duration() {
+    let pinned =
+        with("MaxSpeed=0.0\nMainBBType=Cuboid", "MaxSpeed=0.0\nBlockAbilityOnStartDuration=1.5\nMainBBType=Cuboid");
+    let chasing = chaser(SLAB).replace("IsFlyer=true", "IsFlyer=true\nBlockAbilityOnStartDuration=1.5");
+    for text in [pinned, chasing] {
+        let i = import(&text).unwrap();
+        let w = i.scenario.world.as_ref().unwrap();
+        assert_eq!(w.pushers[0].start_s, 1.5);
+        assert!(i.scenario.to_toml().contains("start_s = 1.5"), "{}", i.scenario.to_toml());
+        let notes: Vec<&String> = i.notes.iter().filter(|n| n.contains("BlockAbilityOnStartDuration")).collect();
+        assert_eq!(notes.len(), 1, "{:?}", i.notes);
+        assert!(notes[0].contains("first 1.5 s"), "{}", notes[0]);
+        // One line of plain text with no period at the end (the app adds one) and no run
+        // of spaces, where a line break in the source wasn't escaped.
+        assert!(!notes[0].contains("  ") && !notes[0].contains('\n') && !notes[0].ends_with('.'), "{}", notes[0]);
+    }
+    // Two helpers with the same delay share the note.
+    let second = r#",
+ {"type": "gameObject", "name": "SpawnPoint", "location": "500, 300, 0", "rotation": "0, 0, 90", "scale": "1, 1, 1", "properties": [{"name": "TeamMask", "value": 1}, {"name": "PermittedCharacterProfiles", "value": "Push Orb"}]}
+]}"#;
+    let two =
+        with("MaxSpeed=0.0\nMainBBType=Cuboid", "MaxSpeed=0.0\nBlockAbilityOnStartDuration=1.5\nMainBBType=Cuboid")
+            .replace("AddedBots=Push.bot;Dot.bot;Dot.bot", "AddedBots=Push.bot;Push.bot;Dot.bot;Dot.bot")
+            .replace("BotTeams=1;2;2", "BotTeams=1;1;2;2")
+            .replace("\n]}", second);
+    let i = import(&two).unwrap();
+    assert_eq!(i.scenario.world.as_ref().unwrap().pushers.len(), 2);
+    assert_eq!(i.notes.iter().filter(|n| n.contains("BlockAbilityOnStartDuration")).count(), 1, "{:?}", i.notes);
+    // None, or 0: no key stored and no note.
+    for text in [
+        HELPER_SCE.to_string(),
+        with("MaxSpeed=0.0\nMainBBType=Cuboid", "MaxSpeed=0.0\nBlockAbilityOnStartDuration=0.0\nMainBBType=Cuboid"),
+        chaser(SLAB),
+    ] {
+        let i = import(&text).unwrap();
+        assert_eq!(i.scenario.world.as_ref().unwrap().pushers[0].start_s, 0.0);
+        assert!(!i.scenario.to_toml().contains("start_s"));
+        assert!(!i.notes.iter().any(|n| n.contains("BlockAbilityOnStartDuration")), "{:?}", i.notes);
+    }
+    // An hour is fine, more is refused.
+    let hour = |s: &str| {
+        with(
+            "MaxSpeed=0.0\nMainBBType=Cuboid",
+            &format!("MaxSpeed=0.0\nBlockAbilityOnStartDuration={s}\nMainBBType=Cuboid"),
+        )
+    };
+    assert!(import(&hour("3600.0")).is_ok());
+    assert!(
+        reasons(&hour("3600.5"))
+            .iter()
+            .any(|g| g.feature == "helper bots" && g.detail.contains("BlockAbilityOnStartDuration=3600.5"))
+    );
 }

@@ -267,6 +267,10 @@ fn a_chasing_helper_under_a_clip_floor_keeps_a_ball_up() {
     assert!(near(Vec3::from_array(p.pos), [0.0, -0.48, -5.0]), "{:?}", p.pos);
     assert!(near(Vec3::from_array(p.facing), [0.0, 1.0, 0.0]), "{:?}", p.facing);
     assert_eq!((p.radius, p.every_s, p.push, p.lift), (0.6, 0.02, 3.0, 0.6));
+    // The character's made-up flight: 30000 units/s² and 20000 units/s, in meters, and a drag of 7.
+    let flight = p.flight.as_ref().expect("a chaser has a flight");
+    assert_eq!((flight.accel, flight.max_speed, flight.drag), (300.0, 200.0, 7.0));
+    assert_eq!(p.start_s, 0.0);
     assert!(w.invincible, "the ball's character is invincible");
     let motion = w.motion.as_ref().expect("a ball needs a motion to be lifted");
     assert!(motion.dodges.is_empty() && motion.abilities.is_none() && motion.max_speed == 0.0);
@@ -338,6 +342,43 @@ fn a_pinned_helper_that_needs_sight_leaves_a_ball_behind_a_ledge_alone() {
     sees.world.as_mut().unwrap().pushers[0].needs_sight = false;
     let (left, right) = moved(sees);
     assert!(left.x < -0.3 && right.x > 0.3 && right.z < -0.3, "{left} {right}");
+}
+
+/// The Floor Keeper file with its helper's spawn point moved 12 m along the slab, away
+/// from the spot under the ball, and its chaser given a slow acceleration.
+fn far_chaser() -> aimadapt_sim::Scenario {
+    let text = std::fs::read_to_string(path("Floor Keeper")).unwrap();
+    // Drop the fixture's own flight settings, if it has them, and set slow ones.
+    let mut text: String = text
+        .lines()
+        .filter(|l| !l.starts_with("Acceleration=") && !l.starts_with("DragCoefficient="))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    for (old, new) in [
+        ("MaxSpeed=20000.0\nIsFlyer=true", "MaxSpeed=20000.0\nAcceleration=500.0\nDragCoefficient=1.0\nIsFlyer=true"),
+        ("\"500, 0, -50\"", "\"500, 1200, -50\""),
+    ] {
+        assert!(text.contains(old), "{old}");
+        text = text.replacen(old, new, 1);
+    }
+    aimadapt_sce::convert::convert(&Sce::parse(&text), "far.sce", "0").unwrap().scenario
+}
+
+/// Bug: K3 played a chasing helper as arriving at once, always at the point of its
+/// slab nearest the ball, whatever its settings and wherever it spawned. A chaser
+/// has an acceleration and takes time to cross to a ball that appears somewhere
+/// else, so one that spawns 12 m along the slab and accelerates at 5 m/s² (it needs
+/// over 2 s) can't hold the ball up in the first 1.5 s: the ball lands. Before the
+/// fix it was held up from the first kick.
+#[test]
+fn a_chaser_far_from_its_ball_takes_time_to_arrive() {
+    let mut sim = started(far_chaser());
+    let mut lowest = f32::MAX;
+    for _ in 0..(1.5 * 120.0) as usize {
+        sim.step(1.0 / 120.0, idle());
+        lowest = lowest.min(sim.targets()[0].pos.y);
+    }
+    assert!((lowest - 0.3).abs() < 0.02, "the ball lands before the chaser arrives: lowest {lowest}");
 }
 
 /// Reads every `.sce` file in your KovaaK's folders. Run by hand with

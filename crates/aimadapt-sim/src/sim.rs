@@ -443,6 +443,9 @@ pub struct Sim {
     clock: f32,
     /// Seconds into the run up to which helper bots' kicks have been applied.
     pushed_to: f64,
+    /// Where each chasing helper with a flight is and how fast it moves, in the order
+    /// of the world's pushers (`None` for the others).
+    fliers: Vec<Option<pushing::Flier>>,
     phase: Phase,
     targets: Vec<Target>,
     next_id: u64,
@@ -524,6 +527,7 @@ impl Sim {
 
     fn build(base: Scenario, seed: u64, adaptive: Option<AdaptiveRun>) -> Sim {
         let current = base.clone();
+        let fliers = pushing::fliers(base.world.as_ref());
         let walls = base.world.as_ref().map(|w| Collider::new(&w.meshes)).unwrap_or_default();
         let bot_walls = base.world.as_ref().map(|w| Collider::for_bots(&w.meshes)).unwrap_or_default();
         let mut sim = Sim {
@@ -535,6 +539,7 @@ impl Sim {
             bot_walls,
             clock: 0.0,
             pushed_to: 0.0,
+            fliers,
             phase: Phase::Countdown,
             targets: Vec::new(),
             next_id: 1,
