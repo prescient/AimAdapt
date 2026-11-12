@@ -28,7 +28,8 @@ A scenario is refused when it uses something the trainer doesn't model, so every
 | Fix: what a bot's abilities keep over a respawn | c118ce9 | 133 of 225 |
 | K8a Still bots that blow themselves up | 1aa3a85 | 139 of 225 |
 | K8b The other weapon abilities, bots that fire | | |
-| K9 Heads | | 143 of 225 |
+| K9 Heads | 4c4db67 | 143 of 225 |
+| Fix: the player's own older spawn offsets, and where a small player stands | | 144 of 225 |
 | K10 Waypoint paths | | |
 | K11 Several pellets per shot | | |
 | K12 Teleporters, hurt volumes and jump pads | | |
@@ -74,7 +75,7 @@ Recounted after K7, with 132 playing. K7 ran before the rest of K15 and made 16 
 
 Recounted after K8a, with 139 playing. Of the 86 that don't play, 32 have one reason, 26 have two and 28 have three or more. Files each reason is on, and the files it blocks by itself: waypoint paths 28 and 5, player movement 25 and 5, heads 21 and 5, map objects 17 and 2, solid props 15 and 5, weapon abilities 13 and 4, aim assist 11 and 1, a movement ability that is still refused 9 and none, aim down sights 9 and 1, several pellets per shot 8 and 3, player abilities 8 and none, recoil 5 and none, KovaaK's own dynamic difficulty 4 and 1, bots that aim and fire 4 and none.
 
-Recounted after K9, with 143 playing. Of the 82 that don't play, 35 have one reason, 20 have two and 27 have three or more. Files each reason is on, and the files it blocks by itself: waypoint paths 28 and 5, player movement 25 and 6, map objects 17 and 2, solid props 15 and 5, weapon abilities 13 and 6, aim assist 11 and 2, a movement ability that is still refused 9 and 1, aim down sights 9 and 1, several pellets per shot 8 and 3, player abilities 8 and none, recoil 5 and 1, KovaaK's own dynamic difficulty 4 and 1, bots that aim and fire 4 and none, a bot size outside what the trainer allows 3 and 1, and one file whose still bots are all hidden behind walls.
+Recounted after the fix for the player's own spawn offsets, with 144 playing. Of the 81 that don't play, 34 have one reason, 20 have two and 27 have three or more. Files each reason is on, and the files it blocks by itself: waypoint paths 28 and 5, player movement 25 and 6, map objects 17 and 2, solid props 15 and 5, weapon abilities 13 and 6, aim assist 11 and 2, a movement ability that is still refused 9 and 1, aim down sights 9 and 1, several pellets per shot 8 and 3, player abilities 8 and none, recoil 5 and 1, KovaaK's own dynamic difficulty 4 and 1, bots that aim and fire 4 and none, and a bot size outside what the trainer allows 3 and 1. No file is refused for still bots hidden behind walls any more.
 
 ## What is out of scope
 
@@ -650,7 +651,50 @@ What K9 builds:
 - The engine draws the head as a ball in the head's colour and starts the health bar above the stack. The `--smoke` bot aims at the head of a bot that only takes headshots.
 - A fixture, Top Knot: three still capsules with heads and a weapon that does four times its damage to a head, scored by damage efficiency.
 
-Result: all 21 files lost the head reason, and 143 of 225 play. Four of the five that waited on heads alone play. The fifth has still bots that the importer finds hidden behind walls from where it puts the player, a planned reason that the head refusal came before. The importer doesn't read the player's own older spawn offsets yet, which is the likely cause and the next small fix. The other 16 keep the reasons they had. No file that already played changed its fingerprint, its notes or its scenario.
+Result: all 21 files lost the head reason, and 143 of 225 play. Four of the five that waited on heads alone play. The fifth has still bots that the importer finds hidden behind walls from where it puts the player, a planned reason that the head refusal came before. The importer didn't read the player's own older spawn offsets then. That was the cause, and the fix after K9 (the next section) reads them, so the file plays. The other 16 keep the reasons they had. No file that already played changed its fingerprint, its notes or its scenario.
+
+### A fault found by K9's files
+
+One file that K9 freed from the head refusal still didn't play. The importer found all its still bots hidden behind walls from where it put the player, and the player was in the wrong place.
+
+#### The player's own older spawn offsets weren't read
+
+A character can move where it appears with the older keys `SpawnXOffset`, `SpawnYOffset` and `VerticalSpawnOffset`, or with the newer ranges. For bots the importer read both. For the player's own character it read the newer ranges alone, so a player with an older key started on its spawn point.
+
+Measured in KovaaK's 3.9.13 on 12 November 2026 with six test maps. Each has a floating player (gravity 0, not a flyer) and five still balls straight ahead, one on the aim line for each place the eye could be. The balls have healths of 1 to 5 and the gun does 1 damage and goes through bots, so the shot that brings the first kill tells where the eye is:
+
+- With no offset the kill comes at shot 1.
+- `VerticalSpawnOffset=300` in a file saved by 3.9.13 raises the eye 300 units.
+- `SpawnYOffset=300` in such a file moves it 300 to the map's right. `SpawnXOffset=300` moves it 300 forward: the kill still comes at shot 1, and the other balls sit about 13% further from the crosshair.
+- In a file saved by 2.0.4.9, `SpawnYOffset=300` moves it 300 back and `SpawnXOffset=300` moves it 300 to the right.
+- So the player's older keys are one fixed offset in Unreal units along the map's axes, turned a quarter below 2.0.5.0, as a bot's are.
+
+Not measured: a player that falls, `MapScale`, an offset below 0.1 of a unit, older and newer keys together, the newer keys in an old file, and a player whose spawn point is turned.
+
+What gets built:
+
+- `aimadapt-sce`: `offsets::player` reads the player's keys by the bots' rule. Older keys with newer ones that aren't zero are refused, as for a bot. An older vertical offset on a player that falls is refused, naming the character. The newer keys stay the middle of their range along the map's axes, and are turned with the file's version by inference.
+
+#### A small player wasn't stood on its floor
+
+Reading the offsets moved the player in files that already played, and looking at why showed a second fault. `Collider::stand` puts a character that appears just above a floor onto it. It tested the body at the far end of its drop (its step-up plus 2.4 units) and then searched for how far the body could drop. A map's walls are surfaces with nothing inside them, so a body shorter than its drop can be wholly under a floor's top face at the far end. The test then found nothing and the body stayed in the air. Over a thick floor the test touched the floor's lower face, and the search settled the body inside the floor. Only the player's start uses `stand`, and only a player character a few units tall is that short.
+
+Measured in KovaaK's 3.9.13 on 12 November 2026 with three test maps. Each has a floating player 2 units tall above a platform and two still balls, one on the aim line if the eye stays where it appeared and one if the player stands 2 units above the platform:
+
+- With no step-up and the platform 30 units under the player, the eye stays where it appeared.
+- With a step-up of 60 and the platform 30 under, the player is pulled down and stands 2 units above the platform.
+- With a step-up of 60 and the platform 70 under, past the reach of 62.4, the eye stays.
+- So a body shorter than its step-up is pulled down onto a floor within its step-up, as a tall one is.
+
+Not measured: a small player that falls. Within its reach it is stood on the floor's top face like the floating one.
+
+What gets built:
+
+- `aimadapt-sim`: for a body shorter than its reach, `stand` tests everything the body passes through on the way down, as one longer capsule. A taller body is tested as before, with the same arithmetic, so no other scenario moves.
+
+Result: 144 of 225. The file that waited on its hidden bots plays, and none stopped. Four playing files have a new fingerprint, because the player's eye is stored in the scenario. In two a small player was stood inside a thick floor and now stands on top of it. In one a small floating player started above an invisible floor within its step-up and is now pulled down onto it. The fourth has an older vertical offset on a speck of a player, and its eye lands where it was to within a rounding error. Bests set here on those four start again. Their notes are as they were. The other 139 keep their fingerprints, and so do the six pinned fixtures and the built-in scenarios. One file that was already refused has one more reason: a player that falls and has an older vertical offset.
+
+The four and the newly playing file were played in the sim without a window after the fix, idle and by a bot that aims perfectly and holds fire. Every file imports with no problem reported and every run goes its full length, with a target in view in at least 99% of frames. None was watched in the game window.
 
 ### K10. Waypoint paths
 
@@ -735,7 +779,10 @@ These rows are filled in as packages land. A row leaves the table when a test ma
 | The older offset keys (`SpawnXOffset`, `SpawnYOffset`, `VerticalSpawnOffset`) on a map with a `MapScale` | Not scaled, like the newer keys | No |
 | An older offset key below 0.1 of a unit | No offset: it would move a bot by less than a millimetre | No |
 | A helper bot's spawn offset | Along the map's axes like a target's, at the middle of its range | No: measured on targets only. One playing file has one |
-| The player's own character's spawn offset | The newer keys alone, at the middle of the range, along the player's own facing. The older keys and the file's version aren't applied | No: one playing file sets an older key there, of 1 unit |
+| The player's own character's newer spawn offset keys | The middle of the range, along the map's axes, turned a quarter in a file saved before 2.0.5.0 like a bot's | No: the older keys were measured for the player, the newer ones for bots only |
+| `VerticalSpawnOffset` on a player's character that falls | Refused: where the player lands wasn't measured | No |
+| The player's older offset keys on a map with a `MapScale`, below 0.1 of a unit, or on a spawn point that is turned | As for a bot: not scaled, no offset below 0.1, along the map's axes | No: measured at scale 1 on a point that isn't turned |
+| The player's older offset keys together with newer ones that aren't zero | Refused, as for a bot | No |
 | `StandStillUntilHurt` on a bot that is pushed | The pushes move it only once it has been hurt | No |
 | A flier's vertical speed when it is lifted | The push is added to it like any other speed | No |
 | A target bouncing on a push cushion | Not copied: in KovaaK's it lost about 4% of its height per cycle, cause unknown | Open |

@@ -244,14 +244,26 @@ impl Collider {
             return if lifted.y > center.y { lifted + Vec3::Y * FLOOR_GAP } else { lifted };
         }
         let reach = step_up.max(0.0) + FLOOR_REACH;
-        if !self.touches(center - Vec3::Y * reach, half, radius) {
+        // Whether it touches anything once it has dropped this far. A body at least as
+        // tall as its reach is tested where it ends up. A shorter one can be wholly under
+        // a floor's surface there (the walls are surfaces, with nothing inside them), so
+        // everything it passes through on the way down is tested: one longer capsule.
+        let short = 2.0 * (half + radius) < reach;
+        let touches = |drop: f32| {
+            if short {
+                self.touches(center - Vec3::Y * (drop / 2.0), half + drop / 2.0, radius)
+            } else {
+                self.touches(center - Vec3::Y * drop, half, radius)
+            }
+        };
+        if !touches(reach) {
             return center;
         }
         // How far it can drop before it touches.
         let (mut free, mut hit) = (0.0, reach);
         for _ in 0..16 {
             let mid = (free + hit) / 2.0;
-            if self.touches(center - Vec3::Y * mid, half, radius) {
+            if touches(mid) {
                 hit = mid;
             } else {
                 free = mid;
@@ -447,6 +459,47 @@ mod tests {
         // Against a wall it's only pushed away from it.
         let p = c.stand(Vec3::new(2.8, 2.0, 0.0), 0.0, 0.4, 0.0);
         assert!((p.x - 2.6).abs() < 1e-3 && (p.y - 2.0).abs() < 1e-3, "{p}");
+    }
+
+    /// Bug: a body shorter than its reach was only tested for a floor at the far end of
+    /// its drop, where the whole of it had already passed through the floor's surface. So
+    /// a speck of a character just above a floor stayed where it appeared, instead of
+    /// standing 2 units above the floor as every other character does.
+    #[test]
+    fn a_body_shorter_than_its_reach_still_finds_the_floor_below_it() {
+        let c = room();
+        let near = |p: Vec3, y: f32| assert!((p.y - y).abs() < 1e-3, "{p} not at y {y}");
+        // A 1 cm ball with its bottom half a millimeter above the floor at y = -1 and no
+        // step: 2.4 cm of reach is more than its 2 cm. It ends 2 cm above the floor.
+        near(c.stand(Vec3::new(0.0, -0.9895, 0.0), 0.0, 0.01, 0.0), -0.97);
+        // A 5 cm ball with a 45 cm step, its bottom 10 cm above the floor, is pulled down.
+        near(c.stand(Vec3::new(0.0, -0.85, 0.0), 0.0, 0.05, 0.45), -0.93);
+        // A short capsule too: 12 cm tall, its feet 30 cm up.
+        near(c.stand(Vec3::new(0.0, -0.64, 0.0), 0.02, 0.04, 0.45), -0.92);
+        // With the floor past its reach it stays where it is, to the last bit.
+        let high = Vec3::new(0.0, -0.4, 0.0);
+        assert_eq!(c.stand(high, 0.0, 0.05, 0.45), high);
+        // Past the floor's edge there is nothing to stand on.
+        let off = Vec3::new(10.5, -0.85, 0.0);
+        assert_eq!(c.stand(off, 0.0, 0.05, 0.45), off);
+    }
+
+    /// Bug: a small body over a thick floor (a top face and a bottom face, as a map's
+    /// boxes have) was stood inside the floor. The far end of its drop touched the bottom
+    /// face, and the search for how far it could drop then passed the top face, which the
+    /// body is too short to still be touching halfway down.
+    #[test]
+    fn a_small_body_stands_on_top_of_a_thick_floor() {
+        let face = |y: f32| WorldMesh {
+            positions: vec![[-10.0, y, -10.0], [10.0, y, -10.0], [10.0, y, 10.0], [-10.0, y, 10.0]],
+            triangles: vec![[0, 1, 2], [0, 2, 3]],
+            ..WorldMesh::default()
+        };
+        // 40 cm thick, its top at y = -1.
+        let c = Collider::new(&[face(-1.0), face(-1.4)]);
+        // A 5 cm ball with a 45 cm step, its bottom 5 cm above the top face.
+        let stood = c.stand(Vec3::new(0.0, -0.9, 0.0), 0.0, 0.05, 0.45);
+        assert!((stood.y - -0.93).abs() < 1e-3, "{stood} isn't on the top face");
     }
 
     #[test]

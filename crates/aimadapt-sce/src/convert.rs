@@ -158,11 +158,16 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
         push_once(&mut reasons, gap);
         [[0.0; 3]; 2]
     });
+    let player_offset = r.player.map_or(Ok(Vec3::ZERO), |p| offsets::player(p, turned)).unwrap_or_else(|gap| {
+        push_once(&mut reasons, gap);
+        Vec3::ZERO
+    });
     let mut spawn_characters = Vec::new();
     let world = world(
         map,
         map_scale,
         r.player,
+        player_offset,
         &characters,
         spawn_rise(bot),
         bot_offsets,
@@ -563,15 +568,12 @@ fn map_walls(map: &Map, map_scale: f32) -> MapWalls {
 // Where the player stands: lifted onto a floor it overlaps, or pulled down onto
 // one within its step-up height, as Unreal's walking movement does (both measured
 // in KovaaK's). The eye is the camera offset above its middle, or with a head, above
-// the top of its body (and half the head's offset higher: one measurement). The
-// player's own spawn offset is read as the newer settings alone, along the sim's axes:
-// what the older settings and the file's version do to it wasn't measured.
-fn player_eye(player: Option<&Section>, start: Vec3, meshes: &[WorldMesh]) -> Vec3 {
+// the top of its body (and half the head's offset higher: one measurement). `offset`
+// is the player's own spawn offset (see `offsets::player`).
+fn player_eye(player: Option<&Section>, start: Vec3, offset: Vec3, meshes: &[WorldMesh]) -> Vec3 {
     let mut body = start;
     let mut camera = Vec3::ZERO;
     if let Some(p) = player {
-        let lo = axes(p.vec3("SpawnOffsetMin").unwrap_or_default());
-        let hi = axes(p.vec3("SpawnOffsetMax").unwrap_or_default());
         let height = p.f32_or("MainBBHeight", 0.0).max(0.0) / UU_PER_M;
         let head = p.is("MainBBHasHead");
         // The capsule Unreal stands on floors: a head reaches its radius further each way.
@@ -579,7 +581,7 @@ fn player_eye(player: Option<&Section>, start: Vec3, meshes: &[WorldMesh]) -> Ve
         let half = height / 2.0 + head_radius;
         let radius = (p.f32_or("MainBBRadius", 0.0).max(0.0) / UU_PER_M).min(half);
         let step_up = p.f32_or("StepUpHeight", 0.0).max(0.0) / UU_PER_M;
-        body += (lo + hi) / 2.0 / UU_PER_M + rise(height);
+        body += offset + rise(height);
         if radius > 0.0 {
             body = aimadapt_sim::collide::Collider::for_bots(meshes).stand(body, half - radius, radius, step_up);
         }
@@ -908,6 +910,7 @@ fn world(
     map: &Map,
     map_scale: f32,
     player: Option<&Section>,
+    player_offset: Vec3,
     bots: &[&Section],
     bot_height: f32,
     bot_offsets: [[f32; 3]; 2],
@@ -936,7 +939,7 @@ fn world(
     // The walls, first where the map has them: where the player stands depends on them.
     let MapWalls { mut meshes, mut walls, skipped, guessed } = map_walls(map, map_scale);
 
-    let eye = player_eye(player, point(start.position), &meshes);
+    let eye = player_eye(player, point(start.position), player_offset, &meshes);
     // JSON rotations are written roll, pitch, yaw, and Reflex ones yaw first; turn
     // the map so the player's starting yaw looks along -Z.
     let yaw_of = |a: [f32; 3]| if reflex { a[0] } else { a[2] };

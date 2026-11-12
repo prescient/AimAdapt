@@ -509,11 +509,13 @@ fn clip_brushes_are_invisible_and_the_player_stands_on_the_floor() {
 /// units above a floor whose top is at z = 0, and how far below the eye that floor
 /// and the bots' spawn volume's lowest corner (100 units under the floor) are.
 fn standing(player: &str, spawn_z: f32) -> (f32, f32) {
+    standing_as(&format!("MainBBRadius=55.0\nMainBBHeight=230.0\n{player}"), spawn_z)
+}
+
+/// [`standing`] for a player of any size: `player` has its radius and height too.
+fn standing_as(player: &str, spawn_z: f32) -> (f32, f32) {
     let text = VOLUME_SCE
-        .replace(
-            "MaxSpeed=0.0\nWeaponProfileNames",
-            &format!("MaxSpeed=0.0\nMainBBRadius=55.0\nMainBBHeight=230.0\n{player}WeaponProfileNames"),
-        )
+        .replace("MaxSpeed=0.0\nWeaponProfileNames", &format!("MaxSpeed=0.0\n{player}WeaponProfileNames"))
         .replace("\"location\": \"0, 0, 0\"", &format!("\"location\": \"0, 0, {spawn_z}\""))
         .replace("\n]}", &format!("{}\n]}}", brush_json("Cube", "-2000, -2000, -16", "0, 0, 0", "40, 40, 0.16")));
     let w = convert(&Sce::parse(&text), "box.sce", "0").unwrap().scenario.world.unwrap();
@@ -554,6 +556,27 @@ fn characters_start_their_height_above_where_they_appear() {
     // too, and sees from 1.17 m (116.5 units).
     near(standing("StepUpHeight=120.0\n", 0.0).0, 1.17);
     near(standing("StepUpHeight=75.0\n", 0.0).0, 2.3);
+}
+
+/// Bug: a speck of a player (a ball 2 units across with a step-up many times its size)
+/// that appears just above a floor stayed where it appeared. The floor was looked for at
+/// the far end of its step only, where the whole ball is already under the floor's
+/// surface. Found when the player's older spawn offsets were first read: one brought such
+/// a player's bottom down to a floor, and its eye came out 2 units lower than a character
+/// on a floor stands.
+#[test]
+fn a_speck_of_a_player_just_above_a_floor_stands_on_it() {
+    let near = |got: f32, want: f32| assert!((got - want).abs() < 1e-3, "{got} != {want}");
+    let speck = "MainBBRadius=1.0\nMainBBHeight=2.0\nStepUpHeight=45.0\n";
+    // Appearing on the floor its middle starts 2 units up, its bottom 1 unit above the
+    // floor: it stands with its bottom 2 units up, so the eye is 3 units over the floor.
+    near(standing_as(speck, 0.0).0, 0.03);
+    // The same from 1 m up, floating, with an older offset that brings it down to half a
+    // unit above the floor.
+    let lowered = format!("{speck}Gravity=0.0\nVerticalSpawnOffset=-100.5\n");
+    near(standing_as(&lowered, 100.0).0, 0.03);
+    // With the floor past its step it stays up: 2 units of rise over the 1 m.
+    near(standing_as(&format!("{speck}Gravity=0.0\n"), 100.0).0, 1.02);
 }
 
 /// [`VOLUME_SCE`] with its bot's hitbox changed: type, radius and height in Unreal units.
@@ -1892,6 +1915,118 @@ fn older_and_newer_offsets_together_are_refused() {
     assert!(err.iter().any(|g| g.feature == "spawn offsets" && g.detail.starts_with("Big Ball:")), "{err:?}");
     let zeros = format!("SpawnXOffset=300.0\n{}", fixed_offset("X=0.000 Y=0.000 Z=0.000"));
     assert_all_at(&offset_sce("", &zeros, 0.0, &[("0, 0, 0", "")]), Vec3::new(0.0, 0.0, -3.0));
+}
+
+/// [`offset_sce`] with one bot spawn point 10 m ahead that isn't turned, the player's start turned
+/// `player_yaw` degrees and `player` settings on the player's character: where that spawn point is from
+/// the eye (meters, sim axes).
+fn spawn_seen_by(version: &str, player: &str, player_yaw: f32) -> Result<Vec3, Vec<Gap>> {
+    let text = offset_sce(&game_version(version), "", player_yaw, &[("0, 0, 0", "")])
+        .replace("MaxSpeed=0.0\nWeaponProfileNames", &format!("MaxSpeed=0.0\n{player}WeaponProfileNames"));
+    assert!(text.contains(player), "the player's settings went in");
+    convert(&Sce::parse(&text), "x.sce", "0").map(|i| Vec3::from_array(i.scenario.world.unwrap().spawns[0].pos))
+}
+
+/// A player that floats, as the measured one did.
+const FLOATS: &str = "Gravity=0.0\n";
+
+/// How far the spawn point moves from the eye when a floating player gets `offset` settings. The eye is
+/// the origin, so an eye that moves one way moves the spawn point the other way.
+fn eye_moved(version: &str, offset: &str, player_yaw: f32) -> Vec3 {
+    let with = spawn_seen_by(version, &format!("{FLOATS}{offset}\n"), player_yaw).unwrap();
+    with - spawn_seen_by(version, FLOATS, player_yaw).unwrap()
+}
+
+fn assert_near(got: Vec3, want: Vec3) {
+    assert!(got.distance(want) < 1e-4, "{got} is not {want}");
+}
+
+/// Bug: the player's own `SpawnXOffset`, `SpawnYOffset` and `VerticalSpawnOffset` were ignored, so a file
+/// that lifts its player with one had the eye at the spawn point, and its still bots could be found
+/// hidden behind walls. Measured in KovaaK's 3.9.13 on 12 November 2026 (`AimAdapt - Rise Test R0` to
+/// `R5` maps: a floating player, and still balls on the rays an eye moved by 300 units would shoot
+/// along): the player's older keys are one fixed offset along the map's axes, as a bot's are, and a file
+/// saved before 2.0.5.0 has X and Y turned a quarter.
+#[test]
+fn the_players_older_offset_keys_move_the_eye() {
+    // The eye 3 m higher, 3 m further right and 3 m further forward: the spawn point goes the other way.
+    for version in ["3.9.13", "2.0.5.0", ""] {
+        assert_near(eye_moved(version, "VerticalSpawnOffset=300.0", 0.0), Vec3::new(0.0, -3.0, 0.0));
+        assert_near(eye_moved(version, "SpawnYOffset=300.0", 0.0), Vec3::new(-3.0, 0.0, 0.0));
+        assert_near(eye_moved(version, "SpawnXOffset=300.0", 0.0), Vec3::new(0.0, 0.0, 3.0));
+    }
+    // An older file: Y moves the eye back and X moves it right. Up stays up.
+    assert_near(eye_moved("2.0.4.9", "SpawnYOffset=300.0", 0.0), Vec3::new(0.0, 0.0, -3.0));
+    assert_near(eye_moved("2.0.4.9", "SpawnXOffset=300.0", 0.0), Vec3::new(-3.0, 0.0, 0.0));
+    assert_near(eye_moved("2.0.4.9", "VerticalSpawnOffset=300.0", 0.0), Vec3::new(0.0, -3.0, 0.0));
+    // All three at once add up.
+    let all = "SpawnXOffset=100.0\nSpawnYOffset=200.0\nVerticalSpawnOffset=-50.0";
+    assert_near(eye_moved("", all, 0.0), Vec3::new(-2.0, 0.5, 1.0));
+}
+
+/// By inference, since the measured player's start wasn't turned: the offset runs along the map's axes
+/// however the player's start is turned, as a bot's does. A player turned 90 degrees faces the map's
+/// right, so the map's forward is to its left and the spawn point seems to move to its right.
+#[test]
+fn the_players_older_offset_runs_along_the_maps_axes() {
+    assert_near(eye_moved("", "SpawnXOffset=300.0", 90.0), Vec3::new(3.0, 0.0, 0.0));
+    assert_near(eye_moved("", "SpawnYOffset=300.0", 90.0), Vec3::new(0.0, 0.0, 3.0));
+}
+
+/// A leftover under a millimeter in one of the player's older keys moves nothing, as on a bot, and a
+/// tenth of a unit does.
+#[test]
+fn a_tiny_older_offset_on_the_player_is_no_offset() {
+    let seen =
+        |offset: &str| spawn_seen_by("", &format!("{FLOATS}{offset}\n"), 0.0).unwrap().to_array().map(f32::to_bits);
+    let none = spawn_seen_by("", FLOATS, 0.0).unwrap().to_array().map(f32::to_bits);
+    assert_eq!(seen("VerticalSpawnOffset=0.05"), none);
+    assert_eq!(seen("SpawnXOffset=-0.09"), none);
+    assert_ne!(seen("VerticalSpawnOffset=0.1"), none);
+}
+
+/// What wasn't measured for the player is refused: the older keys together with newer ones that aren't
+/// zero (as on a bot), and an older vertical offset on a player that falls, because where it lands
+/// wasn't measured. A falling player with an older offset to the side plays, and so does a flyer.
+#[test]
+fn the_players_older_offsets_that_werent_measured_are_refused() {
+    let refused = |player: &str| {
+        let err = spawn_seen_by("", player, 0.0).unwrap_err();
+        assert!(err.iter().all(|g| !g.beyond_plan), "{err:?}");
+        err.into_iter().filter(|g| g.feature == "spawn offsets").map(|g| g.detail).collect::<Vec<_>>()
+    };
+    let both = format!("{FLOATS}VerticalSpawnOffset=300.0\n{}", fixed_offset(THREE_M_RIGHT));
+    let got = refused(&both);
+    assert!(got.len() == 1 && got[0].starts_with("Gunner:") && got[0].contains("SpawnOffsetMin"), "{got:?}");
+    // No `Gravity` key is gravity as it comes: the player falls.
+    for falls in ["VerticalSpawnOffset=300.0\n", "Gravity=1.0\nVerticalSpawnOffset=-20.0\n"] {
+        let got = refused(falls);
+        assert!(got.len() == 1 && got[0].starts_with("Gunner:") && got[0].contains("falls"), "{got:?}");
+    }
+    let zeros = format!("{FLOATS}VerticalSpawnOffset=300.0\n{}", fixed_offset("X=0.000 Y=0.000 Z=0.000"));
+    assert_near(
+        spawn_seen_by("", &zeros, 0.0).unwrap() - spawn_seen_by("", FLOATS, 0.0).unwrap(),
+        Vec3::new(0.0, -3.0, 0.0),
+    );
+    let side = spawn_seen_by("", "Gravity=1.0\nSpawnYOffset=300.0\n", 0.0).unwrap();
+    assert_near(side - spawn_seen_by("", "Gravity=1.0\n", 0.0).unwrap(), Vec3::new(-3.0, 0.0, 0.0));
+    let flyer = spawn_seen_by("", "Gravity=1.0\nIsFlyer=true\nVerticalSpawnOffset=300.0\n", 0.0).unwrap();
+    assert_near(flyer - spawn_seen_by("", "Gravity=1.0\nIsFlyer=true\n", 0.0).unwrap(), Vec3::new(0.0, -3.0, 0.0));
+}
+
+/// Bug guard: the player's newer keys are read as they always were, to the last bit (the eye is in
+/// every stored position, and so in the fingerprint): the middle of the two, along the map's axes. By
+/// inference an older file turns them a quarter, as it does a bot's.
+#[test]
+fn the_players_newer_offset_keys_are_the_middle_of_their_range() {
+    let range = "SpawnOffsetMin=X=0.000 Y=-100.000 Z=30.000\nSpawnOffsetMax=X=0.000 Y=300.000 Z=70.000";
+    assert_near(eye_moved("", range, 0.0), Vec3::new(-1.0, -0.5, 0.0));
+    assert_near(eye_moved("2.0.4.9", range, 0.0), Vec3::new(0.0, -0.5, -1.0));
+    // 33 and 34 units: the middle is taken before the units become meters.
+    let odd = "SpawnOffsetMin=X=0.000 Y=0.000 Z=33.000\nSpawnOffsetMax=X=0.000 Y=0.000 Z=34.000";
+    let seen = spawn_seen_by("", &format!("{FLOATS}{odd}\n"), 0.0).unwrap();
+    let none = spawn_seen_by("", FLOATS, 0.0).unwrap();
+    assert_eq!(seen.y.to_bits(), (none.y - (33.0f32 + 34.0) / 2.0 / 100.0).to_bits());
 }
 
 /// Bug: a bot whose character has a range of respawn delays came back after the middle of
