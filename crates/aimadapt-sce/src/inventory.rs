@@ -6,6 +6,8 @@
 //! Covered by the plan, so not listed: hitscan (including a small `HitscanRadius`),
 //! sphere, cylinder and box hitboxes, health, regen, bot movement and dodging,
 //! rotation profiles, and bots' melee (knockback) and movement (dash) abilities.
+//! Waypoints in a map are no reason by themselves: a bot follows a path only when its dodge
+//! profile says `FollowAimAtWaypoint`, a spawn point names one and the bot can move at all.
 
 use std::collections::BTreeMap;
 
@@ -64,9 +66,6 @@ pub fn gaps(sce: &Sce) -> Vec<Gap> {
             let solid_props: Vec<&str> = m.props.iter().filter(|p| p.collides).map(|p| p.name.as_str()).collect();
             if !solid_props.is_empty() {
                 gap("solid props", counted(solid_props.into_iter()));
-            }
-            if m.spawns.iter().any(|s| !s.path.is_empty()) || !m.waypoints.is_empty() {
-                gap("waypoint paths", format!("{} waypoints", m.waypoints.len()));
             }
             if m.solids.is_empty() && m.spawns.is_empty() {
                 gap("map", "the map has no geometry or spawns".into());
@@ -164,8 +163,26 @@ pub fn gaps(sce: &Sce) -> Vec<Gap> {
             // abilities aren't planned, except the one shape that blows its own bot up.
             weapon_ability_gaps(c, helper, &scene, &mut gap);
             for (d, _) in &c.dodges {
-                if !matches!(d.str("WaypointLogic"), "" | "Ignore") {
-                    gap("waypoint paths", format!("WaypointLogic={}", d.str("WaypointLogic")));
+                match d.str("WaypointLogic") {
+                    "" | "Ignore" => {}
+                    // Measured: this follows a path only where a spawn point names one, and a bot whose top
+                    // speed is 0 stays where it spawned even then. One that a dash, a jump or flight still
+                    // moves is refused: it aims at its waypoint, and where that sends it wasn't measured.
+                    // Which bot spawns where isn't worked out, so any named path in the map counts.
+                    "FollowAimAtWaypoint" => {
+                        let still = |ch: &Section| ch.f32("MaxSpeed") == Some(0.0) && !crate::convert::moves(c, ch);
+                        let stays = c.character.is_some_and(still);
+                        if !stays
+                            && let Ok(m) = &sce.map
+                            && m.spawns.iter().any(|s| !s.path.is_empty())
+                        {
+                            gap(
+                                "waypoint paths",
+                                format!("a bot follows a path ({} waypoints in the map)", m.waypoints.len()),
+                            );
+                        }
+                    }
+                    other => gap("waypoint paths", format!("WaypointLogic={other}")),
                 }
                 if !matches!(d.str("LOSReactType"), "" | "None") {
                     gap("line-of-sight reactions", format!("LOSReactType={}", d.str("LOSReactType")));
@@ -470,6 +487,122 @@ Name=Zap
         );
         let g = gaps(&Sce::parse(&text));
         assert_eq!(g, vec![Gap { feature: "map objects", detail: "Hurt, Teleporter ×2".into(), beyond_plan: true }]);
+    }
+
+    /// BASE with its ball's bot using a dodge profile with this `WaypointLogic` line (empty for none), a map
+    /// with `waypoints` waypoint objects, and a path named on its spawn point when `path` is set.
+    fn waypoint_scene(logic: &str, waypoints: usize, path: bool) -> String {
+        let spawn = if path {
+            "\"location\": \"0, 0, 0\", \"properties\": [{\"name\": \"Path\", \"value\": \"route\"}]}"
+        } else {
+            "\"location\": \"0, 0, 0\"}"
+        };
+        let mut map_objects = spawn.to_string();
+        for i in 0..waypoints {
+            map_objects.push_str(&format!(
+                ", {{\"type\": \"gameObject\", \"name\": \"Waypoint\", \"location\": \"{i}, 0, 0\"}}"
+            ));
+        }
+        BASE.replace("\"location\": \"0, 0, 0\"}", &map_objects)
+            .replace("UseWeapons=false", "DodgeProfileNames=Walk\nUseWeapons=false")
+            .replace("[Map Data]", &format!("[Dodge Profile]\nName=Walk\n{logic}\n[Map Data]"))
+    }
+
+    /// Waypoint logic that is off follows nothing, whatever the map holds, so a map with waypoints and a path
+    /// at a spawn point is no gap by itself (it used to refuse every file with a waypoint in its map).
+    #[test]
+    fn waypoints_and_a_path_in_a_map_are_no_gap_when_the_logic_is_off() {
+        for logic in ["WaypointLogic=Ignore", ""] {
+            assert_eq!(features(&waypoint_scene(logic, 3, true)), Vec::<&str>::new(), "{logic:?}");
+        }
+    }
+
+    /// Measured: following logic with no path at any spawn point is the same as Ignore.
+    #[test]
+    fn following_logic_with_waypoints_but_no_path_is_no_gap() {
+        let logic = "WaypointLogic=FollowAimAtWaypoint";
+        assert_eq!(features(&waypoint_scene(logic, 2, false)), Vec::<&str>::new());
+    }
+
+    #[test]
+    fn following_logic_in_a_map_with_no_waypoints_and_no_path_is_no_gap() {
+        assert_eq!(features(&waypoint_scene("WaypointLogic=FollowAimAtWaypoint", 0, false)), Vec::<&str>::new());
+    }
+
+    /// Following logic and a spawn point that names a path: a bot follows it, which the trainer can't play.
+    #[test]
+    fn following_logic_and_a_path_at_a_spawn_point_is_a_gap() {
+        let text = waypoint_scene("WaypointLogic=FollowAimAtWaypoint", 4, true);
+        assert_eq!(
+            gaps(&Sce::parse(&text)),
+            vec![Gap {
+                feature: "waypoint paths",
+                detail: "a bot follows a path (4 waypoints in the map)".into(),
+                beyond_plan: true
+            }]
+        );
+        // One spawn point with a path is enough: a second one without a path changes nothing.
+        let second =
+            "{\"objects\": [{\"type\": \"gameObject\", \"name\": \"SpawnPoint\", \"location\": \"50, 0, 0\"}, ";
+        let two = text.replace("{\"objects\": [", second);
+        assert_ne!(two, text);
+        assert_eq!(features(&two), vec!["waypoint paths"]);
+    }
+
+    /// Measured: a follower whose top speed is 0 stays where it spawned, path or not, so it is no gap. Only a
+    /// `MaxSpeed` line that says 0 counts: a character with no such line, or one that can move, still is one.
+    /// So is one that can't run but dashes (a local file did, and played with its dash pointed at the player).
+    #[test]
+    fn a_follower_whose_top_speed_is_zero_is_no_gap() {
+        let text = waypoint_scene("WaypointLogic=FollowAimAtWaypoint", 4, true);
+        assert_eq!(features(&text), vec!["waypoint paths"]);
+        let orb = "Name=Orb\nMainBBType=Spheroid";
+        let gap = vec!["waypoint paths"];
+        for (speed, want) in
+            [("0.0", vec![]), ("0", vec![]), ("0.5", gap.clone()), ("-1.0", gap.clone()), ("fast", gap.clone())]
+        {
+            let with = text.replace(orb, &format!("Name=Orb\nMaxSpeed={speed}\nMainBBType=Spheroid"));
+            assert_ne!(with, text);
+            assert_eq!(features(&with), want, "MaxSpeed={speed}");
+        }
+        // The other value nobody measured stays refused for a bot that can't move.
+        let patrol =
+            waypoint_scene("WaypointLogic=Patrol", 4, true).replace(orb, "Name=Orb\nMaxSpeed=0.0\nMainBBType=Spheroid");
+        assert_eq!(features(&patrol), vec!["waypoint paths"]);
+        // A dash moves a bot that can't run. It aims at its waypoint, so where the dash goes isn't known.
+        let still = text.replace(orb, "Name=Orb\nMaxSpeed=0.0\nAbilityProfileNames=Hop.abilmov;;\nMainBBType=Spheroid");
+        let hop = |speed: &str| {
+            still.replace(
+                "[Map Data]",
+                &format!("[Movement Ability Profile]\nName=Hop\nMainVelocity={speed}\n[Map Data]"),
+            )
+        };
+        assert_eq!(features(&hop("0.0")), Vec::<&str>::new());
+        assert_eq!(features(&hop("2400.0")), vec!["waypoint paths"]);
+        assert_eq!(features(&hop("2400.0").replace("FollowAimAtWaypoint", "Ignore")), Vec::<&str>::new());
+    }
+
+    /// A value nobody measured is refused whether or not the map has a path.
+    #[test]
+    fn an_unknown_waypoint_logic_is_a_gap_with_its_value() {
+        for path in [false, true] {
+            assert_eq!(
+                gaps(&Sce::parse(&waypoint_scene("WaypointLogic=Patrol", 0, path))),
+                vec![Gap { feature: "waypoint paths", detail: "WaypointLogic=Patrol".into(), beyond_plan: true }]
+            );
+        }
+    }
+
+    /// Only the dodge profiles of bots the scenario uses are looked at: a following profile on a bot that
+    /// `AddedBots` doesn't name is no gap, even with a path in the map.
+    #[test]
+    fn a_following_profile_on_a_bot_the_scenario_does_not_use_is_no_gap() {
+        let used = waypoint_scene("WaypointLogic=FollowAimAtWaypoint", 2, true);
+        assert_eq!(features(&used), vec!["waypoint paths"]);
+        let unused = used
+            .replace("AddedBots=Ball.bot", "AddedBots=Other.bot")
+            .replace("[Map Data]", "[Bot Profile]\nName=Other\nCharacterProfile=Orb\nUseWeapons=false\n[Map Data]");
+        assert_eq!(features(&unused), Vec::<&str>::new());
     }
 
     #[test]

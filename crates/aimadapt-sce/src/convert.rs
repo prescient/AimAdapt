@@ -609,7 +609,7 @@ fn camera_offset(p: &Section) -> Vec3 {
 /// flies up and down (`IsFlyer` with a flight speed: its dodge profile's jumps and
 /// crouches move it), jumps (a jump speed, gravity to bring it down and a dodge profile
 /// that jumps), uses a jetpack, or has a movement ability that dashes or launches it.
-fn moves(c: &BotChoice, ch: &Section) -> bool {
+pub(crate) fn moves(c: &BotChoice, ch: &Section) -> bool {
     if c.bot.is("NoDodging") {
         return false;
     }

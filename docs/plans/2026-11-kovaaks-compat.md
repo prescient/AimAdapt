@@ -30,8 +30,9 @@ A scenario is refused when it uses something the trainer doesn't model, so every
 | K8b The other weapon abilities, bots that fire | | |
 | K9 Heads | 4c4db67 | 143 of 225 |
 | Fix: the player's own older spawn offsets, and where a small player stands | 910d98f | 144 of 225 |
-| A speck of a body under a head, and thin or fast bodies at walls | | 145 of 225 |
-| K10 Waypoint paths | | |
+| A speck of a body under a head, and thin or fast bodies at walls | 7dd84da | 145 of 225 |
+| K10a Waypoints no bot follows | | 148 of 225 |
+| K10b Bots that follow a path | | |
 | K11 Several pellets per shot | | |
 | K12 Teleporters, hurt volumes and jump pads | | |
 | K13 Solid props | | |
@@ -79,6 +80,8 @@ Recounted after K8a, with 139 playing. Of the 86 that don't play, 32 have one re
 Recounted after the fix for the player's own spawn offsets, with 144 playing. Of the 81 that don't play, 34 have one reason, 20 have two and 27 have three or more. Files each reason is on, and the files it blocks by itself: waypoint paths 28 and 5, player movement 25 and 6, map objects 17 and 2, solid props 15 and 5, weapon abilities 13 and 6, aim assist 11 and 2, a movement ability that is still refused 9 and 1, aim down sights 9 and 1, several pellets per shot 8 and 3, player abilities 8 and none, recoil 5 and 1, KovaaK's own dynamic difficulty 4 and 1, bots that aim and fire 4 and none, and a bot size outside what the trainer allows 3 and 1. No file is refused for still bots hidden behind walls any more.
 
 Recounted after the speck package, with 145 playing. Of the 80 that don't play, 33 have one reason, 20 have two and 27 have three or more. The files each reason is on are as above, except that a bot size outside what the trainer allows is now on 2 and blocks none by itself. No local file is refused for a bot that starts inside a wall.
+
+Recounted after K10a, with 148 playing. Of the 77 that don't play, 40 have one reason, 13 have two and 24 have three or more. Files each reason is on, and the files it blocks by itself: player movement 25 and 9, map objects 17 and 7, solid props 15 and 5, weapon abilities 13 and 6, aim assist 11 and 2, aim down sights 9 and 1, a movement ability the trainer can't play yet 9 and 2, several pellets per shot 8 and 4, player abilities 8 and 0, waypoint paths 8 and 2, recoil 5 and 1, KovaaK's dynamic difficulty 4 and 1, bots that shoot back 4 and 0, distance scoring 3 and 0, a projectile weapon 3 and 0, invincibility set on a character 2 and 0, bot size 2 and 0, bots that use abilities 2 and 0, and one file each with none alone: a score multiplied by kill efficiency, bots with a set number of lives, MBS scoring, an explosive weapon, spawn offsets and a third-person camera.
 
 ## What is out of scope
 
@@ -750,9 +753,46 @@ Result: 145 of 225. One file started and none stopped, and no playing file has a
 
 ### K10. Waypoint paths
 
-- 28 files move bots along waypoints placed in the map. The only logic in use is `FollowAimAtWaypoint`.
-- The map reader keeps the waypoints and each spawn's path. Bot movement gets a mode that walks them.
-- Measure in KovaaK's first: what happens at the last waypoint, and whether the dodge profile still applies on the way.
+- 28 files had this reason. The inventory refused any map with a waypoint or a spawn point that names a path, whatever the bots' dodge profiles said, and any `WaypointLogic` other than `Ignore`.
+- The only other logic in use is `FollowAimAtWaypoint`.
+- The package is split. K10a is the importer side: who follows a path at all. K10b is a path follower in the sim.
+
+Measured in KovaaK's 3.9.13 on 12 November 2026 with six test maps, filmed off the screen. The bots were flying balls of radius 40 with a top speed of 400 and no gravity, 2000 units ahead, unless said.
+
+Who follows a path:
+
+- `WaypointLogic=Ignore` with a looping path at the bot's spawn point: the path is ignored. A still bot stays still. A strafing one strafes exactly like a bot in the same map with no path, with the same legs and the same turning moments.
+- `FollowAimAtWaypoint` with no path at the spawn point is the same as logic off, whether the map has waypoints elsewhere or none at all. A still bot stays within 2 film pixels of its start, and a strafing one keeps the leg times and widths of the logic-off bot.
+- `FollowAimAtWaypoint` with a path, on a bot whose `MaxSpeed` is 0: the bot stays exactly where it spawned. Four variants agreed over 31 s: a once path 300 to the right on a bot that doesn't fly, a loop on a flyer, the same loop with the crouch speed 0 too, and a once path 300 straight up. All had no gravity, no abilities and no jumping.
+
+How a path is followed (kept for K10b, not built):
+
+- A level loop of two waypoints 500 apart at speed 400: the bot turns at +206 and -185, in legs of 0.98 to 1.01 s at 388 to 399 uu/s.
+- The bot turns before it reaches a waypoint, about 76.5 uu short for a ball of radius 40 and about 42.5 for radius 20 (at speeds of 50 and 100). The form of that distance isn't known.
+- The waypoint's scale makes no difference.
+- Slanted loops of 30 and 60 degrees, and a path off the line of sight, are followed at about 393 uu a leg.
+- A slant of 80 degrees, or a path straight up and down, isn't followed along its line. The bot bobs about 109 uu up and down in legs of about 0.3 s.
+- A follower that also strafes moves along its path with the strafing mixed in (seen, not analysed).
+- A follower that doesn't fly, with speed 400 and no gravity on a once path 300 to its right, moved at a steady 166 uu/s, went past its waypoint and stopped only against the next bot about 757 uu on. So a once path isn't simply walked to its end, and a walker's speed isn't its `MaxSpeed`.
+
+Not measured: a path that names waypoints the map doesn't have, any other `WaypointLogic` value, pauses at waypoints, turn rates below 100000, where a once path ends, and a follower that can't run but has a dash. `FollowAimAtWaypoint` also aims the bot at its waypoint and a dash goes along the aim line, so that dash probably goes toward the waypoint.
+
+Built (K10a):
+
+- `inventory.rs` no longer refuses a map for its waypoints or a named path. A bot is refused under "waypoint paths" when its dodge profile says `FollowAimAtWaypoint` and a spawn point in the map names a path. Which bot spawns at which point isn't worked out, so any named path counts.
+- A follower whose `MaxSpeed` line says 0 and that nothing else moves (no flight, jump, jetpack or movement ability that launches it) is let through, because it stays where it spawns. A character with no `MaxSpeed` line doesn't count as still.
+- Any other `WaypointLogic` value is refused with the value named.
+- The stored scenario holds nothing about waypoints. A file whose bots ignore them imports to the same scenario as a copy with the waypoints and the path taken out.
+- Two fixtures: Trail Pair (two strafing balls with the logic off, at a spawn point that names a loop of four waypoints) and Lone Post (one ball with follow logic in a map where no spawn point names a path).
+
+Found in review:
+
+- The first rule for a top speed of 0 let through a local file whose follower can't run but dashes. Played without a window, its bot dashed toward the player, where in KovaaK's it would aim at its waypoint. The rule now asks that nothing else moves the bot, and that file is refused again. No local file is opened by the rule as it stands. It stays because it is measured and costs one line.
+- In the older (Reflex) map format a waypoint is a `Target` entity and a spawn's `path` names one. The reader drops `Target` entities as cosmetic, so for those maps the refusal's detail counts 0 waypoints. The refusal itself is right, because it goes by the spawn's path.
+
+Left for K10b: a path follower in the sim, the older format's `Target` entities kept as waypoints, and where a follower's dash points. 8 files keep the reason, three of them on older-format maps, and 2 have no other reason. Some of their paths are steep enough to fall where the measured behaviour stops being a line, so K10b needs more measuring before it can be built.
+
+Result: 148 of 225. Three files started and none stopped, and no playing file has a new fingerprint or a new import note. Of the 28 files that had the reason, 20 lost it and 8 keep it. The three new files were played in the sim without a window, idle and by a bot that aims perfectly and holds fire. Their bots stay inside the map, move, and can be killed.
 
 ### K11. Several pellets per shot
 
@@ -895,3 +935,6 @@ These rows are filled in as packages land. A row leaves the table when a test ma
 | A head on a cuboid, a head radius of 0 or less, headshots only without a head or with a weapon that can't headshot, a headshot multiplier of 0 or less | Refused | No |
 | `EnemyHeadColor` | The head's colour. Unset or black gives AimAdapt's own head colour | No |
 | A head with a radius under 1 uu | Played at its size, a speck that can hardly be hit. Files use one where they want no head worth hitting | No |
+| `WaypointLogic=Ignore` on a bot that walks, jumps or dashes | The path at its spawn point is ignored, as it was for flying balls that stand or strafe | No: measured on flyers only |
+| `FollowAimAtWaypoint` at a spawn point with no path, on a bot that walks, jumps or dashes | The same as logic off, as it was for flying balls that stand or strafe | No: measured on flyers only |
+| A follower with a top speed of 0 that has gravity | Stays where it lands, as one with no gravity stayed where it spawned | No: measured with no gravity |

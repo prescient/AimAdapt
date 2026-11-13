@@ -23,7 +23,7 @@ fn read(name: &str) -> Sce {
 #[test]
 fn finds_every_fixture() {
     let files = find_files(&[fixtures()]);
-    assert_eq!(files.len(), 17);
+    assert_eq!(files.len(), 19);
     assert!(files.iter().all(|f| f.extension().unwrap() == "sce"));
 }
 
@@ -406,6 +406,100 @@ fn every_local_scenario_file_reads() {
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
 
+/// Where the sim's bots are after `seconds` of play with no shots, sampled every tenth of a second.
+fn bot_tracks(s: aimadapt_sim::Scenario, seconds: f32) -> Vec<Vec<Vec3>> {
+    let mut sim = started(s);
+    let mut tracks: Vec<Vec<Vec3>> = sim.targets().iter().map(|t| vec![t.pos]).collect();
+    let dt = 1.0 / 120.0;
+    for step in 1..=(seconds / dt) as usize {
+        sim.step(dt, idle());
+        if step % 12 == 0 {
+            for (track, t) in tracks.iter_mut().zip(sim.targets()) {
+                track.push(t.pos);
+            }
+        }
+    }
+    tracks
+}
+
+/// A bot whose dodge profile ignores waypoints plays as in a map with none, even when a spawn point names a
+/// path through four of them. The stored scenario equals the one from a copy of the file with the waypoints and
+/// the path taken out, apart from the file name and its hash (the fingerprint covers the hash, so the
+/// scenarios themselves are compared). The bots strafe.
+#[test]
+fn waypoints_a_bot_ignores_change_nothing_in_the_stored_scenario() {
+    let name = "Trail Pair";
+    let i = import(&path(name)).unwrap();
+    assert!(gaps(&read(name)).is_empty(), "{:?}", gaps(&read(name)));
+    assert!(i.notes.iter().all(|n| n.starts_with("bots move by their dodge profiles")), "{:?}", i.notes);
+    // The reader does see the path and its waypoints, so the file is here for what the importer does with them.
+    let sce = read(name);
+    let Ok(map) = &sce.map else { panic!("the map reads") };
+    assert_eq!(map.waypoints.len(), 4);
+    assert!(map.spawns.iter().any(|s| s.path == "lane a,lane b,lane c,lane d"), "{:?}", map.spawns);
+    let text = std::fs::read_to_string(path(name)).unwrap();
+    let named = ", {\"name\": \"Path\", \"value\": \"lane a,lane b,lane c,lane d\"}, {\"name\": \"LoopingPath\", \"value\": true}";
+    assert_eq!(text.matches(named).count(), 1);
+    let plain: String = text
+        .lines()
+        .filter(|l| !l.contains("\"name\": \"Waypoint\""))
+        .map(|l| format!("{}\n", l.replace(named, "")))
+        .collect();
+    assert!(
+        !plain.contains("\"name\": \"Waypoint\"") && !plain.contains("Path") && !plain.contains("lane a"),
+        "the copy still has a waypoint or path"
+    );
+    // The last object line lost its comma's partner: the copy's last object is the second spawn point.
+    let plain = plain.replace("}]},\n]}", "}]}\n]}");
+    let dir = std::env::temp_dir().join(format!("aimadapt-sce-trail-pair-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let copy = dir.join("AimAdapt Test - Trail Pair Plain.sce");
+    std::fs::write(&copy, plain).unwrap();
+    let from_copy = import(&copy).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let (mut a, mut b) = (i.scenario.clone(), from_copy.scenario);
+    for s in [&mut a, &mut b] {
+        let w = s.world.as_mut().unwrap();
+        (w.source, w.source_hash) = (String::new(), String::new());
+    }
+    assert_eq!(a, b, "the waypoints and the path changed what was stored");
+
+    let tracks = bot_tracks(i.scenario, 6.0);
+    assert_eq!(tracks.len(), 2);
+    for t in &tracks {
+        let travelled: f32 = t.windows(2).map(|w| (w[1] - w[0]).length()).sum();
+        assert!(travelled > 1.0, "a strafing bot moves: {travelled} m");
+    }
+}
+
+/// A bot whose dodge profile follows waypoints, in a map where no spawn point names a path, stands still when
+/// it doesn't strafe, as measured (apart from dropping onto its floor). It imports with no gap and no note
+/// about waypoints. Its spawn point has a `Path` with nothing in it, the way KovaaK's writes one.
+#[test]
+fn a_following_bot_with_no_path_stands_where_it_started() {
+    let name = "Lone Post";
+    let sce = read(name);
+    let Ok(map) = &sce.map else { panic!("the map reads") };
+    assert_eq!(map.waypoints.len(), 2);
+    assert!(map.spawns.iter().all(|s| s.path.is_empty()), "{:?}", map.spawns);
+    assert!(std::fs::read_to_string(path(name)).unwrap().contains("{\"name\": \"Path\", \"value\": \"\"}"));
+    assert!(gaps(&read(name)).is_empty(), "{:?}", gaps(&read(name)));
+    let i = import(&path(name)).unwrap();
+    assert!(i.notes.iter().all(|n| n.starts_with("bots move by their dodge profiles")), "{:?}", i.notes);
+    let tracks = bot_tracks(i.scenario, 6.0);
+    assert_eq!(tracks.len(), 1);
+    // It drops onto its floor in the first half second, as any bot with gravity does, and then stays put. It
+    // never moves sideways, and after a second it has not moved at all.
+    let start = tracks[0][0];
+    let landed = tracks[0][10];
+    for (n, p) in tracks[0].iter().enumerate() {
+        assert!((p.x - start.x).abs() < 1e-3 && (p.z - start.z).abs() < 1e-3, "it moved sideways from {start} to {p}");
+        if n >= 10 {
+            assert!((*p - landed).length() < 1e-3, "it moved from {landed} to {p}");
+        }
+    }
+}
+
 /// A scenario's fingerprint is what its saved ratings and best scores hang on, so a
 /// new world field that isn't left out of the file at its default would restart them
 /// all. These were taken before helper bots (plan K3) were added; Dash Lane's bot dashes, so
@@ -439,6 +533,10 @@ fn imported_fixtures_keep_their_fingerprints() {
     // A speck of a body under a head, moved to a wall at its block's edge. Ledge Mote is the first file like it,
     // so it is pinned the way it was first taken; the six above kept theirs.
     assert_eq!(import(&path("Ledge Mote")).unwrap().scenario.fingerprint(), "741dbf83b45cdd34");
+    // Waypoints a bot doesn't follow: Trail Pair's bots ignore a path in the map, Lone Post's follows one no
+    // spawn point names. Both are pinned the way they were first taken; the seven above kept theirs.
+    assert_eq!(import(&path("Trail Pair")).unwrap().scenario.fingerprint(), "23a61fbaf8657a8a");
+    assert_eq!(import(&path("Lone Post")).unwrap().scenario.fingerprint(), "6bd230148eedd584");
 }
 
 /// Regression test: CI failed on every push from plan K3 on. Git on Windows checked the
@@ -472,6 +570,8 @@ fn git_keeps_the_fixtures_bytes() {
         "Short Fuse",
         "Top Knot",
         "Ledge Mote",
+        "Trail Pair",
+        "Lone Post",
     ] {
         assert!(!crlf(name), "{name} was given CRLF line ends");
     }
