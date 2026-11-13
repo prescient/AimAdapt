@@ -28,6 +28,7 @@ pub(crate) mod fuse;
 pub(crate) mod heads;
 mod helpers;
 mod offsets;
+pub(crate) mod pellets;
 mod rules;
 pub(crate) mod volumes;
 
@@ -207,6 +208,7 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
     }
     abilities::fuse_notes(&kinds_motions(&kinds), kill_limit, &mut notes);
     heads::notes(&kinds, &mut notes);
+    pellets::notes(weapon, heads::any_head(targets.iter().copied()), &mut notes);
     volumes::notes(map, &kinds, &mut notes);
     if kinds.len() > 1 {
         // Several kinds: each with its own hitbox, health, look and movement, on the
@@ -237,6 +239,7 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
     scenario.weapon.headshot_multiplier =
         heads::multiplier(weapon, heads::any_head(targets.iter().copied()), top.is("ScoreMultDamageEfficiency"))
             .unwrap_or(1.0);
+    scenario.weapon.pellets = pellets::count(weapon);
     scenario.timing.kill_limit = kill_limit;
     let t = &mut scenario.targets;
     t.count = targets.len() as u32;
@@ -245,7 +248,8 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
     t.height = height;
     t.health = bot.f32_or("MaxHealth", 100.0).max(0.001);
     t.respawn_delay_s = respawn_delay(bot);
-    let damage = scenario.weapon.damage;
+    // A bar shows when one click can't kill the bot.
+    let damage = scenario.weapon.damage * scenario.weapon.pellets as f32;
     t.health_bar =
         !top.is("BlockHealthbars") && characters.iter().any(|ch| ch.f32_or("MaxHealth", 100.0).max(0.001) > damage);
     if let Some(c) = body_color(bot) {

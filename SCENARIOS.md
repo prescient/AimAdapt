@@ -70,6 +70,7 @@ per_miss = -30.0
 | `weapon.trigger` | `"click"` | `click`: one shot per click. `hold`: fires while held. `always`: always firing, so only aim matters. |
 | `weapon.fire_rate` | `0.0` | Hitscan: most shots per second. Required for `hold`. 0 means no cap with `click`. |
 | `weapon.damage` | `100.0` | Hitscan damage per hit. |
+| `weapon.pellets` | `1` | Pellets in one hitscan shot (1–1000). A shot is still one shot and one hit, every pellet lands on the first target the aim line meets, and the shot does `weapon.damage` times this. Written by imported KovaaK's scenarios (a weapon's `ShotsPerClick`). Left out of the file at 1. Not in the editor. |
 | `weapon.damage_per_s` | `100.0` | Beam damage per second on target. |
 | `weapon.headshot_multiplier` | `1.0` | What a hit on a target's head does, as a multiple of the damage (0–1000, above 0). Left out of the file at 1. A shot's possible damage, which damage efficiency divides by, is the damage times this whether or not any target has a head. Not in the editor. |
 
@@ -139,7 +140,7 @@ Score = kills × `per_kill` + hits × `per_hit` + misses × `per_miss` + damage 
 | `scoring.per_kill` | `100.0` | Points per destroyed target. |
 | `scoring.per_hit` | `0.0` | Points per hit. For beams, a hit is one 1/60 s tick on target. |
 | `scoring.per_miss` | `0.0` | Usually 0 or negative. |
-| `scoring.per_damage` | `0.0` | Points per point of damage. Tracking scenarios use 1. |
+| `scoring.per_damage` | `0.0` | Points per point of damage. Tracking scenarios use 1. A shot that kills counts the health it took. In an imported KovaaK's scenario it counts its whole damage, as KovaaK's does. |
 | `scoring.per_timeout` | `0.0` | Usually 0 or negative. |
 
 ### `[adaptive]`

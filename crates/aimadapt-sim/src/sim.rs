@@ -943,6 +943,8 @@ mod spawning;
 mod volumes;
 
 #[cfg(test)]
+mod pellet_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod volume_tests;

@@ -33,8 +33,9 @@ A scenario is refused when it uses something the trainer doesn't model, so every
 | A speck of a body under a head, and thin or fast bodies at walls | 7dd84da | 145 of 225 |
 | K10a Waypoints no bot follows | f23ed15 | 148 of 225 |
 | K10b Bots that follow a path | | |
-| K11 Several pellets per shot | | |
-| K12a Hurt volumes, and teleporters into a deadly one | | 153 of 225 |
+| K11a Whole pellet counts with no spread, and a kill shot's whole damage | | 157 of 225 |
+| K11b Weapon spread | | |
+| K12a Hurt volumes, and teleporters into a deadly one | b35e0f2 | 153 of 225 |
 | K12b Other teleporters, jump pads, volumes at the player | | |
 | K13 Solid props | | |
 | K14 Player movement | | |
@@ -85,6 +86,8 @@ Recounted after the speck package, with 145 playing. Of the 80 that don't play, 
 Recounted after K10a, with 148 playing. Of the 77 that don't play, 40 have one reason, 13 have two and 24 have three or more. Files each reason is on, and the files it blocks by itself: player movement 25 and 9, map objects 17 and 7, solid props 15 and 5, weapon abilities 13 and 6, aim assist 11 and 2, aim down sights 9 and 1, a movement ability the trainer can't play yet 9 and 2, several pellets per shot 8 and 4, player abilities 8 and 0, waypoint paths 8 and 2, recoil 5 and 1, KovaaK's dynamic difficulty 4 and 1, bots that shoot back 4 and 0, distance scoring 3 and 0, a projectile weapon 3 and 0, invincibility set on a character 2 and 0, bot size 2 and 0, bots that use abilities 2 and 0, and one file each with none alone: a score multiplied by kill efficiency, bots with a set number of lives, MBS scoring, an explosive weapon, spawn offsets and a third-person camera.
 
 Recounted after K12a, with 153 playing. Of the 72 that don't play, 37 have one reason, 11 have two and 24 have three or more. Files each reason is on, and the files it blocks by itself: player movement 25 and 9, solid props 15 and 6, weapon abilities 13 and 6, aim assist 11 and 2, aim down sights 9 and 1, a movement ability the trainer can't play yet 9 and 2, map volumes 8 and 2, several pellets per shot 8 and 4, player abilities 8 and 0, waypoint paths 8 and 2, recoil 5 and 1, KovaaK's dynamic difficulty 4 and 1, bots that shoot back 4 and 0, distance scoring 3 and 0, a projectile weapon 3 and 0, invincibility set on a character 2 and 0, bots that use abilities 2 and 0, bot size 2 and 0, map objects 2 and 0, a score multiplied by kill efficiency 1 and 1, and one file each with none alone: bots with a set number of lives, MBS scoring, an explosive weapon, spawn offsets and a third-person camera.
+
+Recounted after K11a, with 157 playing. Of the 68 that don't play, 35 have one reason, 11 have two and 22 have three or more. Files each reason is on, and the files it blocks by itself: player movement 25 and 9, solid props 15 and 6, weapon abilities 13 and 8, aim assist 11 and 2, aim down sights 9 and 1, a movement ability the trainer can't play yet 9 and 2, map volumes 8 and 2, player abilities 8 and 0, waypoint paths 8 and 2, recoil 5 and 1, KovaaK's dynamic difficulty 4 and 1, bots that shoot back 4 and 0, distance scoring 3 and 0, a projectile weapon 3 and 0, invincibility set on a character 2 and 0, weapon spread 2 and 0, bots that use abilities 2 and 0, bot size 2 and 0, map objects 2 and 0, a score multiplied by kill efficiency 1 and 1, and one file each with none alone: bots with a set number of lives, MBS scoring, an explosive weapon, spawn offsets and a third-person camera. No file has "several pellets per shot" any more.
 
 ## What is out of scope
 
@@ -799,7 +802,48 @@ Result: 148 of 225. Three files started and none stopped, and no playing file ha
 
 ### K11. Several pellets per shot
 
-- A shot fires several pellets with a spread. Read the spread settings in the 8 files, then model the pattern (fixed or random) and how hits and damage count per pellet.
+- 8 files had this reason and 4 had no other. The importer refused any weapon whose `ShotsPerClick` was above 1.
+- A weapon has `ShotsPerClick`, `UsePerBulletSpread`, `SpreadStationaryVelocity`, `SpreadDecayDelay` and eight spread patterns of four numbers each, one for each stance: `SpreadSSH`, `SpreadSSA`, `SpreadSCH`, `SpreadSCA`, `SpreadMSH`, `SpreadMSA`, `SpreadMCH` and `SpreadMCA` (still or moving, standing or crouched, from the hip or aimed).
+- The package is split. K11a is a whole pellet count with a standing hip pattern that doesn't spread. K11b is spread.
+
+Measured in KovaaK's 3.9.13 on 12 November 2026 with twelve test maps, read off the HUD after single clicks and after three seconds of held fire. The player stood still. No run was finished, so no run file was read.
+
+Pellets:
+
+- A click of N pellets is one shot and, when it lands, one hit. Ten pellets of 1 at a big ball: each click added one shot, one hit and 10 damage done of 10 possible.
+- Damage done and damage possible both rise by N times the damage of a pellet. A click that misses adds that much to the possible damage only.
+- Every pellet lands on the body in front, even when fewer would kill it, and none carries on. Ten pellets of 1 at a ball of health 3 in front of a big ball: one kill, 10 done of 10 possible, and the big ball untouched.
+- Pellet damage adds as fractions. Four pellets of 2.5 at health 25 read 10 of 10, 20 of 20, and a kill at 30 of 30.
+
+A shot that kills (this holds for every weapon and was found here):
+
+- Its whole damage counts as done. One pellet of 10 a click at health 25 read 10 of 10, 20 of 20 and a kill at 30 of 30, where the last click took only 5 health.
+- A score per damage is paid on the whole shot. With 1 point per damage, nothing per kill and one ball of health 3, a single pellet of 10 scored 10.0, and so did ten pellets of 1.
+- The sim had capped a hit's damage at the health left. That rule was in the table of settings read by inference, and it was wrong.
+
+Spread:
+
+- With a standing hip pattern (`SpreadSSH`) whose fourth number is 0, nothing spreads. Three seconds of held fast fire hit 31 of 31 with 310 of 310 damage, in two tests, with the other seven patterns wide.
+- With a fourth number above 0, the same three seconds read 17 of 31 hits and 45 of 310 damage. A shot counts as a hit when at least one pellet lands, and the possible damage counts every pellet.
+
+Not measured: how spread grows and decays, which pattern applies when the player moves, crouches or aims, `UsePerBulletSpread` set to false, pellets against a head, a weapon with no `SpreadSSH` line, the damage of a kill in a run file, and what a bot's damage reaction is given on a kill shot.
+
+Built (K11a):
+
+- The scenario format's weapon has `pellets` (1 to 1000, hitscan only), left out of the file at 1 so stored fingerprints keep their values.
+- The sim fires a click as one shot whose damage is the pellet's times the count, all on the first body the aim line meets. A head takes that times the headshot multiplier.
+- In an imported scenario a killing shot counts its whole damage as done: in the stats, on the target, and so in the score per damage and in damage efficiency. A built-in scenario still counts the health taken. A bot's damage reaction is given the health taken in both.
+- The importer stores `ShotsPerClick` when it is a whole number from 2 to 1000. A count that isn't whole or is above 1000 keeps the reason "several pellets per shot", with a detail.
+- A new reason, "weapon spread", refuses a weapon whose `SpreadSSH` has a fourth number other than 0 or can't be read as four numbers, with one pellet or many. The other seven patterns and the lines that go with them aren't read.
+- A bot's health bar shows when one click can't kill it, and a click is now the whole volley.
+- A scenario with pellets and a bot with a head gets a note that pellets against a head weren't checked.
+- Two fixtures: Pellet Yard, which plays, and Loose Choke, which stays refused for a count that isn't whole and for a pattern that spreads.
+
+Found in review: a mutation check made 37 changes one at a time. Three got through the first tests: the damage reaction given a kill shot's whole damage, a pellet count between 1 and 2 that wasn't looked at, and `inf` read as a number in a pattern. Each got a test.
+
+Left for K11b: the spread law (how the four numbers and the two timing settings turn into a cone, and whether pellets share one draw), the patterns for the other stances once the player can move or aim, pellets against heads, and `UsePerBulletSpread` set to false with a pattern that spreads.
+
+Result: 157 of 225. Four files started and none stopped, and no playing file has a new fingerprint or a new import note. None of the 8 files keeps the pellet reason: all their counts were whole and none of their standing patterns spreads. 4 play and 4 wait on other packages. 2 files that were already refused for other reasons have the new spread reason. The four new files were played in the sim without a window, idle and by a bot that aims perfectly and holds fire. They run to the end, the idle run scores 0 and the bot scores with kills. The Pellet Yard fixture was also played by the bot in the trainer's window.
 
 ### K12. Teleporters, hurt volumes and jump pads
 
@@ -945,7 +989,7 @@ These rows are filled in as packages land. A row leaves the table when a test ma
 | A score multiplier (accuracy or damage efficiency) with a score for time | Applies to the whole score, the time points too (the note says it's unchecked) | No: the time score was measured with no multiplier |
 | Accuracy and damage efficiency on one scenario | Both apply, one after the other (a note says it's unchecked) | No |
 | Damage efficiency on a score that has kills, hits or misses in it | The multiplier applies to the whole score (a note says it's unchecked) | No: measured on a score by damage only |
-| Overkill under damage efficiency | Damage done stops at the bot's health left, and the shot's full damage counts as possible | No |
+| Overkill under damage efficiency | In an imported scenario a killing shot's whole damage counts as done and as possible | Yes, for K11a, on the HUD: three clicks of 10 at health 25 read 10 of 10, 20 of 20 and 30 of 30. The rule inferred before that capped the damage done at the health left, and was wrong |
 | The beam's damage possible | Its damage for every tick it fires, on target or off, as the run file writes it | No |
 | Damage efficiency with no shots fired | No cut, as with the accuracy multiplier | No |
 | A character with no `Gravity` key | A moving bot gets gravity 1.0 (so a flyer without the key falls when no key is down), and a bot that never moves doesn't fall | No: every installed character profile has the key |
@@ -1007,3 +1051,11 @@ These rows are filled in as packages land. A row leaves the table when a test ma
 | Volumes with bots that can't die, or with helper bots | Refused | No |
 | A volume in a map whose version is neither 0.0.7 nor 1.0.0 | Placed by its lowest corner, as in 1.0.0 | No |
 | A volume with a negative damage or cooldown | Refused | No |
+| A weapon with no `SpreadSSH` line | Plays with no spread | No |
+| `UsePerBulletSpread` false with a standing pattern that doesn't spread | Plays, as with true | No: measured with true |
+| The spread patterns for moving, crouching and aiming down sights | Never apply: the player of an imported scenario stands still and can't aim down sights | No |
+| Pellets against a bot with a head | All of them count on the part the aim line meets first (a note says it's unchecked) | No |
+| What a bot's damage reaction is given on a kill shot | The health the shot took, not its whole damage | No: the bot is gone either way |
+| The damage of a kill in a run's list of kills | The whole damage of the shots that hit it, as in the totals | No: no test run was finished, so no run file was written |
+| A `ShotsPerClick` of 1 or below, or one that isn't a number | One pellet | No |
+| `inf` or `NaN` in a spread pattern | Refused as a pattern that can't be read | No |

@@ -2431,11 +2431,11 @@ fn damage_efficiency_with_no_shots_leaves_the_score_alone() {
     assert!((sim.score() - 10.0).abs() < 1e-4, "{}", sim.score());
 }
 
-/// A hit does no more damage than the target had left, so overkill counts as damage possible
-/// and not as damage done: the kill shot of 10 on a target with 4 left is 4 of 10. Not
-/// measured in KovaaK's.
+/// Bug: a hit was capped at the health the target had left, so the kill shot of 10 on a target with 4 left read
+/// 4 done of 10 possible. In KovaaK's 3.9.13 (test maps, 12 November 2026) a killing shot counts its whole damage as
+/// done: 10 of 10, scoring 10 per damage, and the damage efficiency is 1.
 #[test]
-fn overkill_counts_as_possible_damage_and_not_as_done() {
+fn a_kill_shot_counts_its_whole_damage_as_done() {
     let mut s = scored(100.0, 0.0);
     s.targets.health = 4.0;
     s.scoring.per_damage = 1.0;
@@ -2444,8 +2444,44 @@ fn overkill_counts_as_possible_damage_and_not_as_done() {
     real_seconds(&mut sim, 0.1);
     click(&mut sim, true);
     let st = sim.stats();
+    assert_eq!((st.kills, st.damage_done, st.damage_possible), (1, 10.0, 10.0));
+    assert_eq!(st.damage_efficiency(), Some(1.0));
+    assert!((sim.score() - 10.0).abs() < 1e-4, "{}", sim.score());
+}
+
+/// The same bug over several clicks: 10 a click at a target of health 25 reads 10/10, 20/20, and the kill at 30/30
+/// (30 done against 25 health), and the kill's record carries the whole 30.
+#[test]
+fn three_clicks_at_a_target_of_25_read_10_20_and_30_of_damage() {
+    let mut s = scored(100.0, 0.0);
+    s.targets.health = 25.0;
+    let mut sim = Sim::new(s, 1);
+    real_seconds(&mut sim, 0.1);
+    for (n, want) in [(1, 10.0), (2, 20.0), (3, 30.0)] {
+        click(&mut sim, true);
+        let st = sim.stats();
+        assert_eq!((st.damage_done, st.damage_possible), (want, want), "after click {n}");
+        assert_eq!(st.kills, u32::from(n == 3), "after click {n}");
+    }
+    assert_eq!(sim.kills.len(), 1);
+    assert_eq!(sim.kills[0].damage, 30.0);
+}
+
+/// A scenario with no world (every built-in) keeps the cap at the health left, so no built-in score moves.
+#[test]
+fn a_built_in_scenario_still_caps_a_hit_at_the_health_left() {
+    let mut s = no_countdown(Scenario::default());
+    s.targets.health = 4.0;
+    s.weapon.damage = 10.0;
+    s.scoring.per_damage = 1.0;
+    s.scoring.per_kill = 0.0;
+    assert!(s.world.is_none());
+    let mut sim = Sim::new(s, 1);
+    let at = sim.targets()[0].pos;
+    sim.step(FRAME, shoot(at));
+    let st = sim.stats();
     assert_eq!((st.kills, st.damage_done, st.damage_possible), (1, 4.0, 10.0));
-    assert!((sim.score() - 4.0 * 0.4).abs() < 1e-4, "{}", sim.score());
+    assert!((sim.score() - 4.0).abs() < 1e-4, "{}", sim.score());
 }
 
 /// The beam adds its damage per tick to damage possible whether or not it is on a target

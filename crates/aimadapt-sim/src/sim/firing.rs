@@ -68,16 +68,20 @@ impl Sim {
         }
     }
 
-    /// One shot. Its possible damage, which damage efficiency divides by, is the damage times the weapon's
-    /// headshot multiplier whenever the weapon has one, whether or not any target has a head. A hit on a head
-    /// does the damage times the multiplier, and a hit on a body the plain damage. A hit on the body of a bot
+    /// One shot: a click, whatever its pellet count. Its damage is one pellet's times the pellet count. Its
+    /// possible damage, which damage efficiency divides by, is that damage times the weapon's headshot
+    /// multiplier whenever the weapon has one, whether or not any target has a head. A hit on a head does
+    /// the damage times the multiplier, and a hit on a body the plain damage. A hit on the body of a bot
     /// that only takes headshots is a miss in every way: no damage, no hit counted, no restart of its regen
     /// delay, no reaction; the stats, the pace and the event say miss. The target's own shots and misses go
     /// up as they do for a near miss (plan K9; the rules were measured in KovaaK's 3.9.13).
     pub(super) fn fire_shot(&mut self, aim: Vec3, events: &mut Vec<Event>) {
         let (damage, multiplier) = (self.scenario.weapon.damage, self.scenario.weapon.headshot_multiplier);
+        // A click of several pellets is one shot and, when it lands, one hit. All its pellets go on the first body
+        // the aim line meets, even when fewer would kill it (measured in KovaaK's 3.9.13).
+        let volley = damage * self.scenario.weapon.pellets as f32;
         self.stats.shots += 1;
-        self.stats.damage_possible += damage * multiplier;
+        self.stats.damage_possible += volley * multiplier;
         let picked = self.pick(aim);
         let hit = picked.filter(|(i, part)| self.targets[*i].counts(*part));
         if let Some(i) = picked.map(|(i, _)| i).or_else(|| self.nearest_to(aim)) {
@@ -100,7 +104,7 @@ impl Sim {
             }
         }
         match hit {
-            Some((i, part)) => self.damage(i, if part == Part::Head { damage * multiplier } else { damage }, events),
+            Some((i, part)) => self.damage(i, if part == Part::Head { volley * multiplier } else { volley }, events),
             None => {
                 self.stats.misses += 1;
                 self.pace.misses += 1;
@@ -156,9 +160,14 @@ impl Sim {
         let now = self.elapsed();
         // Invincible bots (KovaaK's `InvincibleBots`, on the scenario or on the bot's
         // character) take the hit but lose no health.
+        let imported = self.current.world.is_some();
         let invincible = is_invincible(self.current.world.as_ref(), self.targets[i].kind);
         let t = &mut self.targets[i];
         let dealt = if invincible { amount } else { amount.min(t.health) };
+        // In an imported scenario a killing shot counts its whole damage as done, for the stats, the target's own
+        // total and so the score per damage (measured in KovaaK's 3.9.13): the health only drops to 0, and the bot's
+        // reaction gets what was taken. A built-in scenario counts what was taken.
+        let counted = if imported { amount } else { dealt };
         if !invincible {
             t.health -= dealt;
         }
@@ -170,9 +179,9 @@ impl Sim {
             b.on_hit(m, &mut self.rng, dealt, now);
         }
         t.hits += 1;
-        t.damage += dealt;
+        t.damage += counted;
         self.stats.hits += 1;
-        self.stats.damage_done += dealt;
+        self.stats.damage_done += counted;
         events.push(Event::Hit { id: t.id });
         if t.health > 1e-4 {
             return;

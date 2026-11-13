@@ -248,6 +248,19 @@ pub struct Weapon {
     /// (measured with test maps in KovaaK's 3.9.13 on 12 November 2026). Left out of the file at 1.
     #[serde(skip_serializing_if = "is_one")]
     pub headshot_multiplier: f32,
+    /// Hitscan: pellets fired on each click (KovaaK's `ShotsPerClick`), `damage` being one pellet's. A click is
+    /// one shot and, if it lands, one hit: all the pellets go on the first body the aim line meets, even when fewer
+    /// would kill it, and none carries on to a body behind. Damage done and damage possible both rise by pellets
+    /// times damage (times the headshot multiplier on a head; possible always has the multiplier). Pellets don't
+    /// spread (a spreading weapon isn't imported). Measured with test maps in KovaaK's 3.9.13 on 12 November 2026.
+    /// Left out of the file at 1.
+    #[serde(skip_serializing_if = "pellets_is_one")]
+    pub pellets: u32,
+}
+
+/// Whether a pellet count is 1, so it stays out of the file (and the fingerprint).
+fn pellets_is_one(v: &u32) -> bool {
+    *v == 1
 }
 
 /// Whether a multiplier is 1, so it stays out of the file (and the fingerprint).
@@ -264,6 +277,7 @@ impl Default for Weapon {
             damage: 100.0,
             damage_per_s: 100.0,
             headshot_multiplier: 1.0,
+            pellets: 1,
         }
     }
 }
@@ -696,6 +710,11 @@ impl Scenario {
         check(
             self.weapon.headshot_multiplier > 0.0 && self.weapon.headshot_multiplier <= 1000.0,
             "headshot multiplier must be above 0 and at most 1000",
+        );
+        check((1..=1000).contains(&self.weapon.pellets), "pellets per shot must be 1–1000");
+        check(
+            self.weapon.pellets == 1 || self.weapon.kind == WeaponKind::Hitscan,
+            "only a hitscan weapon can fire pellets",
         );
         check(t.regen_per_s.is_finite(), "regen must be a number");
         check(t.respawn_delay_s >= 0.0, "respawn delay can't be negative");

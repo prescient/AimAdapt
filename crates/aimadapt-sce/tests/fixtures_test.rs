@@ -23,7 +23,7 @@ fn read(name: &str) -> Sce {
 #[test]
 fn finds_every_fixture() {
     let files = find_files(&[fixtures()]);
-    assert_eq!(files.len(), 22);
+    assert_eq!(files.len(), 24);
     assert!(files.iter().all(|f| f.extension().unwrap() == "sce"));
 }
 
@@ -542,6 +542,9 @@ fn imported_fixtures_keep_their_fingerprints() {
     // with no volumes stores no key for them.
     assert_eq!(import(&path("Kill Gate")).unwrap().scenario.fingerprint(), "783b0c95869b9e40");
     assert_eq!(import(&path("Holding Pens")).unwrap().scenario.fingerprint(), "990baa757ed01677");
+    // Plan K11a: several pellets per shot. Pellet Yard is the first file with a volley, so it is pinned the way it
+    // was first taken; the eleven above kept theirs, because a weapon of one pellet stores no key for it.
+    assert_eq!(import(&path("Pellet Yard")).unwrap().scenario.fingerprint(), "ed8a13aeaeea021e");
 }
 
 /// Plan K12a: Kill Gate's balls strafe in a lane with a thin teleporter across part of it. A ball that
@@ -626,6 +629,8 @@ fn git_keeps_the_fixtures_bytes() {
         "Kill Gate",
         "Holding Pens",
         "Slow Gate",
+        "Pellet Yard",
+        "Loose Choke",
     ] {
         assert!(!crlf(name), "{name} was given CRLF line ends");
     }
@@ -1125,4 +1130,46 @@ fn a_speck_of_a_ball_with_a_head_stands_on_its_block_at_the_wall_and_dies_to_a_h
     sim.step(0.01, Input { aim, fire_pressed: true, fire_held: true });
     assert_eq!((sim.stats().hits, sim.stats().kills), (1, 1));
     assert_eq!(sim.score(), 100.0);
+}
+
+/// Plan K11a: Pellet Yard's weapon fires six pellets of 5 a click, and its pattern for standing still ends in 0
+/// (so nothing spreads, whatever the other seven say). The first click on a ball of health 50 is one shot and one
+/// hit of 30 done out of 30 possible and no kill; the second kills it with 60 of 60, and the score per damage pays
+/// the whole 60 (the kill shot's volley counts in full, 10 over the health).
+#[test]
+fn a_volley_of_six_pellets_is_one_hit_and_a_killing_volley_counts_in_full() {
+    let i = import(&path("Pellet Yard")).unwrap();
+    let s = &i.scenario;
+    assert_eq!((s.weapon.pellets, s.weapon.damage), (6, 5.0));
+    assert_eq!(s.targets.health, 50.0);
+    assert!(s.problems().is_empty(), "{:?}", s.problems());
+    assert!(gaps(&Sce::read(&path("Pellet Yard")).unwrap()).is_empty());
+    assert!(i.notes.iter().all(|n| !n.contains("pellets")), "{:?}", i.notes);
+
+    let mut sim = started(s.clone());
+    let at = sim.targets()[0].pos;
+    let fire = Input { aim: at.normalize(), fire_pressed: true, fire_held: true };
+    sim.step(1.0 / 120.0, fire);
+    let st = sim.stats();
+    assert_eq!((st.shots, st.hits, st.kills, st.damage_done, st.damage_possible), (1, 1, 0, 30.0, 30.0));
+    for _ in 0..60 {
+        sim.step(1.0 / 120.0, Input { aim: at.normalize(), fire_pressed: false, fire_held: false });
+    }
+    sim.step(1.0 / 120.0, fire);
+    let st = sim.stats();
+    assert_eq!((st.shots, st.hits, st.kills, st.damage_done, st.damage_possible), (2, 2, 1, 60.0, 60.0));
+    assert_eq!(sim.score(), 60.0);
+}
+
+/// Plan K11a: Loose Choke is Pellet Yard with `ShotsPerClick=2.5` and a pattern that ends above 0. It stays
+/// refused, for both reasons.
+#[test]
+fn a_fractional_pellet_count_and_a_spreading_pattern_are_both_reasons() {
+    let found: Vec<(&str, String)> = gaps(&read("Loose Choke")).into_iter().map(|g| (g.feature, g.detail)).collect();
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert_eq!(found[0].0, "several pellets per shot");
+    assert!(found[0].1.contains("ShotsPerClick=2.5") && found[0].1.contains("whole number"), "{found:?}");
+    assert_eq!(found[1].0, "weapon spread");
+    assert!(found[1].1.contains("SpreadSSH=0.4,0.6,0.2,3.5") && found[1].1.contains("spread"), "{found:?}");
+    assert!(import(&path("Loose Choke")).is_err());
 }

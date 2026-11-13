@@ -11,7 +11,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::convert::{fuse, heads, volumes};
+use crate::convert::{fuse, heads, pellets, volumes};
 use crate::scenario::{BotChoice, Sce};
 use crate::settings::Section;
 
@@ -243,8 +243,8 @@ fn weapon_gaps(w: &Section, gap: &mut impl FnMut(&'static str, String)) {
     if recoil || w.is("UsePerShotRecoil") {
         gap("recoil", w.name().into());
     }
-    if w.f32_or("ShotsPerClick", 1.0) > 1.0 {
-        gap("several pellets per shot", format!("ShotsPerClick={}", w.str("ShotsPerClick")));
+    for (feature, detail) in pellets::refusals(w) {
+        gap(feature, detail);
     }
     if w.is("IsBurstWeapon") {
         gap("burst fire", w.name().into());
