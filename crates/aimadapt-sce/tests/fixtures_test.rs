@@ -23,7 +23,7 @@ fn read(name: &str) -> Sce {
 #[test]
 fn finds_every_fixture() {
     let files = find_files(&[fixtures()]);
-    assert_eq!(files.len(), 24);
+    assert_eq!(files.len(), 26);
     assert!(files.iter().all(|f| f.extension().unwrap() == "sce"));
 }
 
@@ -545,6 +545,9 @@ fn imported_fixtures_keep_their_fingerprints() {
     // Plan K11a: several pellets per shot. Pellet Yard is the first file with a volley, so it is pinned the way it
     // was first taken; the eleven above kept theirs, because a weapon of one pellet stores no key for it.
     assert_eq!(import(&path("Pellet Yard")).unwrap().scenario.fingerprint(), "ed8a13aeaeea021e");
+    // Plan K13a: solid props. Slab Backdrop is the first file with a prop that blocks, so it is pinned the way it
+    // was first taken; the twelve above kept theirs, because their cubes are built as they were.
+    assert_eq!(import(&path("Slab Backdrop")).unwrap().scenario.fingerprint(), "82a7db57b51155c1");
 }
 
 /// Plan K12a: Kill Gate's balls strafe in a lane with a thin teleporter across part of it. A ball that
@@ -631,6 +634,8 @@ fn git_keeps_the_fixtures_bytes() {
         "Slow Gate",
         "Pellet Yard",
         "Loose Choke",
+        "Slab Backdrop",
+        "Lantern Row",
     ] {
         assert!(!crlf(name), "{name} was given CRLF line ends");
     }
@@ -1172,4 +1177,56 @@ fn a_fractional_pellet_count_and_a_spreading_pattern_are_both_reasons() {
     assert_eq!(found[1].0, "weapon spread");
     assert!(found[1].1.contains("SpreadSSH=0.4,0.6,0.2,3.5") && found[1].1.contains("spread"), "{found:?}");
     assert!(import(&path("Loose Choke")).is_err());
+}
+
+/// Plan K13a: Slab Backdrop has a Window squashed into a thin slab and turned into a backdrop wall (under map scale
+/// 2), a Tree with no flags (solid by default), a Banner that collides (never solid) and a Window that doesn't.
+/// The world has the Window's box and the Tree's three as walls, nothing for the others, and both notes.
+#[test]
+fn a_backdrop_window_and_a_tree_are_walls_and_a_banner_is_not() {
+    let i = import(&path("Slab Backdrop")).unwrap();
+    assert!(gaps(&Sce::read(&path("Slab Backdrop")).unwrap()).is_empty());
+    let w = i.scenario.world.as_ref().unwrap();
+    assert_eq!((w.meshes.len(), w.walls.len()), (4, 4));
+    assert!(w.meshes.iter().all(|m| !m.decor && !m.clip));
+    assert!(i.notes.iter().any(|n| n.ends_with("blocks shots in KovaaK's (Tree, Window)")), "{:?}", i.notes);
+    assert!(i.notes.iter().any(|n| n.contains("aren't drawn (Banner, Window)")), "{:?}", i.notes);
+
+    // The eye looks at the middle of the backdrop and the slab stops the shot.
+    let slab = &w.meshes[0];
+    let middle = slab.positions.iter().map(|p| Vec3::from_array(*p)).sum::<Vec3>() / 8.0;
+    let hit = aimadapt_sim::collide::Collider::new(&w.meshes)
+        .ray(Vec3::ZERO, middle.normalize(), 100.0)
+        .expect("the backdrop stops a shot");
+    assert!(hit > 19.0 && hit <= middle.length(), "{hit}");
+}
+
+/// Plan K13a: Slab Backdrop's spawn volume is 0.2 deep and ends 0.08 short of the slab's near face, so every ball
+/// (radius 0.3) is drawn overlapping the slab and has to be moved out of it, as a ball is out of a brush. Each
+/// one ends up touching the near face from the player's side, and none is put behind it.
+#[test]
+fn balls_drawn_against_a_prop_slab_are_moved_out_of_it() {
+    let i = import(&path("Slab Backdrop")).unwrap();
+    let w = i.scenario.world.as_ref().unwrap();
+    let radius = 0.3;
+    // The player looks along -z, so the near face is the slab's highest z.
+    let face = w.meshes[0].positions.iter().map(|p| p[2]).fold(f32::MIN, f32::max);
+    assert!((face + 19.8812).abs() < 1e-3, "the slab's near face is at {face}");
+    let mut rng = aimadapt_sim::rng::Rng::new(7);
+    for _ in 0..300 {
+        let (pos, _) = w.spawn_point_in(&mut rng, &[], radius, Vec3::NEG_Z, None);
+        let gap = pos.z - face;
+        assert!((gap - radius).abs() < 1e-3, "a ball's middle is {gap} from the face, not its radius");
+    }
+}
+
+/// Plan K13a: Lantern Row has a Window (measured) and two Lanterns (not measured) that collide. It is refused for
+/// one reason, which names the Lantern and not the Window.
+#[test]
+fn a_colliding_prop_that_was_not_measured_is_the_only_reason_to_refuse() {
+    let found: Vec<(&str, String)> = gaps(&read("Lantern Row")).into_iter().map(|g| (g.feature, g.detail)).collect();
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].0, "solid props");
+    assert!(found[0].1.contains("Lantern") && !found[0].1.contains("Window"), "{found:?}");
+    assert!(import(&path("Lantern Row")).is_err());
 }

@@ -29,6 +29,7 @@ pub(crate) mod heads;
 mod helpers;
 mod offsets;
 pub(crate) mod pellets;
+pub(crate) mod props;
 mod rules;
 pub(crate) mod volumes;
 
@@ -210,6 +211,7 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
     heads::notes(&kinds, &mut notes);
     pellets::notes(weapon, heads::any_head(targets.iter().copied()), &mut notes);
     volumes::notes(map, &kinds, &mut notes);
+    props::notes(map, &mut notes);
     if kinds.len() > 1 {
         // Several kinds: each with its own hitbox, health, look and movement, on the
         // spawn points its character may use.
@@ -570,6 +572,10 @@ fn map_walls(map: &Map, map_scale: f32) -> MapWalls {
             }
         }
     }
+    // Props measured in KovaaK's block shots and bodies like a brush wall (plan K13a).
+    let (prop_meshes, prop_walls) = props::build(map, map_scale);
+    meshes.extend(prop_meshes);
+    walls.extend(prop_walls);
     MapWalls { meshes, walls, skipped, guessed }
 }
 
@@ -1103,17 +1109,33 @@ fn transform(p: &Placement, v: [f32; 3]) -> [f32; 3] {
 
 /// A `Cube` brush as a solid box: its lowest corner and three edges.
 fn cube_box(p: &Placement, map_scale: f32, place: &impl Fn(Vec3) -> Vec3) -> WorldBox {
+    box_wall(p, [0.0; 3], [CUBE_UU; 3], map_scale, place)
+}
+
+/// A box with local corners `lo` and `hi` (Unreal units before the placement's scale) as a solid box: the
+/// corner at `lo` and three edges.
+fn box_wall(p: &Placement, lo: [f32; 3], hi: [f32; 3], map_scale: f32, place: &impl Fn(Vec3) -> Vec3) -> WorldBox {
     let at = |c: [f32; 3]| place(map_point(transform(p, c), map_scale));
-    let corner = at([0.0; 3]);
-    let edges = [[CUBE_UU, 0.0, 0.0], [0.0, CUBE_UU, 0.0], [0.0, 0.0, CUBE_UU]].map(|c| (at(c) - corner).to_array());
+    let corner = at(lo);
+    let edges = [0, 1, 2].map(|k| {
+        let mut c = lo;
+        c[k] = hi[k];
+        (at(c) - corner).to_array()
+    });
     WorldBox { corner: corner.to_array(), edges }
 }
 
 /// A `Cube` brush: 100 units per scale step from its lowest corner.
 fn cube(p: &Placement, map_scale: f32, place: &impl Fn(Vec3) -> Vec3) -> WorldMesh {
+    box_mesh(p, [0.0; 3], [CUBE_UU; 3], map_scale, place)
+}
+
+/// A box with local corners `lo` and `hi` as a mesh. Corner `i` takes `hi` on x when bit 0 of `i` is set, on y
+/// for bit 1 and on z for bit 2, and `lo` otherwise.
+fn box_mesh(p: &Placement, lo: [f32; 3], hi: [f32; 3], map_scale: f32, place: &impl Fn(Vec3) -> Vec3) -> WorldMesh {
     let corners: Vec<[f32; 3]> = (0..8)
         .map(|i| {
-            let c = [(i & 1) as f32, ((i >> 1) & 1) as f32, ((i >> 2) & 1) as f32].map(|v| v * CUBE_UU);
+            let c = [0, 1, 2].map(|k| if (i >> k) & 1 == 1 { hi[k] } else { lo[k] });
             place(map_point(transform(p, c), map_scale)).to_array()
         })
         .collect();

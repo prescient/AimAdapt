@@ -11,7 +11,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::convert::{fuse, heads, pellets, volumes};
+use crate::convert::{fuse, heads, pellets, props, volumes};
 use crate::scenario::{BotChoice, Sce};
 use crate::settings::Section;
 
@@ -67,7 +67,8 @@ pub fn gaps(sce: &Sce) -> Vec<Gap> {
             for detail in volumes::refusals(m, top, &r) {
                 gap("map volumes", detail);
             }
-            let solid_props: Vec<&str> = m.props.iter().filter(|p| p.collides).map(|p| p.name.as_str()).collect();
+            // Props measured in KovaaK's play (plan K13a); a colliding kind that wasn't measured is refused.
+            let solid_props = props::unmeasured(m);
             if !solid_props.is_empty() {
                 gap("solid props", counted(solid_props.into_iter()));
             }

@@ -33,11 +33,12 @@ A scenario is refused when it uses something the trainer doesn't model, so every
 | A speck of a body under a head, and thin or fast bodies at walls | 7dd84da | 145 of 225 |
 | K10a Waypoints no bot follows | f23ed15 | 148 of 225 |
 | K10b Bots that follow a path | | |
-| K11a Whole pellet counts with no spread, and a kill shot's whole damage | | 157 of 225 |
+| K11a Whole pellet counts with no spread, and a kill shot's whole damage | 2441b69 | 157 of 225 |
 | K11b Weapon spread | | |
 | K12a Hurt volumes, and teleporters into a deadly one | b35e0f2 | 153 of 225 |
 | K12b Other teleporters, jump pads, volumes at the player | | |
-| K13 Solid props | | |
+| K13a Window and Tree props as plain boxes | | 162 of 225 |
+| K13b Other kinds of prop | | |
 | K14 Player movement | | |
 
 ## Where the files stand
@@ -88,6 +89,8 @@ Recounted after K10a, with 148 playing. Of the 77 that don't play, 40 have one r
 Recounted after K12a, with 153 playing. Of the 72 that don't play, 37 have one reason, 11 have two and 24 have three or more. Files each reason is on, and the files it blocks by itself: player movement 25 and 9, solid props 15 and 6, weapon abilities 13 and 6, aim assist 11 and 2, aim down sights 9 and 1, a movement ability the trainer can't play yet 9 and 2, map volumes 8 and 2, several pellets per shot 8 and 4, player abilities 8 and 0, waypoint paths 8 and 2, recoil 5 and 1, KovaaK's dynamic difficulty 4 and 1, bots that shoot back 4 and 0, distance scoring 3 and 0, a projectile weapon 3 and 0, invincibility set on a character 2 and 0, bots that use abilities 2 and 0, bot size 2 and 0, map objects 2 and 0, a score multiplied by kill efficiency 1 and 1, and one file each with none alone: bots with a set number of lives, MBS scoring, an explosive weapon, spawn offsets and a third-person camera.
 
 Recounted after K11a, with 157 playing. Of the 68 that don't play, 35 have one reason, 11 have two and 22 have three or more. Files each reason is on, and the files it blocks by itself: player movement 25 and 9, solid props 15 and 6, weapon abilities 13 and 8, aim assist 11 and 2, aim down sights 9 and 1, a movement ability the trainer can't play yet 9 and 2, map volumes 8 and 2, player abilities 8 and 0, waypoint paths 8 and 2, recoil 5 and 1, KovaaK's dynamic difficulty 4 and 1, bots that shoot back 4 and 0, distance scoring 3 and 0, a projectile weapon 3 and 0, invincibility set on a character 2 and 0, weapon spread 2 and 0, bots that use abilities 2 and 0, bot size 2 and 0, map objects 2 and 0, a score multiplied by kill efficiency 1 and 1, and one file each with none alone: bots with a set number of lives, MBS scoring, an explosive weapon, spawn offsets and a third-person camera. No file has "several pellets per shot" any more.
+
+Recounted after K13a, with 162 playing. Of the 63 that don't play, 30 have one reason, 11 have two and 22 have three or more. Files each reason is on, and the files it blocks by itself: player movement 25 and 9, weapon abilities 13 and 8, aim assist 11 and 2, aim down sights 9 and 1, a movement ability the trainer can't play yet 9 and 2, map volumes 8 and 2, player abilities 8 and 0, waypoint paths 8 and 2, recoil 5 and 1, solid props 5 and 0, KovaaK's dynamic difficulty 4 and 1, bots that shoot back 4 and 0, distance scoring 3 and 0, a projectile weapon 3 and 0, invincibility set on a character 2 and 0, weapon spread 2 and 0, bots that use abilities 2 and 0, bot size 2 and 0, map objects 2 and 0, a score multiplied by kill efficiency 1 and 1, a time limit above an hour 1 and 1, and one file each with none alone: bots with a set number of lives, MBS scoring, an explosive weapon, spawn offsets and a third-person camera. The time limit is new in this count. That file's props were all banners, which block nothing, and nothing else is in its way.
 
 ## What is out of scope
 
@@ -909,8 +912,54 @@ Result: 153 of 225. Five files started and none stopped, and no playing file has
 
 ### K13. Solid props
 
-- 15 files have props that block shots or movement, among them three Voltaic 1w2ts benchmarks with a window frame.
-- The trainer has no copies of KovaaK's prop meshes and won't get them. Measure each prop's solid box on a test map, and play it as a plain box of that size, drawn in a flat colour. A prop that hasn't been measured still refuses.
+- 15 files had props that block shots or movement, and 6 had no other reason. Three of them are Voltaic 1w2ts benchmarks with a window frame. The map reader kept each prop's name, its placement and its `EnableCollision` flag.
+- The trainer has no copies of KovaaK's prop meshes and won't get them. Each kind of prop is measured on a test map and played as plain boxes the size of what blocks there, drawn in a flat colour. A kind that hasn't been measured still refuses.
+- The package is split. K13a is the `Window`, the `Tree` and the two banners, the only kinds in the 6 files with no other reason. K13b is every other kind.
+
+Measured in KovaaK's 3.9.13 on 12 and 13 November 2026 with ten test maps of both map versions. The view was turned by set angles with mouse moves, and a short click fired 5 or 6 shots. A big ball stood behind each prop, so hits rose when the shots passed the prop and only shots rose when it stopped them. A control beside each prop had to be hit every time.
+
+What blocks shots:
+
+- A `Window` blocks over its whole rectangle, glass and frame alike. In the prop's own units the solid reaches 198 to each side of the pivot and from the pivot to 302 above it. Sweeps in steps of 10 put the side edges between 190 and 210 and the top between 300 and 310.
+- The Window is thin. Seen edge-on it blocked between 3 and 5 units to each side of the pivot. A Window squashed thin and then stretched 25 times in depth gave the finer figure: from 4.25 behind the pivot to 3.55 in front.
+- A `Tree` blocks only near its trunk and pot. The solid starts at the pivot and ends between 220 and 225 above it. Its half-width was between 35 and 40 at heights 45 and 115, between 20 and 25 at 175, and between 10 and 15 at 205. A tree turned 45 degrees was 1.4 times as wide at 115 and 175, so the solid is square there. At 45 it was as wide both ways, so the pot is round or eight-sided.
+- A `Banner` and a `BannerB` block nothing. 23 clicks down the length of each all went through, and so did 12 with `EnableCollision` set to true.
+
+The flag, rotation and scale:
+
+- A Window with `EnableCollision` set to false is drawn and lets every shot through. With true it blocks the same rectangle. With no flag it blocks too, in maps of version 0.0.7 and 1.0.0. A Tree with no flag is solid in both versions.
+- A prop's rotation is read as a brush's is: roll, pitch, yaw. A Window turned in yaw was seen edge-on, and one rolled 90 degrees lay flat and blocked on the side that reading puts it.
+- `MapScale` moves a prop as it moves a brush, and a prop's size is its own scale times `MapScale`. Under `MapScale` 4 a Window at scale 0.25 blocked the same 396 by 302 as one at scale 1 under `MapScale` 1, and a Window at 0.5 had its top between 590 and 610, where twice 302 is 604. The Tree kept its widths the same way.
+- A scale that differs per axis stretches the solid with the drawing.
+
+Bodies:
+
+- A ball that flies left and right at a prop's height passed through both banners. At the Tree it rode over the top, about 100 units higher near the tree. The ball whose path crossed the Window was never seen, so it either didn't spawn or was held behind the pane. A control above each moved freely.
+- A still ball of radius 40 that spawned overlapping a solid stayed where it spawned, on a spawn point and from a volume 4 units wide, with its middle outside the solid or inside it. A `Cube` slab and a Window slab behaved alike, in both map versions.
+- Four balls from volumes 80 units wide that reached into a Window slab sat at two places. Two touched the slab's face and two were near a third of the way along. Four samples don't settle whether a wide volume moves a ball out, draws again or draws in steps.
+- Of two balls stacked 120 apart only one ever spawned, though the bots have no blocked-spawn radius. Pairs 190 or more apart always both spawned. This isn't explained.
+
+Not measured: a Tree with `EnableCollision` written out, a Tree or a banner in roll or pitch, the Tree's widths between the heights tried, a moving bot or a bot with a head that starts inside a prop, the player standing on a prop, and every other kind of prop.
+
+Built (K13a):
+
+- `convert/props.rs` in `aimadapt-sce` holds what was measured. A Window is one box. A Tree is three square boxes on the pivot's vertical, which fit the measured widths within about 5 units except at the pot's corners: half-width 37.5 up to 130, 22.5 up to 190 and 12.5 up to 222. The banners have an entry that says they are never solid. Names are matched exactly.
+- Each box goes through the same placement as a `Cube` brush (the prop's scale, rotation and location, then `MapScale`) and is added to the world as a wall: a mesh that stops shots and bodies, and a wall box. So everything the sim does at a `Cube` wall it does at a prop, and that includes moving a spawn that overlaps it out to the surface. The helpers that built a `Cube` now take any box, and the `Cube` calls them with its own.
+- A box is drawn in a flat colour with the wall grid: blue-grey for a Window, dark green for a Tree. The engine needed no change.
+- A banner, a prop whose `EnableCollision` is false and a prop with a scale of zero on an axis add nothing and aren't drawn.
+- Two import notes: one names the kinds drawn as plain boxes, the other the kinds that aren't drawn.
+- The reason "solid props" now lists only props that collide and have no measurement.
+- Two made-up fixtures. Slab Backdrop plays: two still balls drawn from a thin volume in front of a Window stretched into a backdrop slab, with a Tree, a Banner and a Window that doesn't collide, under `MapScale` 2. Lantern Row has a Window and two props of a made-up kind that collide, and stays refused for that alone.
+
+Found in review:
+
+- A fixture's description had a sentence twice. It was cut, and the pinned fingerprint is of the fixed file.
+- The test of balls drawn against the slab was loose. It now checks that all 300 draws sit exactly a radius from the slab's near face.
+- A mutation check made 48 changes, one at a time. Two were skipped at first because their text didn't match the file. Five changes to the Tree's heights failed only the test that repeats the table and the pinned fingerprint, so the Tree's test got shots just under and over each joint and each end. All 48 now fail a test.
+
+Left for K13b: the other kinds of prop that collide, on 5 files that all have other reasons too. Each kind needs its own sweeps. One more thing is open, as a spike in the backlog for walls and props alike: what KovaaK's does with a spawn that overlaps a solid. The still balls above stayed put, and the trainer moves every such spawn out.
+
+Result: 162 of 225. Five files started and none stopped. No playing file has a new fingerprint, and three gained the note about props that aren't drawn, for a floor prop whose `EnableCollision` is false. Of the 15 files that had the reason, 5 play, 5 keep it beside other reasons, 4 lost it and have other reasons, and one is now refused only because its time limit is above an hour: its props were all banners. The five new files were played in the sim without a window. Idle, each scores 0. A bot that aims perfectly and holds fire scores in each, with 30 or more kills and no timeouts. Bot screenshots were taken of the Slab Backdrop fixture and of two of the new files. One of those, a file with seven trees, was also loaded in KovaaK's, and the two views agree on where the trees stand, with the branches in KovaaK's reaching well past the green boxes. The four files with a Window weren't compared side by side.
 
 ### K14. Player movement
 
@@ -1059,3 +1108,10 @@ These rows are filled in as packages land. A row leaves the table when a test ma
 | The damage of a kill in a run's list of kills | The whole damage of the shots that hit it, as in the totals | No: no test run was finished, so no run file was written |
 | A `ShotsPerClick` of 1 or below, or one that isn't a number | One pellet | No |
 | `inf` or `NaN` in a spread pattern | Refused as a pattern that can't be read | No |
+| A `Tree` prop with `EnableCollision` written out | True is solid and false isn't, as measured for a `Window` | No: only a Tree with no flag was tried |
+| A `Tree` or a banner turned in roll or pitch | The Tree's boxes turn with it, and a banner is never solid | No: the Tree was turned in yaw only |
+| A prop of a kind that wasn't measured, with `EnableCollision` false | Not solid and not drawn (a note says so) | No: measured for a `Window` only |
+| A ball that spawns overlapping a prop's box | Moved out to the box's surface, as at a `Cube` wall | In part, and it doesn't agree: a still ball on a spawn point or from a volume 4 units wide stayed where it spawned, and two of four from volumes 80 wide touched the face |
+| A moving bot, or a bot with a head, that starts overlapping a prop's box | Handled as it is inside a `Cube` wall | No |
+| A prop's box under the player, between a chasing helper and its targets, or in front of every place a still bot can appear | A wall like any other | No |
+| A `Tree`'s solid between the heights tried | Three square boxes that change width at 130 and 190 | In part: its widths at 45, 115, 175 and 205, and its top between 220 and 225 |
