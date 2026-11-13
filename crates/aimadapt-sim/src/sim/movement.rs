@@ -78,6 +78,12 @@ impl Sim {
                 }
             }
         }
+        self.settle_timeouts(now, timed_out);
+    }
+
+    /// What follows targets that went as timeouts (`leave_as_timeout`) in a frame: the next one is
+    /// picked, and each counts as a failed outcome when the run rates every target.
+    pub(super) fn settle_timeouts(&mut self, now: f32, timed_out: Vec<f32>) {
         if !timed_out.is_empty() {
             self.next_target(now);
             if self.per_target() {
@@ -94,7 +100,7 @@ impl Sim {
     /// ability spent its last health. It counts as a timeout, with no kill, score or
     /// damage, and its slot fills again after its respawn delay. `timed_out` gets the
     /// value of its track (NaN for none), for `move_targets` to settle afterwards.
-    fn leave_as_timeout(&mut self, i: usize, now: f32, events: &mut Vec<Event>, timed_out: &mut Vec<f32>) {
+    pub(super) fn leave_as_timeout(&mut self, i: usize, now: f32, events: &mut Vec<Event>, timed_out: &mut Vec<f32>) {
         let mut t = self.targets.swap_remove(i);
         self.stats.timeouts += 1;
         self.telemetry.targets.push(t.record(now, Outcome::TimedOut));

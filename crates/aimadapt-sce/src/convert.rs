@@ -29,6 +29,7 @@ pub(crate) mod heads;
 mod helpers;
 mod offsets;
 mod rules;
+pub(crate) mod volumes;
 
 use crate::inventory::Gap;
 use crate::map::{Map, MapFormat, Placement, Solid, Teams};
@@ -206,6 +207,7 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
     }
     abilities::fuse_notes(&kinds_motions(&kinds), kill_limit, &mut notes);
     heads::notes(&kinds, &mut notes);
+    volumes::notes(map, &kinds, &mut notes);
     if kinds.len() > 1 {
         // Several kinds: each with its own hitbox, health, look and movement, on the
         // spawn points its character may use.
@@ -1024,6 +1026,7 @@ fn world(
             guessed.into_iter().collect::<Vec<_>>().join(", ")
         ));
     }
+    let volumes = volumes::build(map, map_scale, &place);
     let frames: Vec<helpers::Frame> = taken.iter().map(|i| frame(&map.spawns[*i])).collect();
     // The map's own right, up and back, which every offset runs along. The scenario keeps
     // them only if they move a target (see `offsets::keep_offset_axes`).
@@ -1039,6 +1042,7 @@ fn world(
         cluster: bot.is("InvertBlockedSpawn") && bot.f32_or("BlockedSpawnRadius", 0.0) > 0.0,
         meshes,
         walls,
+        volumes,
         player_block: player.and_then(player_block),
         ..World::default()
     })

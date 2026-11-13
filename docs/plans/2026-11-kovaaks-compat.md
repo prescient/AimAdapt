@@ -31,10 +31,11 @@ A scenario is refused when it uses something the trainer doesn't model, so every
 | K9 Heads | 4c4db67 | 143 of 225 |
 | Fix: the player's own older spawn offsets, and where a small player stands | 910d98f | 144 of 225 |
 | A speck of a body under a head, and thin or fast bodies at walls | 7dd84da | 145 of 225 |
-| K10a Waypoints no bot follows | | 148 of 225 |
+| K10a Waypoints no bot follows | f23ed15 | 148 of 225 |
 | K10b Bots that follow a path | | |
 | K11 Several pellets per shot | | |
-| K12 Teleporters, hurt volumes and jump pads | | |
+| K12a Hurt volumes, and teleporters into a deadly one | | 153 of 225 |
+| K12b Other teleporters, jump pads, volumes at the player | | |
 | K13 Solid props | | |
 | K14 Player movement | | |
 
@@ -82,6 +83,8 @@ Recounted after the fix for the player's own spawn offsets, with 144 playing. Of
 Recounted after the speck package, with 145 playing. Of the 80 that don't play, 33 have one reason, 20 have two and 27 have three or more. The files each reason is on are as above, except that a bot size outside what the trainer allows is now on 2 and blocks none by itself. No local file is refused for a bot that starts inside a wall.
 
 Recounted after K10a, with 148 playing. Of the 77 that don't play, 40 have one reason, 13 have two and 24 have three or more. Files each reason is on, and the files it blocks by itself: player movement 25 and 9, map objects 17 and 7, solid props 15 and 5, weapon abilities 13 and 6, aim assist 11 and 2, aim down sights 9 and 1, a movement ability the trainer can't play yet 9 and 2, several pellets per shot 8 and 4, player abilities 8 and 0, waypoint paths 8 and 2, recoil 5 and 1, KovaaK's dynamic difficulty 4 and 1, bots that shoot back 4 and 0, distance scoring 3 and 0, a projectile weapon 3 and 0, invincibility set on a character 2 and 0, bot size 2 and 0, bots that use abilities 2 and 0, and one file each with none alone: a score multiplied by kill efficiency, bots with a set number of lives, MBS scoring, an explosive weapon, spawn offsets and a third-person camera.
+
+Recounted after K12a, with 153 playing. Of the 72 that don't play, 37 have one reason, 11 have two and 24 have three or more. Files each reason is on, and the files it blocks by itself: player movement 25 and 9, solid props 15 and 6, weapon abilities 13 and 6, aim assist 11 and 2, aim down sights 9 and 1, a movement ability the trainer can't play yet 9 and 2, map volumes 8 and 2, several pellets per shot 8 and 4, player abilities 8 and 0, waypoint paths 8 and 2, recoil 5 and 1, KovaaK's dynamic difficulty 4 and 1, bots that shoot back 4 and 0, distance scoring 3 and 0, a projectile weapon 3 and 0, invincibility set on a character 2 and 0, bots that use abilities 2 and 0, bot size 2 and 0, map objects 2 and 0, a score multiplied by kill efficiency 1 and 1, and one file each with none alone: bots with a set number of lives, MBS scoring, an explosive weapon, spawn offsets and a third-person camera.
 
 ## What is out of scope
 
@@ -800,8 +803,65 @@ Result: 148 of 225. Three files started and none stopped, and no playing file ha
 
 ### K12. Teleporters, hurt volumes and jump pads
 
-- The map reader keeps only the names of these objects. Keep their properties too.
-- Hurt volumes damage bots inside them (often a kill floor). Teleporters move a bot that touches them. One file has a jump pad.
+- 17 files had this reason and 7 had no other. The map reader kept only the names of these objects.
+- A `Hurt` has `Kill`, `Damage` and `Cooldown`. A `Teleporter` has `Target` (the name of a waypoint) and `TeleportDelay`. A `JumpPad` has `Target`.
+- The package is split. K12a is hurt volumes, and teleporters that only ever lead into a deadly one. K12b is the rest: teleporters into the open or with a delay, jump pads, turned volumes and volumes at the player.
+
+Measured in KovaaK's 3.9.13 on 12 November 2026 with thirteen test maps, looked at in the game window at set times. The bots were still balls of radius 40 with no gravity, 2400 units ahead, unless said.
+
+Where a volume is:
+
+- The map's `version` decides the pivot. In a map of version 0.0.7 a volume's `location` is the middle of its box. In version 1.0.0 it is the box's lowest corner. This holds for `Hurt` and `Teleporter` alike, and the box is 100 units per scale step.
+- A `SpawnVolume` is placed by its lowest corner in both versions.
+- `MapScale` multiplies a volume's place and its size, as it does for a brush. Bodies aren't scaled. A teleporter's target is scaled too.
+- Hurt volumes are drawn as see-through purple boxes. Teleporters aren't drawn.
+
+What touches a volume:
+
+- A body only has to touch it. A box whose face was 30 units from a ball's middle killed the ball, and one whose face was 50 away didn't, to the side, above and below. A teleporter at 30 moved the ball.
+- A wall of `Kill` 10 units thick killed a mover that crossed it at speed 50, and one set to speed 60000.
+
+What a hurt volume does:
+
+- `Kill` removes a touching body at once and ignores the cooldown, also right after a respawn.
+- Otherwise the volume takes `Damage` from a touching body, then waits `Cooldown` seconds before it hits that body again. The wait is kept for each pair of a body and a volume: a mover through a narrow volume into a long one was hit at 1.2 s, 2.2 s and 7.2 s.
+- A cooldown of 0 repeats the damage about every frame, so it depends on the frame rate. Damage 100000 on cooldown 0 killed a ball of health 10000 at once.
+- The wait is kept over a respawn. A ball of health 100 that came back after 3 s inside a volume on a 5 s cooldown died at 0, 5, 10 and 15 s.
+- On a body's first frame, at the run's start or after a respawn, a hit that falls due starts the wait and removes the body if the damage would kill it at full health. Otherwise it does no damage. Health 200 on a 5 s cooldown showed its first damage at 5 s and died at 10 s. Health 200 on a 2 s cooldown that came back after 3 s died at 4, 11 and 18 s, a cycle of 7 s where a damaging return hit would give 5 s.
+- A death by a volume is not a kill. The kill count stayed 0 and the damage line empty in every map.
+- A volume of damage 0 still counts as a hit on each frame, and a hit restarts the regen delay, so a body touching one doesn't heal. Two shots 4 s apart killed a ball inside one that healed between the shots outside it.
+- Shots pass through a hurt volume.
+
+What a teleporter does:
+
+- With a delay of 0 a touching body is moved at once. The target waypoint acts as a spawn point: a ball's middle showed 80 above it.
+- `TeleportDelay` is in seconds from the first touch. Delays of 3, 8 and 20 all fit.
+- A ball teleported into a deadly hurt volume dies there, with no kill counted.
+- A mover that crosses a thin teleporter wall is teleported and then carries on toward its path's waypoint.
+
+Not measured: volumes with a rotation, what a volume does to the player, a teleporter whose target waypoint is missing, whether a volume's hit sets off a bot's damage reaction, volumes with bots that can't die or with helper bots, whether a headed bot touches by its head, bodies other than balls, and a body that an ability moves across a volume in one step.
+
+Built (K12a):
+
+- The map reader keeps `Hurt` and `Teleporter` objects as volumes, each with its place and its settings. A `JumpPad` is still refused as a map object.
+- `convert/volumes.rs` holds the refusals (the reason "map volumes", each with a detail that says why), builds the stored volumes and adds the import notes. Only a map of version 0.0.7 gets the middle pivot. Every other version gets the corner.
+- A teleporter plays when its delay is 0, its target waypoint exists, and every kind of target bot lands inside a hurt volume that kills at once: a `Kill` volume, or one with cooldown 0 and damage of at least the highest `MaxHealth` among the target bots. It is stored as an unseen volume that kills, since the bot would die on arrival anyway.
+- The stored world has `volumes` (a corner, three edges, kill, damage, cooldown, and whether it is drawn). The key is left out when a world has none, so every stored fingerprint keeps its value. The world's own checks ask for finite numbers, a size, one upright edge and no negative damage or cooldown.
+- The sim's `volume_pass` runs each frame after spawning. It tests each body's box along the straight way it moved since the last pass, so a fast body can't skip a thin volume. It keeps a cooldown for each pair of a bot slot and a volume, and treats a body's first frame as measured. A death goes as a timeout: no kill, no damage, no score, and nothing toward a kill limit.
+- A world with volumes and no bot slots gives each bot a slot number of its own, so a cooldown still follows a seat over its respawns.
+- The trainer draws hurt volumes as see-through purple boxes. Teleporters aren't drawn.
+- Three fixtures: Kill Gate and Holding Pens play, and Slow Gate stays refused with two details.
+
+Found in review:
+
+- A negative `Damage` or `Cooldown` got past the importer's refusals and was stopped only by the stored world's own checks. It now has a refusal of its own, "a volume with a negative number", with a test that failed first. No local file has one.
+- A mutation check made 47 changes, one at a time, 20 in the sim and 27 in the importer. Eleven got through the first tests: a new body swept from the world's middle, a bot that can't die taking a volume's damage, cooldowns that outlive a restart of the run, a tall body's reach up swapped with its reach across (two changes), one kind of bot landing inside the deadly box being enough, a `Kill` volume refused for its weak damage, the weakest kind's health deciding instead of the healthiest, and the player's offsets, height and width ignored at its start. Each got a test, and all 47 now fail one.
+- The fixtures had hidden some of those: a player with no body size, and one kind of bot. The new tests give the player a size and add a second, smaller kind.
+- The build had cut a doc comment loose from its function in the engine. It was put back.
+
+Left for K12b: a teleporter that moves a bot somewhere it lives, teleport delays, jump pads, turned volumes, a volume at the player's spawn, and volumes with bots that can't die or with helper bots. Of the 8 files that have the new reason, 4 have a volume that meets the player's start, 4 a teleporter that leads into the open, 2 a teleporter whose target is missing, 2 a teleporter with a delay, 2 damage every frame that doesn't kill at once, and one each bots that can't die, a helper bot and a turned volume. 2 files keep "map objects", one for a jump pad and one for a prefab.
+
+Result: 153 of 225. Five files started and none stopped, and no playing file has a new fingerprint or a new import note. Of the 17 files that had the old reason, 5 play, 2 lost it and have other reasons, 8 have "map volumes" (2 of them with no other reason) and 2 keep "map objects". The five new files were played in the sim without a window, idle and by a bot that aims perfectly and holds fire. With fire, each scores and has 30 or more kills with no timeouts. Idle, four have no timeouts and one has about one a second, because its bots run the length of the room into the deadly wall, which is how that file is laid out. The purple boxes were looked at once, in a bot's screenshot of a made-up map with its targets inside one: the targets show through it.
 
 ### K13. Solid props
 
@@ -938,3 +998,12 @@ These rows are filled in as packages land. A row leaves the table when a test ma
 | `WaypointLogic=Ignore` on a bot that walks, jumps or dashes | The path at its spawn point is ignored, as it was for flying balls that stand or strafe | No: measured on flyers only |
 | `FollowAimAtWaypoint` at a spawn point with no path, on a bot that walks, jumps or dashes | The same as logic off, as it was for flying balls that stand or strafe | No: measured on flyers only |
 | A follower with a top speed of 0 that has gravity | Stays where it lands, as one with no gravity stayed where it spawned | No: measured with no gravity |
+| A body other than a ball at a volume, and a ball at a volume's edge or corner | Touches by its bounding box: its radius across and its half height up, against the volume | No: measured with balls at a volume's faces |
+| A bot with a head at a volume | Touches as one upright box around its body and head | No |
+| A volume's hit and a bot's damage reactions | The hit sets off no reaction | No |
+| Whose wait a volume keeps over a respawn | The seat's: a bot that comes back in a slot has the wait of the one before it there | No: measured with one bot |
+| A body that moves a long way in one frame | The straight way between two frames is tested, so it can't skip a volume | Partly: a thin wall killed a mover set to speed 60000, and an ability's step wasn't measured |
+| The player's start near a volume | Refused when a volume meets a box around any spawn the player's team can use, grown by the player's size, its spawn offsets and 0.1 m | No: what a volume does to the player wasn't measured, so the box is generous |
+| Volumes with bots that can't die, or with helper bots | Refused | No |
+| A volume in a map whose version is neither 0.0.7 nor 1.0.0 | Placed by its lowest corner, as in 1.0.0 | No |
+| A volume with a negative damage or cooldown | Refused | No |

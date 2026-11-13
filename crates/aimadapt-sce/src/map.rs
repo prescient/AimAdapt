@@ -76,6 +76,25 @@ pub struct Waypoint {
     pub pause_s: (f32, f32),
 }
 
+/// A JSON map's volume that acts on the bodies touching it (plan K12a). Its box is `place.scale` steps of 100
+/// units, around `place.location` in a map of version 0.0.7 and from it (the lowest corner) in later ones.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Volume {
+    /// A `Hurt` object: removes a touching body (`kill`), or does `damage` to it, at most once every `cooldown_s`
+    /// seconds for each body (0 for every frame).
+    Hurt { place: Placement, kill: bool, damage: f32, cooldown_s: f32 },
+    /// A `Teleporter`: moves a touching body to the waypoint named `target` after `delay_s` seconds.
+    Teleporter { place: Placement, target: String, delay_s: f32 },
+}
+
+impl Volume {
+    pub fn place(&self) -> &Placement {
+        match self {
+            Volume::Hurt { place, .. } | Volume::Teleporter { place, .. } => place,
+        }
+    }
+}
+
 /// Scenery from KovaaK's asset packs.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Prop {
@@ -92,7 +111,9 @@ pub struct Map {
     pub spawns: Vec<Spawn>,
     pub waypoints: Vec<Waypoint>,
     pub props: Vec<Prop>,
-    /// Gameplay objects not modelled yet, by type (e.g. "Teleporter", "Hurt", "prefab").
+    /// JSON `Hurt` and `Teleporter` objects.
+    pub volumes: Vec<Volume>,
+    /// Gameplay objects not modelled yet, by type (e.g. "JumpPad", "prefab", or a Reflex "Teleporter").
     pub other: Vec<String>,
 }
 
@@ -152,6 +173,7 @@ fn parse_reflex(text: &str) -> Result<Map, MapError> {
         spawns: Vec::new(),
         waypoints: Vec::new(),
         props: Vec::new(),
+        volumes: Vec::new(),
         other: Vec::new(),
     };
     let mut block = Block::None;
@@ -293,6 +315,7 @@ fn parse_json(text: &str) -> Result<Map, MapError> {
         spawns: Vec::new(),
         waypoints: Vec::new(),
         props: Vec::new(),
+        volumes: Vec::new(),
         other: Vec::new(),
     };
     let objects =
@@ -338,6 +361,17 @@ fn parse_json(text: &str) -> Result<Map, MapError> {
                         prop_f64(o, "BotPauseTimeMin").unwrap_or(0.0) as f32,
                         prop_f64(o, "BotPauseTimeMax").unwrap_or(0.0) as f32,
                     ),
+                }),
+                "Hurt" => map.volumes.push(Volume::Hurt {
+                    place,
+                    kill: prop_bool(o, "Kill").unwrap_or(false),
+                    damage: prop_f64(o, "Damage").unwrap_or(0.0) as f32,
+                    cooldown_s: prop_f64(o, "Cooldown").unwrap_or(0.0) as f32,
+                }),
+                "Teleporter" => map.volumes.push(Volume::Teleporter {
+                    place,
+                    target: prop_str(o, "Target").unwrap_or("").to_string(),
+                    delay_s: prop_f64(o, "TeleportDelay").unwrap_or(0.0) as f32,
                 }),
                 other => map.other.push(other.to_string()),
             },
@@ -473,6 +507,12 @@ mod tests {
         {"type": "gameObject", "name": "SpawnVolume", "location": "0, 0, 100", "scale": "4, 8, 2", "properties": [{"name": "TeamMask", "value": 2}]},
         {"type": "gameObject", "name": "Waypoint", "location": "1, 2, 3", "properties": [{"name": "Name", "value": "a"}, {"name": "BotPauseTimeMax", "value": 0.5}]},
         {"type": "gameObject", "name": "Teleporter", "location": "0, 0, 0"},
+        {"type": "gameObject", "name": "Teleporter", "location": "1, 2, 3", "scale": "2, 1, 1",
+         "properties": [{"name": "Target", "value": "a"}, {"name": "TeleportDelay", "value": 1.5}]},
+        {"type": "gameObject", "name": "Hurt", "location": "4, 5, 6", "scale": "3, 3, 3",
+         "properties": [{"name": "Kill", "value": true}, {"name": "Damage", "value": 25}, {"name": "Cooldown", "value": 0.5}]},
+        {"type": "gameObject", "name": "Hurt", "location": "0, 0, 0"},
+        {"type": "gameObject", "name": "JumpPad", "location": "0, 0, 0", "properties": [{"name": "Target", "value": "a"}]},
         {"type": "prop", "name": "Tiles", "properties": [{"name": "EnableCollision", "value": false}]}
       ]
     }trailing junk"#;
@@ -496,7 +536,22 @@ mod tests {
         assert_eq!(m.spawns[1].volume.unwrap().scale, [4.0, 8.0, 2.0]);
         assert_eq!(m.waypoints[0].pause_s, (0.0, 0.5));
         assert!(!m.props[0].collides);
-        assert_eq!(m.other, vec!["Teleporter".to_string()]);
+        // A Teleporter with nothing set gets the defaults; a JumpPad is not a volume.
+        let Volume::Teleporter { target, delay_s, .. } = &m.volumes[0] else { panic!() };
+        assert_eq!((target.as_str(), *delay_s), ("", 0.0));
+        let Volume::Teleporter { place, target, delay_s } = &m.volumes[1] else { panic!() };
+        assert_eq!(
+            (place.location, place.scale, target.as_str(), *delay_s),
+            ([1.0, 2.0, 3.0], [2.0, 1.0, 1.0], "a", 1.5)
+        );
+        let Volume::Hurt { place, kill, damage, cooldown_s } = &m.volumes[2] else { panic!() };
+        assert_eq!((place.scale, *kill, *damage, *cooldown_s), ([3.0, 3.0, 3.0], true, 25.0, 0.5));
+        assert_eq!(
+            m.volumes[3],
+            Volume::Hurt { place: *m.volumes[3].place(), kill: false, damage: 0.0, cooldown_s: 0.0 }
+        );
+        assert_eq!(m.volumes.len(), 4);
+        assert_eq!(m.other, vec!["JumpPad".to_string()]);
     }
 
     #[test]

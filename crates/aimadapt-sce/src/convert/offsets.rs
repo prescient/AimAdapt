@@ -76,6 +76,12 @@ pub(super) fn player(p: &Section, turned: bool) -> Result<Vec3, Gap> {
     Ok(axes(as_saved(older, turned)) / UU_PER_M)
 }
 
+/// The most any of a character's spawn offsets (either kind) can move it along one axis, in meters.
+pub(super) fn largest(ch: &Section) -> f32 {
+    let [lo, hi] = newer(ch);
+    lo.into_iter().chain(hi).chain(older(ch)).fold(0.0_f32, |m, v| m.max(v.abs())) / UU_PER_M
+}
+
 /// The newer settings `[min, max]`, in Unreal units and axes.
 fn newer(ch: &Section) -> [[f32; 3]; 2] {
     ["SpawnOffsetMin", "SpawnOffsetMax"].map(|k| ch.vec3(k).unwrap_or_default())

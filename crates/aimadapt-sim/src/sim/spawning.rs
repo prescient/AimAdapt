@@ -34,6 +34,7 @@ impl Sim {
         self.targets.clear();
         self.turns.clear();
         self.brains.clear();
+        self.volume_hits.clear();
         self.next_id = 1;
         self.next_no = 1;
         let mut events = Vec::new();
@@ -57,6 +58,11 @@ impl Sim {
             Some(w) if !w.slots.is_empty() => {
                 let free = (0..w.slots.len()).find(|s| self.targets.iter().all(|t| t.slot as usize != *s)).unwrap_or(0);
                 (free as u32, w.pick_kind(&mut self.rng, free, &mut self.turns))
+            }
+            // Volumes (see `volumes`) keep a cooldown for each bot, so every bot up at once of a world with
+            // one kind of bot also needs a slot of its own.
+            Some(w) if !w.volumes.is_empty() => {
+                ((0..).find(|s| self.targets.iter().all(|t| t.slot != *s)).unwrap_or(0), None)
             }
             _ => (0, None),
         };
@@ -217,6 +223,7 @@ impl Sim {
             // Healing timers go by the start of the frame (see `heal_in_steps`).
             heal_at: self.frame_began + if regen.1 > 0.0 { regen.1 } else { HEAL_STEP_S },
             respawn_s,
+            volume_from: None,
         });
         events.push(Event::Spawned { id });
     }

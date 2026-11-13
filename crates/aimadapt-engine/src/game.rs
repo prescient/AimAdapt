@@ -395,6 +395,39 @@ fn color(hex: &str) -> Color {
     Color::srgb(r, g, b)
 }
 
+/// The eight corners of each of the world's volumes that is drawn (hurt volumes, not the teleporters, which
+/// are unseen). Corner `i` is the volume's corner plus its first edge if bit 0 of `i` is set, its second if
+/// bit 1 is and its third if bit 2 is.
+fn shown_volume_corners(world: &aimadapt_sim::world::World) -> Vec<[[f32; 3]; 8]> {
+    world
+        .volumes
+        .iter()
+        .filter(|v| v.shown)
+        .map(|v| {
+            std::array::from_fn(|i| {
+                let mut p = Vec3::from_array(v.corner);
+                for (k, e) in v.edges.iter().enumerate() {
+                    if i >> k & 1 == 1 {
+                        p += Vec3::from_array(*e);
+                    }
+                }
+                p.to_array()
+            })
+        })
+        .collect()
+}
+
+/// The six faces of a box with the corners above, as triangles. A volume is drawn from both sides, so the
+/// winding doesn't matter.
+fn volume_box_mesh(corners: [[f32; 3]; 8]) -> aimadapt_sim::world::WorldMesh {
+    let faces = [[0, 1, 3, 2], [4, 6, 7, 5], [0, 4, 5, 1], [2, 3, 7, 6], [0, 2, 6, 4], [1, 5, 7, 3]];
+    aimadapt_sim::world::WorldMesh {
+        positions: corners.to_vec(),
+        triangles: faces.iter().flat_map(|f| [[f[0], f[1], f[2]], [f[0], f[2], f[3]]]).collect(),
+        ..Default::default()
+    }
+}
+
 /// An imported map's triangles with flat normals, and texture coordinates from
 /// the two axes each face is most square to, so the 2 m grid lies flat on it.
 fn world_mesh(m: &aimadapt_sim::world::WorldMesh) -> Mesh {
@@ -516,6 +549,25 @@ fn rebuild_world(
             });
             commands.spawn((WorldItem, Mesh3d(mesh.clone()), MeshMaterial3d(solid), Transform::IDENTITY));
             commands.spawn((WorldItem, Mesh3d(mesh), MeshMaterial3d(lines), Transform::IDENTITY));
+        }
+        // Hurt volumes: translucent purple boxes, seen from inside too, that cast no shadow and stop nothing.
+        let hurt = materials.add(StandardMaterial {
+            base_color: Color::srgba(0.6, 0.2, 0.9, 0.35),
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            double_sided: true,
+            cull_mode: None,
+            ..default()
+        });
+        for corners in shown_volume_corners(world) {
+            let mesh = meshes.add(world_mesh(&volume_box_mesh(corners)));
+            commands.spawn((
+                WorldItem,
+                Mesh3d(mesh),
+                MeshMaterial3d(hurt.clone()),
+                Transform::IDENTITY,
+                bevy::light::NotShadowCaster,
+            ));
         }
     }
     // Each panel: size, center, color, and how many 2 m grid cells it spans.
@@ -1512,6 +1564,34 @@ fn rate_word(knob: Knob, per_target: bool) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aimadapt_sim::world::{World, WorldVolume};
+
+    /// Plan K12a: only the volumes marked shown are drawn (a teleporter's is not), each as the eight corners
+    /// of its box, from its corner along its three edges.
+    #[test]
+    fn hurt_volumes_are_drawn_as_boxes_and_unseen_ones_are_not() {
+        let hurt = WorldVolume {
+            corner: [1.0, 2.0, 3.0],
+            edges: [[0.0, 0.0, -4.0], [5.0, 0.0, 0.0], [0.0, 6.0, 0.0]],
+            shown: true,
+            ..Default::default()
+        };
+        let unseen = WorldVolume { shown: false, kill: true, ..hurt.clone() };
+        let world = World { volumes: vec![unseen.clone(), hurt, unseen], ..Default::default() };
+        let boxes = shown_volume_corners(&world);
+        assert_eq!(boxes.len(), 1);
+        let b = boxes[0];
+        assert_eq!(b[0], [1.0, 2.0, 3.0]);
+        assert_eq!(b[1], [1.0, 2.0, -1.0]);
+        assert_eq!(b[2], [6.0, 2.0, 3.0]);
+        assert_eq!(b[4], [1.0, 8.0, 3.0]);
+        assert_eq!(b[7], [6.0, 8.0, -1.0]);
+        // Its mesh has twelve triangles that use only those corners.
+        let mesh = volume_box_mesh(b);
+        assert_eq!(mesh.triangles.len(), 12);
+        assert!(mesh.triangles.iter().flatten().all(|i| *i < 8));
+        assert!(shown_volume_corners(&World::default()).is_empty());
+    }
 
     fn judgment(pick: Pick, rate: Option<f32>, planned: f32) -> RunJudgment {
         RunJudgment {

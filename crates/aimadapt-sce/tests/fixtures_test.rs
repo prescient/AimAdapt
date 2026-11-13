@@ -23,7 +23,7 @@ fn read(name: &str) -> Sce {
 #[test]
 fn finds_every_fixture() {
     let files = find_files(&[fixtures()]);
-    assert_eq!(files.len(), 19);
+    assert_eq!(files.len(), 22);
     assert!(files.iter().all(|f| f.extension().unwrap() == "sce"));
 }
 
@@ -537,6 +537,57 @@ fn imported_fixtures_keep_their_fingerprints() {
     // spawn point names. Both are pinned the way they were first taken; the seven above kept theirs.
     assert_eq!(import(&path("Trail Pair")).unwrap().scenario.fingerprint(), "23a61fbaf8657a8a");
     assert_eq!(import(&path("Lone Post")).unwrap().scenario.fingerprint(), "6bd230148eedd584");
+    // Plan K12a: hurt volumes and deadly teleporters. Kill Gate and Holding Pens are the first files with
+    // volumes, so they are pinned the way they were first taken; the nine above kept theirs, because a world
+    // with no volumes stores no key for them.
+    assert_eq!(import(&path("Kill Gate")).unwrap().scenario.fingerprint(), "783b0c95869b9e40");
+    assert_eq!(import(&path("Holding Pens")).unwrap().scenario.fingerprint(), "990baa757ed01677");
+}
+
+/// Plan K12a: Kill Gate's balls strafe in a lane with a thin teleporter across part of it. A ball that
+/// touches it is sent to a pit that kills at once, which the sim plays as a ball that goes: a timeout, never a
+/// kill. With the aim still there is nothing to shoot, so every bot that goes went by the gate.
+#[test]
+fn bots_that_reach_a_kill_gate_leave_as_timeouts_with_no_kills() {
+    let i = import(&path("Kill Gate")).unwrap();
+    assert!(i.notes.iter().any(|n| n.contains("bounding box")), "{:?}", i.notes);
+    for seed in [1, 2, 3] {
+        let mut sim = Sim::new(i.scenario.clone(), seed);
+        while sim.phase() == Phase::Countdown {
+            sim.step(0.05, idle());
+        }
+        while sim.phase() == Phase::Running {
+            sim.step(1.0 / 120.0, idle());
+        }
+        let st = sim.stats();
+        assert!(st.timeouts >= 2, "seed {seed}: {st:?}");
+        assert_eq!((st.kills, st.hits, st.shots), (0, 0, 0), "seed {seed}: {st:?}");
+    }
+}
+
+/// Plan K12a: Holding Pens' balls have health 5 and each pen does 40 every second to a ball that stays in it.
+/// A ball that starts in a pen dies on its first frame, and one that comes back before the cooldown is up waits
+/// in the pen for it. So no ball is ever up with damage on it, some go as timeouts, and some wait far from the
+/// room.
+#[test]
+fn balls_wait_in_a_pen_until_its_cooldown_lets_them_die() {
+    let i = import(&path("Holding Pens")).unwrap();
+    assert!(i.scenario.world.as_ref().unwrap().volumes.iter().all(|v| v.shown));
+    let (mut waiting_frames, mut frames, mut timeouts) = (0, 0, 0);
+    for seed in 1..=4 {
+        let mut sim = Sim::new(i.scenario.clone(), seed);
+        while sim.phase() != Phase::Finished {
+            sim.step(1.0 / 120.0, idle());
+            frames += 1;
+            assert!(sim.targets().iter().all(|t| t.health == t.max_health), "damaged but alive, seed {seed}");
+            waiting_frames += sim.targets().iter().filter(|t| t.pos.length() > 30.0).count();
+        }
+        let st = sim.stats();
+        assert_eq!((st.kills, st.hits), (0, 0), "{st:?}");
+        timeouts += st.timeouts;
+    }
+    assert!(timeouts >= 8, "{timeouts} timeouts");
+    assert!(waiting_frames > 120, "a ball waited in a pen: {waiting_frames} ball-frames over {frames}");
 }
 
 /// Regression test: CI failed on every push from plan K3 on. Git on Windows checked the
@@ -572,6 +623,9 @@ fn git_keeps_the_fixtures_bytes() {
         "Ledge Mote",
         "Trail Pair",
         "Lone Post",
+        "Kill Gate",
+        "Holding Pens",
+        "Slow Gate",
     ] {
         assert!(!crlf(name), "{name} was given CRLF line ends");
     }

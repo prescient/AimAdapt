@@ -8,6 +8,7 @@
 
 pub use crate::rng::Rng;
 use glam::Vec3;
+use std::collections::HashMap;
 
 use crate::adaptive::{Knob, Mix, Pick, Prior, Rating, planned_kind};
 use crate::collide::Collider;
@@ -114,6 +115,8 @@ pub struct Target {
     heal_at: f32,
     /// Seconds before a replacement appears.
     respawn_s: f32,
+    /// Where it was at the last pass of the world's volumes (see `volumes`); `None` until its first.
+    volume_from: Option<Vec3>,
 }
 
 /// Telemetry for one target while it's alive.
@@ -457,6 +460,8 @@ pub struct Sim {
     next_no: u32,
     /// Running-clock times at which a replacement target should appear.
     pending: Vec<f32>,
+    /// When each pair of a bot slot and a world volume (its index) last hit, over the bot's respawns.
+    volume_hits: HashMap<(u32, u32), f32>,
     /// What the abilities of bots that left keep for the bots that take their places (see
     /// `queue_respawn`).
     brains: Vec<spawning::Left>,
@@ -554,6 +559,7 @@ impl Sim {
             next_id: 1,
             next_no: 1,
             pending: Vec::new(),
+            volume_hits: HashMap::new(),
             brains: Vec::new(),
             turns: Vec::new(),
             last_killed_dir: None,
@@ -743,6 +749,7 @@ impl Sim {
         self.move_targets(dt, &mut events);
         self.pace_tick(now);
         self.spawn_due(now, &mut events);
+        self.volume_pass(now, &mut events);
         self.track_aim(now, aim);
         match self.scenario.weapon.kind {
             WeaponKind::Hitscan => self.fire_hitscan(dt, aim, input, &mut events),
@@ -933,6 +940,9 @@ mod pushing;
 mod rating;
 mod record;
 mod spawning;
+mod volumes;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod volume_tests;

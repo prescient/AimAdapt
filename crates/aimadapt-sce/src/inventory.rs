@@ -11,7 +11,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::convert::{fuse, heads};
+use crate::convert::{fuse, heads, volumes};
 use crate::scenario::{BotChoice, Sce};
 use crate::settings::Section;
 
@@ -62,6 +62,10 @@ pub fn gaps(sce: &Sce) -> Vec<Gap> {
         Ok(m) => {
             if !m.other.is_empty() {
                 gap("map objects", counted(m.other.iter().map(String::as_str)));
+            }
+            // Hurt volumes and teleporters (plan K12a): what plays is in `volumes`.
+            for detail in volumes::refusals(m, top, &r) {
+                gap("map volumes", detail);
             }
             let solid_props: Vec<&str> = m.props.iter().filter(|p| p.collides).map(|p| p.name.as_str()).collect();
             if !solid_props.is_empty() {
@@ -479,14 +483,23 @@ Name=Zap
         );
     }
 
+    /// Hurt volumes and teleporters are volumes now (plan K12a, see `convert::volumes`), no longer "map objects";
+    /// a jump pad and any other object still are.
     #[test]
     fn unmodelled_map_objects_are_listed_with_counts() {
         let text = BASE.replace(
             "\"location\": \"0, 0, 0\"}",
-            "\"location\": \"0, 0, 0\"}, {\"type\": \"gameObject\", \"name\": \"Teleporter\"}, {\"type\": \"gameObject\", \"name\": \"Teleporter\"}, {\"type\": \"gameObject\", \"name\": \"Hurt\"}",
+            "\"location\": \"0, 0, 0\"}, {\"type\": \"gameObject\", \"name\": \"JumpPad\"}, {\"type\": \"gameObject\", \"name\": \"JumpPad\"}, {\"type\": \"gameObject\", \"name\": \"Elevator\"}",
         );
         let g = gaps(&Sce::parse(&text));
-        assert_eq!(g, vec![Gap { feature: "map objects", detail: "Hurt, Teleporter ×2".into(), beyond_plan: true }]);
+        assert_eq!(g, vec![Gap { feature: "map objects", detail: "Elevator, JumpPad ×2".into(), beyond_plan: true }]);
+        // A teleporter and a hurt volume in the same place are a volume's reasons, with no "map objects".
+        let text = BASE.replace(
+            "\"location\": \"0, 0, 0\"}",
+            "\"location\": \"0, 0, 0\"}, {\"type\": \"gameObject\", \"name\": \"Teleporter\"}, {\"type\": \"gameObject\", \"name\": \"Hurt\"}",
+        );
+        let g = gaps(&Sce::parse(&text));
+        assert!(!g.is_empty() && g.iter().all(|g| g.feature == "map volumes" && g.beyond_plan), "{g:?}");
     }
 
     /// BASE with its ball's bot using a dodge profile with this `WaypointLogic` line (empty for none), a map

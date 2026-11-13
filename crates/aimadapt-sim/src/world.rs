@@ -54,6 +54,10 @@ pub struct World {
     /// inside one is pushed out to its surface, as KovaaK's does.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub walls: Vec<WorldBox>,
+    /// The map's hurt volumes and deadly teleporters (see [`WorldVolume`]). Bodies pass through them, as
+    /// do shots. Absent from stored scenarios that have none, so their fingerprints keep their values.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub volumes: Vec<WorldVolume>,
     /// Where the player's profile lets targets appear, around the player and their
     /// view.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -123,6 +127,7 @@ impl Default for World {
             fov_range: None,
             meshes: Vec::new(),
             walls: Vec::new(),
+            volumes: Vec::new(),
             player_block: None,
             motion: None,
             kinds: Vec::new(),
@@ -352,6 +357,28 @@ pub struct WorldBox {
     pub edges: [[f32; 3]; 3],
 }
 
+/// A box that acts on the bodies that touch it (a map's `Hurt` object, or a `Teleporter` whose target kills
+/// at once): one corner and its three edges from there, in meters. Two edges are horizontal and one is
+/// vertical. See `Sim::volume_pass` for the rules.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorldVolume {
+    pub corner: [f32; 3],
+    pub edges: [[f32; 3]; 3],
+    /// A touching body is removed at once, whatever the cooldown.
+    #[serde(default)]
+    pub kill: bool,
+    /// Health taken from a touching body at each hit.
+    #[serde(default)]
+    pub damage: f32,
+    /// Seconds before the same body can be hit by it again; 0 hits every frame.
+    #[serde(default)]
+    pub cooldown_s: f32,
+    /// Drawn as a translucent box (a hurt volume is, a teleporter is not).
+    #[serde(default)]
+    pub shown: bool,
+}
+
 /// KovaaK's `BlockedSpawnRadius`, `BlockSpawnFOV`, `BlockSpawnDistance` and
 /// `InvertBlockedSpawn` on the player's profile: no target appears within `radius`
 /// of the player, or within `fov_deg` (the whole cone) of where they're looking and
@@ -515,6 +542,7 @@ impl World {
                 break;
             }
         }
+        p.extend(self.volume_problems());
         let kinds = self.kinds.len() as u32;
         if self.slots.iter().flatten().any(|(k, _)| *k >= kinds) || self.slots.iter().any(Vec::is_empty) {
             p.push("a bot slot refers to a kind of bot the world doesn't have".into());
@@ -569,6 +597,39 @@ impl World {
         }
         if !self.pushers.is_empty() && !self.bots_move() {
             p.push("helper bots push nothing unless the bots can move".into());
+        }
+        p
+    }
+
+    /// Problems with the volumes: each needs finite numbers, a size and one vertical edge with two
+    /// horizontal ones.
+    fn volume_problems(&self) -> Vec<String> {
+        let mut p = Vec::new();
+        if self.volumes.is_empty() {
+            return p;
+        }
+        let mut say = |text: &str| {
+            if !p.iter().any(|q| q == text) {
+                p.push(text.into());
+            }
+        };
+        for v in &self.volumes {
+            let mut numbers = v.corner.iter().chain(v.edges.iter().flatten()).chain([&v.damage, &v.cooldown_s]);
+            if numbers.any(|n| !n.is_finite()) {
+                say("a map volume has a value that isn't a number");
+                continue;
+            }
+            if v.damage < 0.0 {
+                say("a map volume's damage can't be negative");
+            }
+            if v.cooldown_s < 0.0 {
+                say("a map volume's cooldown can't be negative");
+            }
+            if v.edges.iter().any(|e| Vec3::from_array(*e).length() <= 1e-6) {
+                say("a map volume has an edge with no length");
+            } else if !v.has_one_vertical_edge() {
+                say("a map volume needs one vertical edge and two horizontal ones");
+            }
         }
         p
     }
