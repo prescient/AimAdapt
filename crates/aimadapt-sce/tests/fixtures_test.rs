@@ -23,7 +23,7 @@ fn read(name: &str) -> Sce {
 #[test]
 fn finds_every_fixture() {
     let files = find_files(&[fixtures()]);
-    assert_eq!(files.len(), 16);
+    assert_eq!(files.len(), 17);
     assert!(files.iter().all(|f| f.extension().unwrap() == "sce"));
 }
 
@@ -436,6 +436,9 @@ fn imported_fixtures_keep_their_fingerprints() {
     // Plan K9: bots with heads. Top Knot is the first file with one, so it is pinned the way it was first taken;
     // the five above kept theirs, because a scenario with no head and a multiplier of 1 stores neither.
     assert_eq!(import(&path("Top Knot")).unwrap().scenario.fingerprint(), "f4d50fab6176c804");
+    // A speck of a body under a head, moved to a wall at its block's edge. Ledge Mote is the first file like it,
+    // so it is pinned the way it was first taken; the six above kept theirs.
+    assert_eq!(import(&path("Ledge Mote")).unwrap().scenario.fingerprint(), "741dbf83b45cdd34");
 }
 
 /// Regression test: CI failed on every push from plan K3 on. Git on Windows checked the
@@ -468,6 +471,7 @@ fn git_keeps_the_fixtures_bytes() {
         "Flinch Kite",
         "Short Fuse",
         "Top Knot",
+        "Ledge Mote",
     ] {
         assert!(!crlf(name), "{name} was given CRLF line ends");
     }
@@ -932,4 +936,39 @@ fn capsules_with_heads_import_and_a_headshot_kills_where_a_body_shot_takes_a_qua
     assert_eq!((st.shots, st.hits, st.kills), (12, 12, 3));
     assert_eq!(st.damage_efficiency(), Some(0.25));
     assert_eq!(sim.score(), 75.0);
+}
+
+/// A speck of a ball under a far head that falls onto a block beside a wall (the made-up Ledge Mote, the player's
+/// start turned 20 degrees). The body is 0.3 units across, so the trainer has to allow a body under 1 cm for it.
+/// The stack starts 139.7 units under its spawn point, inside the block, and KovaaK's moves it sideways to the
+/// wall flush against the block's edge and stands it on the block there. After the sim spawns it, the bot is at
+/// the wall's edge, 15.996 m from the player's eye along the turned view, with its body's bottom on the block's
+/// top, and a shot at its head kills it.
+#[test]
+fn a_speck_of_a_ball_with_a_head_stands_on_its_block_at_the_wall_and_dies_to_a_headshot() {
+    let i = import(&path("Ledge Mote")).unwrap();
+    let s = &i.scenario;
+    assert!((s.targets.radius - 0.003).abs() < 1e-7, "{}", s.targets.radius);
+    assert!(s.targets.head.is_some());
+    assert!(s.problems().is_empty(), "{:?}", s.problems());
+    assert!(gaps(&Sce::read(&path("Ledge Mote")).unwrap()).is_empty());
+    // The move has its note, beside the one for a head wider than its body.
+    assert!(i.notes.iter().any(|n| n.starts_with("a bot with a head that starts inside a block")), "{:?}", i.notes);
+
+    let yaw = 20.0_f32.to_radians();
+    let sim = started(s.clone());
+    let t = &sim.targets()[0];
+    // The wall's face is at 1600 units, and the body's middle ends 0.4 units short of it, along the turned view.
+    let along = t.pos.x.hypot(t.pos.z);
+    assert!((along - 15.996).abs() < 2e-3, "{along}");
+    assert!((t.pos.x / along + yaw.sin()).abs() < 1e-4 && (t.pos.z / along + yaw.cos()).abs() < 1e-4, "{}", t.pos);
+    // The block's top is 1 m under the eye, and the stack (2.806 m tall) stands on it.
+    assert!((t.pos.y - t.stack_height() / 2.0 + 1.0).abs() < 2e-3, "{}", t.pos);
+    assert!((t.head_middle().unwrap().y + 1.0 - 2.406).abs() < 2e-3, "{:?}", t.head_middle());
+
+    let mut sim = started(s.clone());
+    let aim = sim.targets()[0].head_middle().unwrap().normalize();
+    sim.step(0.01, Input { aim, fire_pressed: true, fire_held: true });
+    assert_eq!((sim.stats().hits, sim.stats().kills), (1, 1));
+    assert_eq!(sim.score(), 100.0);
 }

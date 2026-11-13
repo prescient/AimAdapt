@@ -29,7 +29,8 @@ A scenario is refused when it uses something the trainer doesn't model, so every
 | K8a Still bots that blow themselves up | 1aa3a85 | 139 of 225 |
 | K8b The other weapon abilities, bots that fire | | |
 | K9 Heads | 4c4db67 | 143 of 225 |
-| Fix: the player's own older spawn offsets, and where a small player stands | | 144 of 225 |
+| Fix: the player's own older spawn offsets, and where a small player stands | 910d98f | 144 of 225 |
+| A speck of a body under a head, and thin or fast bodies at walls | | 145 of 225 |
 | K10 Waypoint paths | | |
 | K11 Several pellets per shot | | |
 | K12 Teleporters, hurt volumes and jump pads | | |
@@ -76,6 +77,8 @@ Recounted after K7, with 132 playing. K7 ran before the rest of K15 and made 16 
 Recounted after K8a, with 139 playing. Of the 86 that don't play, 32 have one reason, 26 have two and 28 have three or more. Files each reason is on, and the files it blocks by itself: waypoint paths 28 and 5, player movement 25 and 5, heads 21 and 5, map objects 17 and 2, solid props 15 and 5, weapon abilities 13 and 4, aim assist 11 and 1, a movement ability that is still refused 9 and none, aim down sights 9 and 1, several pellets per shot 8 and 3, player abilities 8 and none, recoil 5 and none, KovaaK's own dynamic difficulty 4 and 1, bots that aim and fire 4 and none.
 
 Recounted after the fix for the player's own spawn offsets, with 144 playing. Of the 81 that don't play, 34 have one reason, 20 have two and 27 have three or more. Files each reason is on, and the files it blocks by itself: waypoint paths 28 and 5, player movement 25 and 6, map objects 17 and 2, solid props 15 and 5, weapon abilities 13 and 6, aim assist 11 and 2, a movement ability that is still refused 9 and 1, aim down sights 9 and 1, several pellets per shot 8 and 3, player abilities 8 and none, recoil 5 and 1, KovaaK's own dynamic difficulty 4 and 1, bots that aim and fire 4 and none, and a bot size outside what the trainer allows 3 and 1. No file is refused for still bots hidden behind walls any more.
+
+Recounted after the speck package, with 145 playing. Of the 80 that don't play, 33 have one reason, 20 have two and 27 have three or more. The files each reason is on are as above, except that a bot size outside what the trainer allows is now on 2 and blocks none by itself. No local file is refused for a bot that starts inside a wall.
 
 ## What is out of scope
 
@@ -696,6 +699,55 @@ Result: 144 of 225. The file that waited on its hidden bots plays, and none stop
 
 The four and the newly playing file were played in the sim without a window after the fix, idle and by a bot that aims perfectly and holds fire. Every file imports with no problem reported and every run goes its full length, with a target in view in at least 99% of frames. None was watched in the game window.
 
+### A speck of a body under a head
+
+Some files give a bot a body a few hundredths of a unit across and let its head carry the size. The importer and the sim refused any body radius under 0.01 m, so those files didn't play. Letting such a bot in showed a second problem. A head makes the stack (body and head together) taller than the body, and when the head part (`2 * head radius + offset`) is taller than the body, the stack's bottom starts under the spawn point. On a map with a floor, the stack starts inside the floor.
+
+Measured in KovaaK's 3.9.13 on 12 November 2026 with test maps. The bot in all of them is a ball body of radius 0.3 units with a head of radius 40 at an offset of 200: a stack 280.6 tall whose bottom starts 139.7 under the spawn point, and which stands with its head's middle 242.6 above a floor (2 units of that are the gap a standing bot keeps above its floor):
+
+- A stack that starts clear of the floor (the spawn point 160 over a platform) falls and stands with the body's bottom on the floor: the head's middle read 242.8 above the platform. A ball with a head stands on the bottom of its body, as a capsule with a head does.
+- A spawn point on the top of a block 300 thick and 360 wide (every side 180 away, farther than the 139.7 the stack has to rise): the bot is moved up and stands on the block.
+- A spawn point on the top of a block 200 wide or a thin platform (the sides 100 away, nearer than the rise), with nothing beside it: the bot is moved sideways out of the block by the distance to the side, and then falls. One read standing on a floor 400 lower, 100.3 from where it spawned. A bot with Gravity 0 was moved the same way and floats at its spawn height. So KovaaK's moves a spawning body out of a brush the shortest way, at spawn.
+- A spawn point on the top of a block 300 thick, 90 from the nearest edge (the other edges 250 or more away), with a wall 100 thick flush against that edge and rising 400 over the block's top (more than the stack is tall): the falling bot ends at that edge, against the wall, standing on the block's top. The head's middle read 242.8 over the block, half inside the wall's face. The same with the wall on the left, on the right and behind.
+
+A third map, the same day, gave each speck one fixed spawn offset (written with the newer keys, both ends the same) on blocks 300 thick:
+
+- 150 up on a block 200 wide, which leaves the stack 10.3 clear of the block: the bot falls and stands on its block.
+- 100 up on a block 200 wide, which leaves the stack 39.7 inside it with the sides 100.3 away: it stands on its block as well.
+- 60 level on a block 360 wide, which puts a side nearer (120.3) than the top (139.7): the bot is not on its block. Where it ended wasn't seen.
+- So a fixed spawn offset counts before KovaaK's looks whether the bot starts inside a block, and the bot is moved out the shortest way from the place the offset gives.
+
+Not measured: a floating bot against a wall or moved up, a near tie between the top and a side or between two sides, a wall that doesn't cover the standing stack's whole height or leaves a gap to the edge, a stack inside two brushes at once or entering a brush from its side, tilted brushes, a body wider than a speck, a range of spawn offsets, the older offset keys, and a bot whose offset leaves it beside a wall.
+
+What gets built:
+
+- `aimadapt-sim`: a target's radius may be any size above 0 (up to 10 m) when it has a head, on the scenario's targets or on the first kind of a world. Without a head the limits are as they were, 0.01 to 10 m. Nothing in the sim or the engine divides by the radius or assumes 1 cm, and a 0.003 m body with a head plays.
+- `aimadapt-sce`: `hitbox` has the same rule, for every kind of bot. The new module `convert/embedded.rs` runs after the world is made and looks only at a speck under a head: a character with a head whose body is under 0.01 m in radius. For each spawn point that is a point (not a volume) and each such character that may use it, it works out the stack at the start: centred on the spawn point plus the bot's rise, as K9 has it, and moved by the bot's fixed spawn offset along the axes the importer uses for offsets. If that touches nothing that stops bots, nothing changes. Otherwise it takes the one solid touched, which has to be an upright box (one vertical edge) with the stack's axis over its footprint, more than the body radius inside every side, and its top between the stack's bottom and top. Six distances out are worked out: up, down and each of the four sides (to the face plus the body radius). If the two smallest are within 5 percent, the file is refused. If up is the smallest, nothing moves: the sim lifts a bot that falls straight up onto the block, as measured. If a side is the smallest and an upright wall stands flush against that edge (its face within 0.1 unit of the edge's plane, covering the axis by the body radius along the edge, from the block's top or lower to 2 units over the standing stack), the spawn point moves toward the wall until the body's middle is its radius and 0.1 unit short of the wall's face, and the sim then stands the bot on the block there. Every character that may use the spawn point has to get the same move, or the file is refused. A moved bot gets an import note.
+- A range of spawn offsets is looked at in five places along each axis it has a length on. If the stack is clear of the walls in all of them nothing changes, and if it touches one anywhere the file is refused.
+- Refused, all under one feature, "a bot that starts inside a wall", with a detail that says which case: a bot pushed off a ledge with no wall flush against the edge (measured, but not built), a wall beside the edge that doesn't cover the whole bot, a near tie, down as the shortest way, a bot that doesn't fall (no gravity key, no gravity, a flier, or a fuse), a bot inside more than one wall, a wall that isn't an upright block under the bot, a block whose top isn't inside the stack, a middle that starts under the block's top beside a wall (the sim would push it into the wall), a spawn offset that leaves the bot inside a block beside a wall, a range of spawn offsets that reaches into a wall, and characters that would start in different places. Headless bots, bots with a wider body under a head, spawn volumes and bots whose stack touches nothing are as they were.
+- The import note for a ball with a head that falls is gone, because that is measured now.
+- A fixture, Ledge Mote: one speck of a ball under a far head, falling onto a block beside a wall, with the player's start turned 20 degrees.
+
+Changed in review. The first build looked at every bot with a head and refused any spawn offset. It stopped one file that played (wide bodies under heads that start in the map's floor), and it refused the file the package was for, whose offset lifts the stack clear of its floor. So the module now looks at specks alone, and the third test map above was made to see how an offset counts.
+
+#### A thin or fast body passed through walls
+
+The newly playing file was played in the sim without a window before the commit, and its bot fell out of the map every few seconds. The cause was in the sim's collider and older than this package. `Collider::push_out` only sees a wall within the body's radius of its middle line, and a middle line that has passed a wall's face is pushed on inward. A bot moves in steps of 1/240 s, so a body that goes further than about its radius in one step can end past a face. Three cases were made with made-up maps, and each failed before the fix: a needle 6 mm wide walking at 4 m/s (1.7 cm a step) went through a wall standing on its floor, and where a wall stood beside the floor's edge it fell out of the map inside the wall; a ball 5 cm in radius falling at 40 m/s dropped through a floor; and the same ball running at 25 m/s went into a wall.
+
+The fix is `Collider::travel`, which the sim's bots now move with. A move longer than half the body's radius, with a wall anywhere near its path, goes in parts no longer than that, and the body is pushed out after each. Every other move is the one push-out it was, with the same arithmetic, so an ordinary bot moves exactly as before (a bot 0.4 m in radius would have to pass 48 m/s). A move is cut into 512 parts at most, which only bounds the work for a body thinner than any that plays.
+
+Left as it is: a middle line that crosses a face is still pushed out by only the radius a pass, so a bot that an ability puts deep inside a wall climbs out slowly.
+
+Known limits, not built:
+
+- A stack wholly inside a closed brush touches none of its faces and counts as clear.
+- Spawn volumes are left as they are.
+- A range of offsets is looked at in five places an axis, so a thin wall between two of them can be missed.
+- The sim stands a lifted bot exactly on the floor, where KovaaK's keeps it about 2 units above.
+- Headless bots, and bots with a wider body under a head, that start inside a brush still play with the sim's straight-up lift. A scratch count finds such bots with a side nearer than the top in six playing files, where the shortest-way rule would move them sideways if it holds for wider bodies. That is an open class of fault. It needs measuring with wider bodies first, and BACKLOG has the spike.
+
+Result: 145 of 225. One file started and none stopped, and no playing file has a new fingerprint or a new import note. Every local file was played in the sim without a window with the move as it was and as it is now, idle and by a bot that aims perfectly and holds fire. Three playing files play differently. The newly playing file's bot now stays on its floor, rests with its body's bottom on the floor's top, and can be shot and killed. In the other two, small fast bots meet walls a little differently: scores, kills and hits are the same, and the first bot's mean speed moves by about a tenth of a meter a second or less. None was watched in the game window.
+
 ### K10. Waypoint paths
 
 - 28 files move bots along waypoints placed in the map. The only logic in use is `FollowAimAtWaypoint`.
@@ -833,7 +885,9 @@ These rows are filled in as packages land. A row leaves the table when a test ma
 | A weapon with no `SelfDamageMultiplier` key | 1: the blast does its bot its full damage | No: every local fuse weapon has the key |
 | A fuse bot's projectile | Never drawn, and it hits nothing on its way: the importer takes only a blast that stays inside its own bot | No |
 | `MainBBHeadOffset` below minus twice the head's radius | Placed by the same stacking rule as a shallower head | Only at exactly minus twice the radius, where the head lay inside a ball and every hit was a body hit |
-| A ball with a head under gravity | Stands on the ball's bottom, as tall as the stacking rule says | No: measured on capsules |
+| The body's middle of a bot moved to a wall at a block's edge | Its radius plus 0.1 of a unit short of the wall's face. KovaaK's may put it at the edge | No: at this size the two can't be told apart |
+| A wall beside the edge of a block a bot starts in | Counts when it stands flush (within 0.1 unit), covers the standing stack and the bot's width along the edge, and reaches 2 units over the stack, whatever is below the block's top | No: measured with walls from the block's bottom up |
+| An older spawn offset key on a speck of a body under a head | Counts before the bot is looked at, as a fixed offset written with the newer keys does | No: measured with the newer keys |
 | A head much bigger than its body | Placed by the stacking rule | Partly: the bottom fit, the top came out 2 to 6 uu low |
 | What a bot with a head bumps into | A capsule of its body's radius and the stack's height, even when the head is wider than the body | No |
 | A headshots-only body in front of another bot | It blocks the shot, which is a miss | No: the sim's shots stop at the first surface |

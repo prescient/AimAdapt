@@ -23,6 +23,7 @@ use aimadapt_sim::world::{AccuracyMult, PlayerBlock, World, WorldBox, WorldKind,
 use aimadapt_sim::{Scenario, Vec3};
 
 mod abilities;
+mod embedded;
 pub(crate) mod fuse;
 pub(crate) mod heads;
 mod helpers;
@@ -183,6 +184,7 @@ pub fn convert(sce: &Sce, source: &str, source_hash: &str) -> Result<Imported, V
         return Err(reasons);
     }
     let Some(mut world) = world else { return Err(reasons) };
+    embedded::place(&mut world, &kinds, &spawn_characters, turned, &mut notes)?;
     if moving {
         notes
             .push("bots move by their dodge profiles; how closely that matches KovaaK's is still to be checked".into());
@@ -846,8 +848,13 @@ fn respawn_delay(ch: &Section) -> f32 {
 fn hitbox(ch: &Section, reasons: &mut Vec<Gap>) -> (Shape, f32, f32) {
     let radius = ch.f32_or("MainBBRadius", 0.0) / UU_PER_M;
     let height = ch.f32_or("MainBBHeight", 0.0) / UU_PER_M;
-    if !(0.01..=10.0).contains(&radius) {
-        reasons.push(Gap::planned("bot size", format!("a radius of {radius:.2} m; the trainer allows 0.01–10 m")));
+    // A body under a head can be a speck, as files have it: the head is what is shot.
+    let (least, allowed) = match heads::head(ch) {
+        Some(_) => (f32::MIN_POSITIVE, "above 0 to 10 m for a bot with a head"),
+        None => (0.01, "0.01–10 m"),
+    };
+    if !(least..=10.0).contains(&radius) {
+        reasons.push(Gap::planned("bot size", format!("a radius of {radius:.2} m; the trainer allows {allowed}")));
     }
     match ch.str("MainBBType") {
         // A ball of radius R whatever the height is.

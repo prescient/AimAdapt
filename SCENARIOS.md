@@ -79,7 +79,7 @@ per_miss = -30.0
 |---|---|---|
 | `targets.count` | `1` | Targets alive at once (1–50). |
 | `targets.shape` | `"sphere"` | `sphere`, `capsule` (an upright pill, roughly a body) or `box` (an upright box with square ends, its faces lined up with the room). |
-| `targets.radius` | `0.3` | Radius in meters. |
+| `targets.radius` | `0.3` | Radius in meters, 0.01 to 10. A target with a head (see `[targets.head]`) can be smaller, any size above 0, because files give a bot a speck of a body under its head. |
 | `targets.height` | `1.8` | Capsule or box height in meters. A capsule's includes its rounded ends. Both need at least twice the radius. |
 | `targets.health` | `100.0` | Damage needed to destroy a target. Equal to `weapon.damage` means one shot. Use a huge value for pure tracking. |
 | `targets.regen_per_s` | `0.0` | Health restored per second: with a beam while the crosshair is off the target, with hitscan once `regen_delay_s` has passed since the last hit. An imported KovaaK's scenario heals in steps of a tenth of a second, as KovaaK's does. |

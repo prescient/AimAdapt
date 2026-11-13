@@ -75,27 +75,19 @@ pub(crate) fn multiplier_refusal(weapon: &Section, any_head: bool, efficiency: b
 
 /// Notes on heads that play by a rule nobody checked in KovaaK's, each once, in order.
 pub(super) fn notes(kinds: &[(&Section, Option<Motion>)], notes: &mut Vec<String>) {
-    let heads: Vec<(&Section, Head, &Option<Motion>)> =
-        kinds.iter().filter_map(|(ch, m)| head(ch).map(|h| (*ch, h, m))).collect();
+    let heads: Vec<(&Section, Head)> = kinds.iter().filter_map(|(ch, _)| head(ch).map(|h| (*ch, h))).collect();
     let mut note = |text: &str| {
         if !notes.iter().any(|n| n == text) {
             notes.push(text.to_string());
         }
     };
-    if heads.iter().any(|(_, h, _)| h.offset < -2.0 * h.radius) {
+    if heads.iter().any(|(_, h)| h.offset < -2.0 * h.radius) {
         note(
             "a head sunk more than twice its radius into its body is placed by the same rule as a shallower one; \
              that wasn't checked against KovaaK's",
         );
     }
-    let falls = |m: &Option<Motion>| m.as_ref().is_some_and(|m| m.gravity > 0.0 && m.flight.is_none());
-    if heads.iter().any(|(ch, _, m)| ch.str("MainBBType") == "Spheroid" && falls(m)) {
-        note(
-            "a ball with a head that falls stands on the bottom of its body, as a capsule with a head does; that \
-             wasn't checked against KovaaK's for a ball",
-        );
-    }
-    if heads.iter().any(|(ch, h, _)| h.radius > ch.f32_or("MainBBRadius", 0.0) / UU_PER_M) {
+    if heads.iter().any(|(ch, h)| h.radius > ch.f32_or("MainBBRadius", 0.0) / UU_PER_M) {
         note(
             "a head wider than its body: the bot bumps into walls and other bots at its body's width; that wasn't \
              checked against KovaaK's",

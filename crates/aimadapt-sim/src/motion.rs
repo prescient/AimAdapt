@@ -28,6 +28,8 @@ mod jump_tests;
 mod reaction;
 #[cfg(test)]
 mod reaction_tests;
+#[cfg(test)]
+mod thin_tests;
 use ability::AbilityState;
 pub use ability::{Abilities, Ability, Brain, Fuse};
 use jump::Keys;
@@ -651,12 +653,13 @@ impl BotState {
             self.hold_ability(m, &view, *pos, h);
             let was = *pos;
             let on_floor = self.grounded;
-            *pos += self.vel * h;
+            let mut to = was + self.vel * h;
             if self.grounded && self.vel.y <= 0.0 {
                 // Keep in touch with the floor (and follow it down small steps).
-                pos.y -= STICK;
+                to.y -= STICK;
             }
-            let c = walls.push_out(*pos, half, radius);
+            // In parts when it is thin or fast, so it can't step over a wall's face.
+            let c = walls.travel(was, to, half, radius);
             *pos = c.pos;
             let over_ledge = m.gravity > 0.0
                 && if on_floor {

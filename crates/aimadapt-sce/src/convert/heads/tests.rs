@@ -228,16 +228,10 @@ fn heads_played_by_an_unchecked_rule_get_a_note() {
         notes_of(&with("MainBBHeadOffset=-10.0", "MainBBHeadOffset=-50.0")).is_empty(),
         "exactly twice is not more"
     );
-    // A ball with a head that falls (its character has gravity).
+    // A ball with a head that falls (its character has gravity) stands on the bottom of its body, as
+    // measured in KovaaK's, so it gets no note (it did, until a falling ball was measured).
     let ball = with("MainBBType=Cylindrical", "MainBBType=Spheroid\nGravity=1.0");
-    let n = notes_of(&ball);
-    assert_eq!(n.len(), 1, "{n:?}");
-    assert!(n[0].starts_with("a ball with a head that falls stands on the bottom of its body"), "{n:?}");
-    assert!(notes_of(&with("MainBBType=Cylindrical", "MainBBType=Spheroid")).is_empty(), "no gravity key, no fall");
-    assert!(
-        notes_of(&with("MainBBType=Cylindrical", "MainBBType=Cylindrical\nGravity=1.0")).is_empty(),
-        "a capsule was measured"
-    );
+    assert!(notes_of(&ball).is_empty(), "{:?}", imported(&ball).notes);
     // A head wider than its body.
     let wide = with("MainBBHeadRadius=25.0", "MainBBHeadRadius=50.0");
     let n = notes_of(&wide);
@@ -258,32 +252,44 @@ fn a_hidden_body_changes_nothing() {
     assert_eq!(hidden.notes, plain.notes);
 }
 
-/// Guard (mutation check of plan K9): the note for a ball with a head is for a ball that falls, and a flyer
-/// (gravity above 0 and flight) doesn't. A head exactly as wide as its body isn't wider, so it gets no note
-/// either. (A note can't come twice: each text is added from one `any` over all kinds, so no file shows it.)
+/// Guard (mutation check of plan K9): a head exactly as wide as its body isn't wider, so it gets no note. (A
+/// note can't come twice: each text is added from one `any` over all kinds, so no file shows it.)
 #[test]
-fn a_flying_ball_and_a_head_as_wide_as_its_body_get_no_note() {
+fn a_head_as_wide_as_its_body_gets_no_note() {
     let notes_of = |text: &str| -> Vec<String> {
         imported(text).notes.into_iter().filter(|n| n.contains("wasn't checked against KovaaK's")).collect()
     };
-    let falling = with(
-        "MainBBType=Cylindrical",
-        "MainBBType=Spheroid
-Gravity=1.0",
-    );
-    assert_eq!(notes_of(&falling).len(), 1);
-    let flyer = with(
-        "MainBBType=Cylindrical",
-        "MainBBType=Spheroid
-Gravity=1.0
-IsFlyer=true
-FlightVelocityUp=800.0",
-    );
-    let i = imported(&flyer);
-    let m = i.scenario.world.as_ref().unwrap().motion.as_ref().expect("a flyer moves");
-    assert!(m.gravity > 0.0 && m.flight.is_some(), "the test file is a flyer under gravity");
-    assert!(notes_of(&flyer).is_empty(), "{:?}", i.notes);
     // The body's radius is 40 units.
     assert!(notes_of(&with("MainBBHeadRadius=25.0", "MainBBHeadRadius=40.0")).is_empty());
     assert_eq!(notes_of(&with("MainBBHeadRadius=25.0", "MainBBHeadRadius=41.0")).len(), 1);
+}
+
+/// A body can be a speck under its head (KovaaK's bots can be a ball a few hundredths of a unit across under a
+/// far head). The importer refused any body radius under 0.01 m ("bot size"), with or without a head. With a head
+/// anything above 0 and up to 10 m plays; without one the old limits stay, and a radius of 0 is refused either way.
+#[test]
+fn a_speck_of_a_body_imports_with_a_head_and_is_refused_without_one() {
+    let size_reasons =
+        |text: &str| -> Vec<String> { refused(text).into_iter().filter(|r| r.starts_with("bot size")).collect() };
+    let speck = with("MainBBRadius=40.0", "MainBBRadius=0.3");
+    assert_eq!(size_reasons(&speck), Vec::<String>::new());
+    let i = imported(&speck);
+    assert!((i.scenario.targets.radius - 0.003).abs() < 1e-7, "{}", i.scenario.targets.radius);
+    assert!(i.scenario.problems().is_empty(), "{:?}", i.scenario.problems());
+    // A second kind of bot is checked the same way.
+    let two = two_kinds(&KNOT.replace("MainBBRadius=40.0", "MainBBRadius=0.3"), "MainBBRadius=0.2");
+    assert_eq!(size_reasons(&two), Vec::<String>::new());
+    // No head, no speck.
+    let bare = change(&speck, "MainBBHasHead=true", "MainBBHasHead=false");
+    let r = size_reasons(&bare);
+    assert_eq!(r.len(), 1, "{r:?}");
+    assert!(r[0].contains("0.01"), "{r:?}");
+    let bare_second = two_kinds(&change(KNOT, "MainBBHasHead=true", "MainBBHasHead=false"), "MainBBRadius=0.2");
+    assert_eq!(size_reasons(&bare_second).len(), 1, "{:?}", refused(&bare_second));
+    // A radius of 0 or less is refused with a head too, as one past 10 m is.
+    for radius in ["0.0", "-3.0", "1001.0"] {
+        let text = with("MainBBRadius=40.0", &format!("MainBBRadius={radius}"));
+        assert_eq!(size_reasons(&text).len(), 1, "{radius}: {:?}", refused(&text));
+    }
+    assert_eq!(size_reasons(&with("MainBBRadius=40.0", "MainBBRadius=1000.0")), Vec::<String>::new());
 }

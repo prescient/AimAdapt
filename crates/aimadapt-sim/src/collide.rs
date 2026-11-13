@@ -191,7 +191,46 @@ impl Collider {
         }
         Contact { pos, normals }
     }
+
+    /// Where an upright capsule that goes from `from` to `to` ends, pushed out of the walls, and what it
+    /// met on the way.
+    ///
+    /// [`Collider::push_out`] only sees a wall within the body's radius of its middle line, and a middle
+    /// line that has passed a wall's face is pushed on inward. So a body that would go further than half
+    /// its radius in one go, with a wall anywhere near its path, goes in parts no longer than that and is
+    /// pushed out after each. Any other body is pushed out where it ends.
+    pub fn travel(&self, from: Vec3, to: Vec3, half: f32, radius: f32) -> Contact {
+        let parts = ((to - from).length() / (0.5 * radius)).ceil().clamp(1.0, MAX_PARTS) as usize;
+        let reach = Vec3::new(radius, half + radius, radius);
+        if parts <= 1 || !self.any_near(from.min(to) - reach, from.max(to) + reach) {
+            return self.push_out(to, half, radius);
+        }
+        let step = (to - from) / parts as f32;
+        let mut pos = from;
+        let mut normals: Vec<Vec3> = Vec::new();
+        for _ in 0..parts {
+            let c = self.push_out(pos + step, half, radius);
+            pos = c.pos;
+            for normal in c.normals {
+                if !normals.iter().any(|n| n.dot(normal) > 0.999) {
+                    normals.push(normal);
+                }
+            }
+        }
+        Contact { pos, normals }
+    }
+
+    /// Whether any triangle's box overlaps `min..max`.
+    fn any_near(&self, min: Vec3, max: Vec3) -> bool {
+        let mut any = false;
+        self.each_near(min, max, |_| any = true);
+        any
+    }
 }
+
+/// The most parts [`Collider::travel`] cuts one move into. A walking speck needs a dozen; this only bounds
+/// the work for a body thinner than any that plays.
+const MAX_PARTS: f32 = 512.0;
 
 impl Collider {
     /// Whether an upright capsule at `center` overlaps any wall.
@@ -424,6 +463,49 @@ mod tests {
         assert_eq!(c.ray(Vec3::ZERO, Vec3::NEG_X, 100.0), None, "decorations don't stop shots");
         assert_eq!(c.ray(Vec3::ZERO, Vec3::Y, 100.0), None);
         assert_eq!(c.ray(Vec3::ZERO, Vec3::Z, 100.0), None, "nor do clip walls");
+    }
+
+    /// Bug: a body that went further than its own radius in one go could pass a wall's face, and was then
+    /// pushed on into the wall (a speck of a body under a head walked through walls and fell out of the
+    /// map). `travel` takes such a move in parts.
+    #[test]
+    fn a_thin_or_fast_body_cannot_step_over_a_face() {
+        let c = room();
+        // A needle 6 mm wide that would end 4 cm past the wall at x = 3 stops against it.
+        let (half, radius) = (1.4, 0.003);
+        let stood = -1.0 + half + radius;
+        let end = c.travel(Vec3::new(2.99, stood, 0.0), Vec3::new(3.04, stood, 0.0), half, radius);
+        assert!((end.pos.x - (3.0 - radius)).abs() < 1e-4, "{}", end.pos);
+        assert!(end.normals.iter().any(|n| n.x < -0.99), "it met the wall: {:?}", end.normals);
+        // Pushed out only where it would have ended, it is on the wall's far side.
+        assert!(c.push_out(Vec3::new(3.04, stood, 0.0), half, radius).pos.x > 3.0);
+        // A small ball that falls 17 cm in one go lands on the floor at y = -1.
+        let radius = 0.05;
+        let end = c.travel(Vec3::new(0.0, -0.9, 0.0), Vec3::new(0.0, -1.07, 0.0), 0.0, radius);
+        assert!((end.pos.y - (-1.0 + radius)).abs() < 1e-4, "{}", end.pos);
+        assert!(end.normals.iter().any(|n| n.y > 0.99), "it met the floor: {:?}", end.normals);
+        assert!(c.push_out(Vec3::new(0.0, -1.07, 0.0), 0.0, radius).pos.y < -1.0);
+    }
+
+    /// A move that is short for the body, or has no wall near it, is one push out of the walls where it
+    /// ends, bit for bit: ordinary bots move as they did before `travel`.
+    #[test]
+    fn an_ordinary_move_is_one_push_out_where_it_ends() {
+        let c = room();
+        let (half, radius) = (0.6, 0.4);
+        for (from, to) in [
+            (Vec3::new(2.55, 0.0, 0.3), Vec3::new(2.7, 0.0, 0.3)),
+            (Vec3::new(0.1, 0.05, 0.3), Vec3::new(0.13, -0.11, 0.31)),
+            (Vec3::new(2.55, 0.02, 0.3), Vec3::new(2.69, -0.05, 0.37)),
+        ] {
+            let (went, pushed) = (c.travel(from, to, half, radius), c.push_out(to, half, radius));
+            assert_eq!(went.pos, pushed.pos, "{from} to {to}");
+            assert_eq!(went.normals, pushed.normals, "{from} to {to}");
+            assert!(!pushed.normals.is_empty(), "the move ends against something: {from} to {to}");
+        }
+        // A needle that flies 3.7 m through open air goes in one piece too.
+        let (from, to) = (Vec3::new(-2.0, 30.0, 0.3), Vec3::new(-1.1, 26.4, 0.9));
+        assert_eq!(c.travel(from, to, 1.4, 0.003).pos, to);
     }
 
     #[test]

@@ -676,7 +676,15 @@ impl Scenario {
         check(self.weapon.damage > 0.0, "damage must be above 0");
         check(self.weapon.damage_per_s > 0.0, "beam damage must be above 0");
         check(t.count >= 1 && t.count <= 50, "target count must be 1–50");
-        check(t.radius >= 0.01 && t.radius <= 10.0, "target radius must be 0.01–10 m");
+        // A body under a head can be a speck, as files have it: the head is what is shot. The first kind of bot of
+        // a world sets the targets' radius, so its head counts.
+        let headed =
+            t.head.is_some() || self.world.as_ref().and_then(|w| w.kinds.first()).is_some_and(|k| k.head.is_some());
+        let least = if headed { 0.0 } else { 0.01 };
+        check(
+            t.radius >= least && t.radius > 0.0 && t.radius <= 10.0,
+            "target radius must be 0.01–10 m, or above 0 and at most 10 m when the target has a head",
+        );
         check(
             t.shape == Shape::Sphere || t.height >= 2.0 * t.radius,
             "capsule and box height must be at least 2× radius",
@@ -1293,6 +1301,43 @@ mod tests {
             s.weapon.headshot_multiplier = m;
             assert_eq!(s.problems().is_empty(), ok, "multiplier {m}: {:?}", s.problems());
         }
+    }
+
+    /// A body can be a speck (under 1 cm) when it has a head: KovaaK's bots can be a ball a few hundredths of a
+    /// unit across under a far head, and the head is what a player shoots. Without a head the radius still has to
+    /// be 0.01 m or more, and a radius of 0 or less is a problem either way. The first kind of bot in a world
+    /// counts for the scenario's targets, as it sets their radius.
+    #[test]
+    fn a_speck_of_a_body_is_allowed_under_a_head_only() {
+        let speck = |radius: f32, head: Option<Head>| {
+            let mut s = Scenario::default();
+            s.targets.shape = Shape::Sphere;
+            s.targets.radius = radius;
+            s.targets.height = 2.0 * radius;
+            s.targets.head = head;
+            s
+        };
+        let head = Some(Head { radius: 0.4, offset: 2.0, ..Head::default() });
+        let radius_problem = |s: &Scenario| s.problems().iter().any(|p| p.contains("target radius"));
+        assert!(radius_problem(&speck(0.003, None)), "without a head a speck is still refused");
+        assert!(!radius_problem(&speck(0.01, None)));
+        let with_head = speck(0.003, head.clone());
+        assert!(with_head.problems().is_empty(), "{:?}", with_head.problems());
+        assert!(radius_problem(&speck(0.0, head.clone())));
+        assert!(radius_problem(&speck(-0.1, head.clone())));
+        assert!(radius_problem(&speck(f32::NAN, head.clone())));
+        assert!(radius_problem(&speck(11.0, head.clone())));
+        // Several kinds of bot: the first one's head counts.
+        let kind = |head: Option<Head>| crate::world::WorldKind { head, ..Default::default() };
+        let world = |kinds| {
+            let spawns = vec![crate::world::WorldSpawn { pos: [0.0, 0.0, -10.0], ..Default::default() }];
+            Some(crate::world::World { spawns, kinds, slots: vec![vec![(0, 1.0)]], ..Default::default() })
+        };
+        let mut s = speck(0.003, None);
+        s.world = world(vec![kind(head.clone())]);
+        assert!(!radius_problem(&s), "{:?}", s.problems());
+        s.world = world(vec![kind(None), kind(head)]);
+        assert!(radius_problem(&s), "the second kind's head doesn't count");
     }
 
     /// Plan K9: a head makes a target taller, so it has to fit between the floor and the ceiling too.
