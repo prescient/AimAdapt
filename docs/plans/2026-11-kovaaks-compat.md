@@ -37,8 +37,13 @@ A scenario is refused when it uses something the trainer doesn't model, so every
 | K11b Weapon spread | | |
 | K12a Hurt volumes, and teleporters into a deadly one | b35e0f2 | 153 of 225 |
 | K12b Other teleporters, jump pads, volumes at the player | | |
-| K13a Window and Tree props as plain boxes | | 162 of 225 |
+| K13a Window and Tree props as plain boxes | 41bf004 | 162 of 225 |
 | K13b Other kinds of prop | | |
+| Fix: a bot that strafes and goes forward or back at once walked too fast | | 162 of 225 |
+| K16a Over-damage switched off, and time refilled by a kill | | |
+| K16b A magazine on the player's weapon | | |
+| K16c Per-bullet spread | | |
+| K16d Weapon knockback, and braking by friction alone | | |
 | K14 Player movement | | |
 
 ## Where the files stand
@@ -961,6 +966,97 @@ Left for K13b: the other kinds of prop that collide, on 5 files that all have ot
 
 Result: 162 of 225. Five files started and none stopped. No playing file has a new fingerprint, and three gained the note about props that aren't drawn, for a floor prop whose `EnableCollision` is false. Of the 15 files that had the reason, 5 play, 5 keep it beside other reasons, 4 lost it and have other reasons, and one is now refused only because its time limit is above an hour: its props were all banners. The five new files were played in the sim without a window. Idle, each scores 0. A bot that aims perfectly and holds fire scores in each, with 30 or more kills and no timeouts. Bot screenshots were taken of the Slab Backdrop fixture and of two of the new files. One of those, a file with seven trees, was also loaded in KovaaK's, and the two views agree on where the trees stand, with the branches in KovaaK's reaching well past the green boxes. The four files with a Window weren't compared side by side.
 
+### K16. Settings the importer never read
+
+After K13a every setting in the local files was counted against what the importer reads. Most of the unread ones belong to things that are refused anyway. The ones below are set by files that play, and they change how a run plays or scores.
+
+- `EnableOverDamage` is false in 52 playing files. The trainer counts a kill shot's whole damage, which is right only for true or for no line.
+- `TimeRefilledByKill` is above 0 in 2 playing files.
+- 27 playing files give the player's weapon a magazine. 26 of them have a semi-automatic weapon with a few shots, a short reload and ammo given back on a kill.
+- 4 playing files fire ten pellets in a small ring, set with `UsePerBulletSpread` and the `PBS0` keys onward. K11a plays them as ten pellets down the aim line.
+- 24 playing files have a weapon `KnockbackFactor` and a bot `DamageKnockbackFactor` that are both above 0. In 13 of them the bots move, and in 12 of those they stand on a floor with gravity. In the other 11 the bots float and stand still.
+- `ForwardSpeedBias` is below 1 in 40 playing files, for a bot that strafes and goes forward or back. That one showed the fault written up after this section.
+
+Measured in KovaaK's 3.9.13 on 13 and 15 November 2026 with 34 test maps. Hits, damage and score were read off the HUD, and bots that move were filmed. No run was let finish.
+
+Over-damage:
+
+- With `EnableOverDamage` false, each pellet that lands scores its damage or the health the target had before the shot, whichever is less. One pellet of 10 at a ball with 3 health scored 3. Ten pellets of 1 scored 10, and ten of 5 scored 30.
+- Pellets left over after the kill don't pass on to a body behind.
+- With true, or with no line, the whole shot counts. The HUD's damage line shows the whole shot either way.
+
+Time refilled by a kill:
+
+- Each kill adds `TimeRefilledByKill` seconds to the time left. With 30 s and a time limit of 900 s the clock went from 14:57 to 15:25, 15:53 and 16:22 over three kills, so the time limit doesn't cap it.
+
+Magazines:
+
+- A magazine is real whatever `CooldownType` says, `InfiniteUse` included. With a magazine of 2, four quick clicks fired two shots.
+- The weapon reloads by itself when the magazine is empty, and that takes `ReloadTimeFromEmpty`. With `ReloadBeforeRecovery` true the reload starts the moment the last shot fires. With false it starts after that shot's recovery time. An automatic weapon held down, with a magazine of 2, half a second between shots and a reload of 3.0 s, cycled every 3.5 s with true and every 4.0 s with false.
+- A shot fires while any ammo is left, even less than `AmmoPerShot`: a magazine of 100 at 30 a shot gave four shots.
+- `AmmoReloadedOnKill` gives ammo back on a kill, capped at the magazine's size. A kill with the last shot refills the magazine and no reload starts.
+- Not measured: a hand reload and `ReloadTimeFromPartial`, `CancelReloadOnKill` set to true, and the incremental reload keys.
+
+Per-bullet spread:
+
+- With `UsePerBulletSpread` true, each pellet flies at the offset its `PBS` key gives. The first number is the angle off the aim line, about a degree per unit (between 0.94 and 1.25). The second is the direction round the aim line in degrees, 0 to the right and 90 up.
+- `CircularSpread` changed nothing.
+- A click is one shot, and one hit if any pellet lands. Each pellet that lands does its own damage, and the possible damage is the pellet count times the damage.
+- Not measured: whether the offsets add to a random spread.
+
+Weapon knockback:
+
+- A hit adds a speed to the bot, straight away from the shooter: the weapon's `KnockbackFactor` times the bot's `DamageKnockbackFactor` times the damage, in units a second. With factors of 4 and 8 and a damage of 10, a still ball on a floor with a friction of 1 slid about 315 units a hit. Half of either factor halved that, and twice the damage doubled it.
+- The speed dies away by the bot's own braking: its `Friction` times its speed, plus its `BrakingDeceleration`. `BrakingFrictionFactor` plays no part, since a ball with a factor of 2 slid as far as one with 0. With a friction of 8 and a deceleration of 2048 the same hit moved the ball about 12 units.
+- A bot that floats (gravity 0) isn't pushed, with or without a top speed. A bot on a floor is, even with a top speed of 0.
+- A strafing bot keeps strafing through the hit. It is pushed back less than a standing one, because its own acceleration turns its velocity back toward the strafe.
+- The ball beside the one hit stays put.
+- Not measured: whether the push is level or along the shot line, and whether each pellet adds its own.
+
+The finding on `BrakingFrictionFactor` reaches past knockback. The sim brakes a bot with its friction times that factor, as Unreal's stock rule does, and a knocked bot in KovaaK's brakes with its friction alone. Whether the same holds for a bot that stops by itself is checked against the earlier dash and chaser films before the sim's braking changes.
+
+What gets built, one part per commit:
+
+- K16a: a kill shot's score follows `EnableOverDamage`, and a kill adds `TimeRefilledByKill` seconds to the clock.
+- K16b: the player's weapon gets its magazine, with the ammo a shot uses, the reload by itself with both start rules, and the ammo a kill gives back. The trainer shows the ammo left.
+- K16c: pellets fly at their `PBS` offsets.
+- K16d: the knock on a hit for bots on a floor, and braking by friction alone.
+
+Not measured, and left as they are:
+
+- `EndChallengeAfterDamage` ends a run after a set amount of damage. 3 playing files set it, 2 of them too high to reach. It can only be measured by letting a test run finish, which writes a result into KovaaK's history, so it waits for a yes.
+- 2 playing files set the tagging keys (`TaggingDuration`, `TaggingHitFactor`). What they do wasn't measured.
+- 2 playing files are reaction tests that KovaaK's ends after about a second, by a rule that hasn't been found.
+- `Untargetable` is in 14 files and `SpawnGroup` in 8. What they do is unknown.
+
+### A fault found by K16's test maps
+
+#### A bot that strafed and went forward or back at once walked too fast
+
+The sim took a bot's top speed from the length of its input, with the sideways part times the strafe multiplier and a backward part times the backward multiplier. A bot that strafes and comes closer or backs off at once has an input 1.414 long, so it walked at 1.414 times its top speed. So did a strafer outside its distance band, which is pulled in or pushed out while it strafes. `ForwardSpeedBias` was read nowhere.
+
+Measured in KovaaK's 3.9.13 on 13 November 2026 with two filmed test maps of walkers on a floor, each with a top speed of 300 units a second:
+
+- A bot that only strafes walks at its top speed times `StrafeSpeedMult`: 149 with a multiplier of 0.5.
+- A bot that only goes forward and back walks forward at its top speed, and backward at its top speed times `BackSpeedMult`: 235 to 245 with 0.8.
+- A bot that does both keeps its top speed in total. On a forward diagonal it had 212 each way, which is 300.
+- `ForwardSpeedBias` tilts the direction walked: the bot walks along its sideways input plus its forward input times the bias. With a bias of 0.25 the forward diagonal was 286 to 289 across and about 73 toward the player, where the law gives 291 and 73. The bias changed nothing for a bot that goes one way only.
+- Backing off on a diagonal slows the bot by the backward share of its input. Its top speed is times 1 - (1 - `BackSpeedMult`) x b, where b is 1 straight back, 0.707 on a back diagonal and 0 going forward. With 0.8 the back diagonal was 172 to 187 across at a bias of 1 (the law gives 182) and 246 to 248 at 0.25 (250). With 0.5 it was 139 to 141 each way (137).
+- `StrafeSpeedMult` does nothing on a diagonal. With 0.5 and a backward multiplier of 1 the bot had about 218 and 211, close to 300 in total.
+
+Not measured, and played by the same law: a forward bias of 0 or above 1, which no playing local file has, and a strafing bot's speed while its distance band pulls it in or pushes it out. A negative bias is read as 0.
+
+What gets built:
+
+- `aimadapt-sim`: the direction walked is the sideways input plus the forward input times the bias, scaled to a length of 1. The top speed is the bot's top speed times the strafe multiplier while it only strafes, and otherwise times 1 - (1 - backward multiplier) x the backward share of the input. `forward_bias` is a new field of a stored motion, left out when it is 1. A scenario with a moving strafer that also goes forward or back, or keeps a distance band, gets a new rule mark in its fingerprint.
+- `aimadapt-sce`: `ForwardSpeedBias` is read for a bot with a top speed whose dodge strafes and also goes forward or back or keeps a distance band. Anywhere else it changes nothing and isn't stored.
+
+Result: still 162 of 225. None started and none stopped. 110 playing files have a new fingerprint, and bests set here on them start again: 59 have a bot that strafes and goes forward and back at once, and 51 a strafing bot that keeps a distance band. 40 of the 110 have a forward bias below 1, which is now stored. Nothing else in any stored scenario changed, and no notes did. The other playing files keep their fingerprints. The thirteen pinned fixtures keep theirs, and a new fixture, Slant Walk, has the mechanic.
+
+The 110 were played in the sim without a window after the fix, idle and by a bot that aims perfectly and holds fire. Every file imports with no problem reported. Every shooting run goes its full length and lands hits, and three idle runs in long scenarios are cut short by the play tool. In three files the first target stood still, and each was looked at: a bot that waits until it's hurt, a floating bot with no air control, and a first target that dies at once. None of that comes from the fix. None was watched in the game window.
+
+Found on the way and left as a spike in the backlog: a bot that appears exactly on a floor's edge stands still in the trainer.
+
 ### K14. Player movement
 
 - 25 files let the player walk, strafe or jump, and 8 give the player abilities.
@@ -1115,3 +1211,6 @@ These rows are filled in as packages land. A row leaves the table when a test ma
 | A moving bot, or a bot with a head, that starts overlapping a prop's box | Handled as it is inside a `Cube` wall | No |
 | A prop's box under the player, between a chasing helper and its targets, or in front of every place a still bot can appear | A wall like any other | No |
 | A `Tree`'s solid between the heights tried | Three square boxes that change width at 130 and 190 | In part: its widths at 45, 115, 175 and 205, and its top between 220 and 225 |
+| `ForwardSpeedBias` of 0, or above 1 | The measured law: the forward input times the bias, so 0 walks straight sideways (a bot that only goes forward and back stands still) and a bias above 1 tilts toward the player | No: measured at 0.25 and 1 |
+| `ForwardSpeedBias` below 0 | 0 | No |
+| A strafing bot's speed while its distance band pulls it in or pushes it out | The two-way law: its top speed in total, slowed by the backward share while it backs off | No |

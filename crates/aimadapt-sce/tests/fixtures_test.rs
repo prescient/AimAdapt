@@ -23,7 +23,7 @@ fn read(name: &str) -> Sce {
 #[test]
 fn finds_every_fixture() {
     let files = find_files(&[fixtures()]);
-    assert_eq!(files.len(), 26);
+    assert_eq!(files.len(), 27);
     assert!(files.iter().all(|f| f.extension().unwrap() == "sce"));
 }
 
@@ -548,6 +548,10 @@ fn imported_fixtures_keep_their_fingerprints() {
     // Plan K13a: solid props. Slab Backdrop is the first file with a prop that blocks, so it is pinned the way it
     // was first taken; the twelve above kept theirs, because their cubes are built as they were.
     assert_eq!(import(&path("Slab Backdrop")).unwrap().scenario.fingerprint(), "82a7db57b51155c1");
+    // A bot that strafes and also comes closer or backs off walks at its top speed in total, and a scenario with
+    // one has the rule mark "two-way speed". Slant Walk is the first file like it, so it is pinned the way it was
+    // first taken; the thirteen above kept theirs, because none has a bot that strafes and goes forward or back.
+    assert_eq!(import(&path("Slant Walk")).unwrap().scenario.fingerprint(), "3f4a7ab1fceb284b");
 }
 
 /// Plan K12a: Kill Gate's balls strafe in a lane with a thin teleporter across part of it. A ball that
@@ -636,6 +640,7 @@ fn git_keeps_the_fixtures_bytes() {
         "Loose Choke",
         "Slab Backdrop",
         "Lantern Row",
+        "Slant Walk",
     ] {
         assert!(!crlf(name), "{name} was given CRLF line ends");
     }
@@ -1229,4 +1234,27 @@ fn a_colliding_prop_that_was_not_measured_is_the_only_reason_to_refuse() {
     assert_eq!(found[0].0, "solid props");
     assert!(found[0].1.contains("Lantern") && !found[0].1.contains("Window"), "{found:?}");
     assert!(import(&path("Lantern Row")).is_err());
+}
+
+/// Bug: a bot that strafed and moved forward or back at once walked at 1.414 times its top speed. Slant Walk's ball
+/// has a top speed of 3 m/s, a forward bias of 0.25 and both toggles: it imports without gaps, keeps its bias, and
+/// in play never goes faster than 3 m/s across the floor (the old law gave 4.24) while it does get up to speed.
+#[test]
+fn a_ball_that_weaves_sideways_and_in_and_out_keeps_its_top_speed() {
+    assert!(gaps(&Sce::read(&path("Slant Walk")).unwrap()).is_empty());
+    let i = import(&path("Slant Walk")).unwrap();
+    let m = i.scenario.world.as_ref().unwrap().motion.as_ref().unwrap();
+    assert_eq!((m.max_speed, m.forward_bias, m.back_mult, m.strafe_mult), (3.0, 0.25, 0.8, 0.5));
+    assert!(m.dodges[0].strafe && m.dodges[0].advance);
+    let mut sim = started(i.scenario);
+    let dt = 1.0 / 120.0;
+    let (mut last, mut fastest) = (sim.targets()[0].pos, 0.0f32);
+    for _ in 0..(10.0 / dt) as usize {
+        sim.step(dt, idle());
+        let p = sim.targets()[0].pos;
+        fastest = fastest.max(Vec3::new(p.x - last.x, 0.0, p.z - last.z).length() / dt);
+        last = p;
+    }
+    assert!(fastest <= 3.0 * 1.02, "never above its top speed of 3 m/s: {fastest}");
+    assert!(fastest >= 2.4, "it does walk at speed: {fastest}");
 }

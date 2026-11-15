@@ -691,8 +691,15 @@ fn bot_motion(c: &BotChoice, ch: &Section, player: Option<&Section>) -> Motion {
     // A terminal speed of a few centimeters a second isn't a real limit.
     let terminal = ch.f32_or("TerminalVelocity", 0.0);
     let total: f32 = c.dodges.iter().map(|(_, w)| w.max(0.0)).sum();
+    let dodges: Vec<Dodge> = c.dodges.iter().map(|(d, w)| dodge(d, ch, if total > 0.0 { *w } else { 1.0 })).collect();
+    let max_speed = cm("MaxSpeed", 0.0);
+    // KovaaK's reads a forward bias only for a bot that strafes and also comes closer or backs off.
+    // Many files set one on bots that stand still or move one way, where it does nothing, so it is
+    // kept only where it can change the walk, and those scenarios store and fingerprint as before.
+    let two_way = max_speed > 0.0
+        && dodges.iter().any(|d| d.strafe && (d.advance || d.min_distance > 0.0 || d.max_distance > 0.0));
     Motion {
-        max_speed: cm("MaxSpeed", 0.0),
+        max_speed,
         accel: cm("Acceleration", 2048.0),
         friction: ch.f32_or("Friction", 8.0).max(0.0),
         air_friction: ch.f32_or("AerialFriction", 0.0).max(0.0),
@@ -710,6 +717,7 @@ fn bot_motion(c: &BotChoice, ch: &Section, player: Option<&Section>) -> Motion {
         terminal_speed: if terminal >= 10.0 { terminal / UU_PER_M } else { 0.0 },
         strafe_mult: ch.f32_or("StrafeSpeedMult", 1.0).max(0.0),
         back_mult: ch.f32_or("BackSpeedMult", 1.0).max(0.0),
+        forward_bias: if two_way { ch.f32_or("ForwardSpeedBias", 1.0).max(0.0) } else { 1.0 },
         jetpack: has_jetpack(ch).then(|| Jetpack {
             thrust: cm("JetpackThrust", 6000.0),
             max_up: cm("JetpackMaxZVelocity", 400.0),
@@ -731,7 +739,7 @@ fn bot_motion(c: &BotChoice, ch: &Section, player: Option<&Section>) -> Motion {
         bump_bots: !ch.is("DisableCharacterCollision"),
         still_until_hurt: c.bot.is("StandStillUntilHurt"),
         faces_player: !c.bot.is("NoAiming"),
-        dodges: c.dodges.iter().map(|(d, w)| dodge(d, ch, if total > 0.0 { *w } else { 1.0 })).collect(),
+        dodges,
         change_dodge_s: [
             c.bot.f32_or("DodgeProfileMinChangeTime", 0.0).max(0.0),
             c.bot.f32_or("DodgeProfileMaxChangeTime", 0.0).max(0.0),
@@ -749,6 +757,7 @@ fn bot_motion(c: &BotChoice, ch: &Section, player: Option<&Section>) -> Motion {
 fn still_motion(c: &BotChoice, ch: &Section, player: Option<&Section>) -> Motion {
     Motion {
         max_speed: 0.0,
+        forward_bias: 1.0,
         dodges: Vec::new(),
         abilities: None,
         jetpack: None,

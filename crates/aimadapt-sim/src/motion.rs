@@ -30,6 +30,8 @@ mod reaction;
 mod reaction_tests;
 #[cfg(test)]
 mod thin_tests;
+#[cfg(test)]
+mod walk_tests;
 use ability::AbilityState;
 pub use ability::{Abilities, Ability, Brain, Fuse};
 use jump::Keys;
@@ -68,6 +70,15 @@ fn is_true(v: &bool) -> bool {
     *v
 }
 
+/// Whether a forward bias is the default of 1, so it stays out of the file (and the fingerprint).
+fn is_one(v: &f32) -> bool {
+    *v == 1.0
+}
+
+fn one() -> f32 {
+    1.0
+}
+
 /// A bot's movement: its character's physics and its dodge profiles.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -104,9 +115,17 @@ pub struct Motion {
     pub buffered_jumps: bool,
     /// Fastest fall, m/s; 0 for Unreal's 40.
     pub terminal_speed: f32,
-    /// Speed multipliers while strafing and while backing off.
+    /// Top speed, as a share of `max_speed`, while the bot only strafes.
     pub strafe_mult: f32,
+    /// Top speed, as a share of `max_speed`, while it backs off. On a diagonal the share
+    /// goes with how much of the input is backward (see `speed_share`).
     pub back_mult: f32,
+    /// KovaaK's `ForwardSpeedBias`: how much of the forward and back input goes into the
+    /// direction walked. It changes nothing for a bot that only strafes or only goes
+    /// forward and back. Read by inference: a bias above 1 follows the same formula, 0
+    /// leaves a forward-only bot without a direction, and a negative one is read as 0.
+    #[serde(default = "one", skip_serializing_if = "is_one")]
+    pub forward_bias: f32,
     /// Flies instead of walking: no gravity, and up and down on its own timer.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub flight: Option<Flight>,
@@ -158,6 +177,7 @@ impl Default for Motion {
             terminal_speed: 0.0,
             strafe_mult: 1.0,
             back_mult: 1.0,
+            forward_bias: 1.0,
             flight: None,
             jetpack: None,
             bounce_off_walls: false,
@@ -373,6 +393,19 @@ pub struct BotState {
 fn between(rng: &mut Rng, r: [f32; 2]) -> f32 {
     let (lo, hi) = (r[0].min(r[1]), r[0].max(r[1]));
     lo + (hi - lo) * rng.next_f32()
+}
+
+/// The share of `max_speed` a bot walks at with this raw input (`side` and `fore`, each -1, 0 or
+/// 1). Measured in KovaaK's 3.9.13 with filmed test maps: only strafing gives `strafe_mult`. With
+/// any forward or back input it gives `1 - (1 - back_mult) * b`, where `b` is the backward share of
+/// the normalized raw input (1 straight back, 0.7071 on a back diagonal, 0 going forward). The
+/// strafe multiplier has no effect on a diagonal, and the forward bias has none on the speed.
+fn speed_share(side: f32, fore: f32, strafe_mult: f32, back_mult: f32) -> f32 {
+    if fore == 0.0 {
+        return strafe_mult;
+    }
+    let backward = (-fore).max(0.0) / side.hypot(fore);
+    1.0 - (1.0 - back_mult) * backward
 }
 
 fn start(rng: &mut Rng, s: Start) -> f32 {
@@ -637,9 +670,14 @@ impl BotState {
         let toward = if flat.length_squared() > 1e-6 { flat.normalize() } else { spawn_forward };
         let facing = if m.faces_player { toward } else { spawn_forward };
         let right = facing.cross(Vec3::Y);
-        let back = if self.fore < 0.0 { m.back_mult } else { 1.0 };
-        let wish = right * self.side * m.strafe_mult + toward * self.fore * back;
-        let cap = m.max_speed * wish.length();
+        // The bias scales only the forward and back part of the direction; the top speed is
+        // kept in total (see `speed_share`).
+        let wish = right * self.side + toward * self.fore * m.forward_bias.max(0.0);
+        let cap = if self.side == 0.0 && self.fore == 0.0 {
+            0.0
+        } else {
+            m.max_speed * speed_share(self.side, self.fore, m.strafe_mult, m.back_mult)
+        };
         let dir = wish.normalize_or_zero();
         let view = ability::View { wish: dir, spawn_forward };
         self.use_abilities(m, rng, &view, *pos, seen);

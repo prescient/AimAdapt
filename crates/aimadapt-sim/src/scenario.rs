@@ -634,6 +634,17 @@ impl Scenario {
             // the next instead of starting again with each bot (see `motion::Brain`).
             marks += "\n# rules: abilities over respawns";
         }
+        // A bot that strafes and also comes closer or backs off walks at its top speed in total, not
+        // 1.414 times it across the diagonal.
+        let two_way = self.world.as_ref().is_some_and(|w| {
+            w.motions().any(|m| {
+                m.max_speed > 0.0
+                    && m.dodges.iter().any(|d| d.strafe && (d.advance || d.min_distance > 0.0 || d.max_distance > 0.0))
+            })
+        });
+        if two_way {
+            marks += "\n# rules: two-way speed";
+        }
         marks
     }
 
@@ -938,6 +949,47 @@ mod tests {
         {
             assert_eq!(s.fingerprint(), of_settings(&s));
         }
+    }
+
+    /// Bug: a bot that strafed and moved forward or back at once walked at 1.414 times its top speed.
+    /// Scenarios with such a bot restart their bests with a mark placed after the older ones; bots that
+    /// only strafe, only go forward and back or stand still keep their fingerprints.
+    #[test]
+    fn two_way_speed_marks_only_scenarios_with_a_strafer_that_also_goes_forward_or_back() {
+        use crate::motion::{Dodge, Motion};
+        use crate::world::{World, WorldKind};
+        let of_settings = |s: &Scenario| fnv(&s.settings_text());
+        let with_world = |w: World| Scenario { world: Some(w), ..Scenario::default() };
+        let bot = |speed: f32, d: Dodge| Motion { max_speed: speed, dodges: vec![d], ..Motion::default() };
+        let mark = |s: &Scenario, older: &str| fnv(&(s.settings_text() + older + "\n# rules: two-way speed"));
+        let both = Dodge { advance: true, ..Dodge::default() };
+        let banded = Dodge { max_distance: 8.0, ..Dodge::default() };
+        let near_band = Dodge { min_distance: 4.0, ..Dodge::default() };
+        for d in [both.clone(), banded, near_band] {
+            let s = with_world(World { motion: Some(bot(3.0, d)), ..World::default() });
+            assert_eq!(s.fingerprint(), mark(&s, ""));
+        }
+        // A second kind counts too.
+        let second = WorldKind { motion: Some(bot(3.0, both.clone())), ..WorldKind::default() };
+        let s = with_world(World { kinds: vec![second], ..World::default() });
+        assert_eq!(s.fingerprint(), mark(&s, ""));
+        // Strafe only, forward and back only, a band with no strafe, a bot that doesn't move, no world.
+        let fore_only = Dodge { strafe: false, advance: true, ..Dodge::default() };
+        let band_only = Dodge { strafe: false, max_distance: 8.0, ..Dodge::default() };
+        for s in [
+            with_world(World { motion: Some(bot(3.0, Dodge::default())), ..World::default() }),
+            with_world(World { motion: Some(bot(3.0, fore_only)), ..World::default() }),
+            with_world(World { motion: Some(bot(3.0, band_only)), ..World::default() }),
+            with_world(World { motion: Some(bot(0.0, both.clone())), ..World::default() }),
+            with_world(World::default()),
+            Scenario::default(),
+        ] {
+            assert_eq!(s.fingerprint(), of_settings(&s));
+        }
+        // After the older marks.
+        let mut s = with_world(World { motion: Some(bot(3.0, both)), ..World::default() });
+        s.targets.regen_per_s = 10.0;
+        assert_eq!(s.fingerprint(), mark(&s, "\n# rules: heals in steps"));
     }
 
     /// Bug: imported bots healed continuously between shots; they now heal in steps, and scenarios

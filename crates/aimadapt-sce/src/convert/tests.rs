@@ -2049,3 +2049,36 @@ fn a_bot_comes_back_after_its_least_respawn_delay() {
     let w = import_ok(&with_big_kind(wide, &short)).scenario.world.unwrap();
     assert_eq!(w.kinds.iter().map(|k| k.respawn_delay_s).collect::<Vec<_>>(), vec![0.5, 0.2]);
 }
+
+/// Bug: a bot that strafed and moved forward or back at once walked at 1.414 times its top speed
+/// in the sim. The forward bias that tilts its direction is kept only where it can change the walk.
+#[test]
+fn a_forward_bias_is_kept_only_for_a_moving_bot_that_strafes_and_goes_forward_or_back() {
+    let bias = |speed: &str, bias_line: &str, dodge: &str| {
+        let text = VOLUME_SCE
+            .replace("CharacterProfile=Dot Ball", "CharacterProfile=Dot Ball\nDodgeProfileNames=Weave")
+            .replace("MaxSpeed=0.0\nMainBBType", &format!("MaxSpeed={speed}\n{bias_line}MainBBType"))
+            .replace("[Map Data]", &format!("[Dodge Profile]\nName=Weave\n{dodge}[Map Data]"));
+        let w = convert(&Sce::parse(&text), "box.sce", "0").unwrap().scenario.world.unwrap();
+        w.motion.map(|m| m.forward_bias)
+    };
+    let tilt = "ForwardSpeedBias=0.25\n";
+    let both = "ToggleLeftRight=true\nToggleForwardBack=true\n";
+    let band = "ToggleLeftRight=true\nMaxTargetDistance=1000\n";
+    assert_eq!(bias("300.0", tilt, both), Some(0.25));
+    assert_eq!(bias("300.0", tilt, band), Some(0.25));
+    assert_eq!(bias("300.0", tilt, "ToggleLeftRight=true\nMinTargetDistance=500\n"), Some(0.25));
+    // Where it changes nothing it stays 1, so those scenarios keep what they stored.
+    assert_eq!(bias("0.0", tilt, both), None, "a bot that doesn't move has no motion to tilt");
+    assert_eq!(bias("300.0", tilt, "ToggleLeftRight=true\n"), Some(1.0), "strafe only");
+    assert_eq!(
+        bias("300.0", tilt, "ToggleLeftRight=false\nToggleForwardBack=true\n"),
+        Some(1.0),
+        "forward and back only"
+    );
+    // A bot that only hops on the spot has a motion and no top speed: nothing to tilt there either.
+    let hops = "ToggleLeftRight=true\nToggleForwardBack=true\nJumpFrequency=0.5\nMinJumpTime=0.4\nMaxJumpTime=0.9\n";
+    assert_eq!(bias("0.0", "ForwardSpeedBias=0.25\nJumpVelocity=300.0\n", hops), Some(1.0), "a hopper with no speed");
+    assert_eq!(bias("300.0", "ForwardSpeedBias=-2.0\n", both), Some(0.0), "a negative bias is read as 0");
+    assert_eq!(bias("300.0", "", both), Some(1.0), "no line");
+}

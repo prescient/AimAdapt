@@ -603,8 +603,8 @@ fn a_dodge_with_no_jump_chance_draws_what_it_always_drew() {
         ..strafer()
     };
     let (at, next) = trace(&walker, Vec3::new(0.0, -1.5, -10.0));
-    let pinned =
-        [(0.5472234, -7.6509156), (-2.1024978, -7.7887573), (-0.21922867, -7.9428377), (-0.8611942, -6.6430774)];
+    // Pinned again when a two-way bot's top speed went from 1.414 times to 1 times (see walk_tests).
+    let pinned = [(0.4611203, -8.2504225), (-2.177581, -8.393004), (-0.2913482, -8.536776), (-0.69655484, -7.6850104)];
     for (p, (x, z)) in at.iter().zip(pinned) {
         assert!((p.x - x).abs() < 1e-4 && (p.z - z).abs() < 1e-4 && p.y == -1.5, "{p}");
     }
