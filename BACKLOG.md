@@ -143,7 +143,7 @@ Last reviewed: Nov 11, 2026 (after the layout review, the adaptive review and th
   - Coaching notes.
 - [x] Skill profile across the nine sub-skills, three groups and overall (on Progress › Skills).
 - [x] Replay a run from its aim trace and recorded target positions (60 Hz), from the player's view, at any speed.
-- [x] Feeling and energy check-ins (Nov 17, 2026): three faces each on Today, saved with the time, so each run counts with the answers it was played with. Progress › Skills shows how runs went with each answer against what's usual for you (adaptive runs against the planned chance, scored runs against the scenario's median over two weeks either side), averaged over days with a likely range, and a Worth knowing note names the answer furthest from usual once it has three days and is clear of noise.
+- [x] Feeling and energy check-ins (Nov 17, 2026): three faces each on Today, saved with the time, so each run counts with the answers it was played with. Progress › Skills shows how runs went with each answer against what's usual for you (each run against what was expected: adaptive runs against the planned chance, scored runs against the scenario's median over two weeks either side; then each checked-in day against the other days within two weeks), averaged over days with a likely range, and a Worth knowing note names the answer furthest from usual once it has three days and is clear of noise.
 
 ### To do
 - [ ] `todo` P2 Flick shape from the trace: peak speed, deceleration, and where corrections start.

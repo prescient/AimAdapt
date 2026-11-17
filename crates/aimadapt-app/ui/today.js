@@ -170,10 +170,14 @@ document.addEventListener("click", (e) => {
 });
 
 // One answer's row on Progress: its face, days and runs, and the change from your usual.
+// One day has no range and can't be told from noise, so its figure is grey.
 function checkinStatRow(q, s) {
+  const figure = s.change === null ? "–"
+    : s.spread ? changeSpan(s.change, s.spread)
+    : `<span class="muted" title="One day has no range yet, so this may be noise.">${pctChange(s.change)}</span>`;
   return `<div class="list-row"><span class="face-mark" aria-hidden="true">${faceIcon(s.answer, 22)}</span>
-    <div class="main"><div class="title">${CHECKIN[q].words[s.answer]}</div><div class="sub">${s.days ? `${plural(s.days, "day")} · ${plural(s.runs, "run")}` : "No runs yet"}</div></div>
-    <div class="num">${s.change === null ? "–" : changeSpan(s.change, s.spread)}</div></div>`;
+    <div class="main"><div class="title">${CHECKIN[q].words[s.answer]}</div><div class="sub">${s.days ? `${plural(s.days, "day")} · ${plural(s.runs, "run")}` : "Not measured yet"}</div></div>
+    <div class="num">${figure}</div></div>`;
 }
 
 // Progress › Skills: how runs went with each answer.
@@ -186,7 +190,7 @@ function checkinStatsCard() {
   const side = (q) => `<div style="flex:1 1 260px;min-width:0"><h3>${CHECKIN[q].label}</h3>${r[q].map((s) => checkinStatRow(q, s)).join("")}</div>`;
   return `<section class="card">${head}
     <div class="row" style="align-items:flex-start">${side("feeling")}${side("energy")}</div>
-    <div class="small muted">Each figure is how your runs went against what's usual for you, averaged over days. An adaptive run counts the targets you got against the chance the trainer planned at your rating. A scored run counts its score against your median on that scenario over the two weeks either side. The ± is the likely range; a grey figure may be noise.</div>
+    <div class="small muted">Each figure compares the days you gave that answer with your other days in the two weeks either side, and a day needs three of those. A run is measured against what was expected of you: on an adaptive run, the targets you got against the chance the trainer planned at your rating; on a scored run, its score against your median on that scenario. Each day counts once, however many runs it had. The ± is the likely range; a grey figure may be noise.</div>
   </section>`;
 }
 
@@ -198,7 +202,7 @@ function checkinNote() {
   const size = `${Math.abs(shownPct(so.change))}% ${so.change < 0 ? "below" : "above"}`;
   return {
     title: `${c.title[so.answer]}: ${size} your usual`,
-    body: `On the ${so.days} days you checked in ${c.body[so.answer]}, your runs came out ${size} what's usual for you (likely ${rangeText(so.spread)}).` +
+    body: `On the ${so.days} days you checked in ${c.body[so.answer]}, your runs came out ${size} your other days around them (likely ${rangeText(so.spread)}).` +
       (so.change < 0 ? " Worth remembering when a rating dips on a day like that." : ""),
   };
 }

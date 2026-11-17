@@ -9,7 +9,7 @@
 //! finished since the last check-in changes that check-in. After a run it starts a
 //! new one, so the runs already played keep the answers they were played with.
 //!
-//! A run is measured against what was expected of you:
+//! A run is first measured against what was expected of you:
 //! - **Adaptive runs** with a plan (not calibration runs): the share of targets you
 //!   succeeded on against the chance the trainer planned at your rating. 0.80
 //!   against a planned 0.85 is 6% below.
@@ -17,13 +17,18 @@
 //!   that scenario's scores on other days within two weeks either side. A run needs
 //!   three of those, so a scenario's first days are left out.
 //!
-//! A day's figure is the mean of its runs, and an answer's figure is the mean of
-//! its days, with a likely range of one standard error either side. Days are what
-//! count, not runs, since the runs of one day share how that day went.
+//! A day's figure is the mean of its runs. Then each day with an answer is compared
+//! with your usual: the mean figure of your other days within two weeks either side,
+//! checked in or not, and it needs three of them. Comparing with the days around it,
+//! not with the plan itself, means a plan that runs a little high or low for you
+//! doesn't make every answer look worse or better, and checking in only on bad days
+//! still compares them with your other days. An answer's figure is the mean of its
+//! days, with a likely range of one standard error either side. Days are what count,
+//! not runs, since the runs of one day share how that day went.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use chrono::{NaiveDate, NaiveDateTime};
+use chrono::{Duration, NaiveDate, NaiveDateTime};
 use rusqlite::params;
 
 use crate::db::{Db, DbError, TIME_FORMAT};
@@ -52,11 +57,14 @@ pub const STANDOUT_DAYS: usize = 3;
 /// The smallest gap from your usual that is named as the standout (0.03 = 3%).
 pub const STANDOUT_CHANGE: f64 = 0.03;
 
-/// How many days either side of a scored run its usual reaches.
+/// How many days either side a usual reaches: a scored run's, and a checked-in day's.
 pub const USUAL_WINDOW_DAYS: i64 = 14;
 
 /// The scores a scored run's usual needs.
 pub const USUAL_MIN_RUNS: usize = 3;
+
+/// The other days a checked-in day's usual needs.
+pub const USUAL_MIN_DAYS: usize = 3;
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -93,12 +101,12 @@ impl Question {
 pub struct AnswerStat {
     /// 1 (low) to 3 (high).
     pub answer: u8,
-    /// Training days with runs on this answer. A day split between two answers
-    /// counts for each.
+    /// Training days with runs on this answer that could be compared with the days
+    /// around them. A day split between two answers counts for each.
     pub days: usize,
     pub runs: usize,
-    /// The mean of the days' figures: 0.05 is 5% above what's usual for you. `None`
-    /// with no runs.
+    /// The mean of the days' figures against the days around them: 0.05 is 5% above
+    /// what's usual for you. `None` with no such days.
     pub change: Option<f64>,
     /// One standard error either side of `change`. `None` under two days.
     pub spread: Option<Spread>,
@@ -193,9 +201,13 @@ pub fn report(db: &Db, progress: &Progress, time: &TimeSettings, now: NaiveDateT
     let all = load(db)?;
     let mut runs = Vec::new();
     if !all.is_empty() {
-        let days: BTreeSet<NaiveDate> = all.iter().map(|c| time.training_day(c.at)).collect();
+        // Checked-in days and the days around them, which make their usual.
+        let checked: BTreeSet<NaiveDate> = all.iter().map(|c| time.training_day(c.at)).collect();
+        let w = Duration::days(USUAL_WINDOW_DAYS);
+        let near = |d: NaiveDate| checked.range(d - w..=d + w).next().is_some();
         runs = planned_runs(db)?;
-        runs.extend(scored_runs(progress, time, &days));
+        runs.retain(|(t, _)| near(time.training_day(*t)));
+        runs.extend(scored_runs(progress, time, &near));
     }
     Ok(build(&all, &runs, time, now))
 }
@@ -219,10 +231,10 @@ fn planned_runs(db: &Db) -> Result<Vec<(NaiveDateTime, f64)>, DbError> {
     Ok(out)
 }
 
-/// Scored runs on the given training days: when each finished, and its score
+/// Scored runs on the training days `wanted` picks: when each finished, and its score
 /// against the median of the scenario's scores on other days within
 /// [`USUAL_WINDOW_DAYS`] either side.
-fn scored_runs(p: &Progress, time: &TimeSettings, days: &BTreeSet<NaiveDate>) -> Vec<(NaiveDateTime, f64)> {
+fn scored_runs(p: &Progress, time: &TimeSettings, wanted: &dyn Fn(NaiveDate) -> bool) -> Vec<(NaiveDateTime, f64)> {
     let counted = |r: &&ScenarioRun| !r.restarted && r.score.is_some();
     let mut by: HashMap<&str, Vec<(NaiveDate, f64)>> = HashMap::new();
     for r in p.runs.iter().filter(counted) {
@@ -231,7 +243,7 @@ fn scored_runs(p: &Progress, time: &TimeSettings, days: &BTreeSet<NaiveDate>) ->
     let mut out = Vec::new();
     for r in p.runs.iter().filter(counted) {
         let day = time.training_day(r.finished_at);
-        if !days.contains(&day) {
+        if !wanted(day) {
             continue;
         }
         let mut usual: Vec<f64> = by[r.scenario.as_str()]
@@ -257,10 +269,12 @@ fn build(all: &[CheckIn], runs: &[(NaiveDateTime, f64)], time: &TimeSettings, no
     for c in all {
         by_day.entry(time.training_day(c.at)).or_default().push(c);
     }
-    // Each question's run figures, by day and answer.
+    // Every day's runs, for the usuals, and each question's runs by day and answer.
+    let mut day_runs: BTreeMap<NaiveDate, Vec<f64>> = BTreeMap::new();
     let mut groups: BTreeMap<(Question, NaiveDate, u8), Vec<f64>> = BTreeMap::new();
     for &(finished, value) in runs {
         let day = time.training_day(finished);
+        day_runs.entry(day).or_default().push(value);
         let Some(list) = by_day.get(&day) else { continue };
         let c = list.iter().rev().find(|c| c.at <= finished).unwrap_or(&list[0]);
         for q in Question::ALL {
@@ -269,19 +283,28 @@ fn build(all: &[CheckIn], runs: &[(NaiveDateTime, f64)], time: &TimeSettings, no
             }
         }
     }
+    let day_figures: BTreeMap<NaiveDate, f64> = day_runs.iter().map(|(d, v)| (*d, mean(v))).collect();
+    // Each day and answer against the usual around that day: (figure, runs).
+    let compared: BTreeMap<(Question, NaiveDate, u8), (f64, usize)> = groups
+        .iter()
+        .filter_map(|(&(q, d, a), v)| {
+            let usual = usual(&day_figures, d)?;
+            Some(((q, d, a), ((1.0 + mean(v)) / (1.0 + usual) - 1.0, v.len())))
+        })
+        .collect();
     let stats = |q: Question| -> Vec<AnswerStat> {
         (1..=MAX_ANSWER)
             .map(|a| {
-                let days: Vec<&Vec<f64>> =
-                    groups.iter().filter(|((gq, _, ga), _)| *gq == q && *ga == a).map(|(_, v)| v).collect();
-                let day_figures: Vec<f64> = days.iter().map(|v| mean(v)).collect();
-                let change = (!day_figures.is_empty()).then(|| mean(&day_figures));
+                let days: Vec<(f64, usize)> =
+                    compared.iter().filter(|((gq, _, ga), _)| *gq == q && *ga == a).map(|(_, v)| *v).collect();
+                let figures: Vec<f64> = days.iter().map(|d| d.0).collect();
+                let change = (!figures.is_empty()).then(|| mean(&figures));
                 AnswerStat {
                     answer: a,
-                    days: day_figures.len(),
-                    runs: days.iter().map(|v| v.len()).sum(),
+                    days: figures.len(),
+                    runs: days.iter().map(|d| d.1).sum(),
                     change,
-                    spread: change.and_then(|m| spread(&day_figures, m)),
+                    spread: change.and_then(|m| spread(&figures, m)),
                 }
             })
             .collect()
@@ -306,6 +329,14 @@ fn build(all: &[CheckIn], runs: &[(NaiveDateTime, f64)], time: &TimeSettings, no
         });
     let answered = by_day.iter().filter(|(_, l)| l.iter().any(|c| c.feeling.is_some() || c.energy.is_some())).count();
     Report { today: current(all, now, time), feeling, energy, days: answered, standout }
+}
+
+/// The usual around `day`: the mean figure of the other days within
+/// [`USUAL_WINDOW_DAYS`] either side. `None` under [`USUAL_MIN_DAYS`] of them.
+fn usual(day_figures: &BTreeMap<NaiveDate, f64>, day: NaiveDate) -> Option<f64> {
+    let w = Duration::days(USUAL_WINDOW_DAYS);
+    let around: Vec<f64> = day_figures.range(day - w..=day + w).filter(|(d, _)| **d != day).map(|(_, f)| *f).collect();
+    (around.len() >= USUAL_MIN_DAYS).then(|| mean(&around)).filter(|u| *u > -1.0)
 }
 
 fn mean(v: &[f64]) -> f64 {
@@ -386,6 +417,17 @@ mod tests {
         &list[usize::from(answer) - 1]
     }
 
+    /// A run at exactly what was expected on each of these days, with no check-in:
+    /// the days around a checked-in day that make its usual.
+    fn plain(days: std::ops::RangeInclusive<u32>) -> Vec<(NaiveDateTime, f64)> {
+        days.map(|d| (at(d, 10, 0), 0.0)).collect()
+    }
+
+    /// A day's figure against the mean of the others' figures.
+    fn against(day: f64, others: &[f64]) -> f64 {
+        (1.0 + day) / (1.0 + others.iter().sum::<f64>() / others.len() as f64) - 1.0
+    }
+
     #[test]
     fn a_check_in_counts_from_when_it_was_made_and_covers_the_runs_before_it() {
         let all = [
@@ -393,16 +435,18 @@ mod tests {
             check(at(16, 12, 0), Some(3), None),
             check(at(17, 20, 0), Some(2), None),
         ];
-        let runs = [
+        let mut runs = vec![
             (at(16, 8, 0), -0.1),  // before the day's first check-in: counts with it
             (at(16, 10, 0), -0.2), // after the first
             (at(16, 13, 0), 0.1),  // after the second
-            (at(15, 10, 0), 0.5),  // a day with no check-in
+            (at(15, 10, 0), 0.5),  // a day with no check-in: part of the usual only
         ];
+        runs.extend(plain(3..=7));
         let r = build(&all, &runs, &time(), at(17, 21, 0));
         let bad = stat(&r, Question::Feeling, 1);
         assert_eq!((bad.days, bad.runs), (1, 2));
-        assert!((bad.change.unwrap() + 0.15).abs() < 1e-9);
+        let others = [0.0, 0.0, 0.0, 0.0, 0.0, 0.5];
+        assert!((bad.change.unwrap() - against(-0.15, &others)).abs() < 1e-9, "{:?}", bad.change);
         assert_eq!(stat(&r, Question::Feeling, 3).runs, 1);
         // The second check-in left energy out, so its run has no energy answer.
         assert_eq!(stat(&r, Question::Energy, 2).runs, 2);
@@ -416,7 +460,9 @@ mod tests {
         // 2 AM is still the 16th's training day; 5 AM is the next.
         assert_eq!(build(&all, &[], &time(), at(17, 2, 0)).today, Some(all[0]));
         assert_eq!(build(&all, &[], &time(), at(17, 5, 0)).today, None);
-        let r = build(&all, &[(at(17, 1, 30), -0.1)], &time(), at(17, 2, 0));
+        let mut runs = plain(3..=7);
+        runs.push((at(17, 1, 30), -0.1));
+        let r = build(&all, &runs, &time(), at(17, 2, 0));
         assert_eq!(stat(&r, Question::Energy, 1).runs, 1);
     }
 
@@ -475,14 +521,31 @@ mod tests {
         store(&mut db, "Pasu", at(12, 10, 0), Some(50.0), None);
         store(&mut db, "Pasu", at(14, 10, 0), Some(50.0), None);
         store(&mut db, "Pasu", at(16, 11, 30), Some(10.0), None);
-        save(&db, at(16, 9, 0), &t, Some(1), None).unwrap();
 
+        let planned = planned_runs(&db).unwrap();
+        assert_eq!(planned.len(), 1, "{planned:?}");
+        assert_eq!(planned[0].0, at(16, 10, 0));
+        assert!((planned[0].1 + 0.2).abs() < 1e-9, "{planned:?}");
         let p = crate::progress::load(&db, &t).unwrap();
-        let r = report(&db, &p, &t, at(16, 12, 0)).unwrap();
+        let day = t.training_day(at(16, 10, 0));
+        let scored = scored_runs(&p, &t, &|d| d == day);
+        assert_eq!(scored.len(), 1, "{scored:?}");
+        assert_eq!(scored[0].0, at(16, 11, 0));
+        assert!((scored[0].1 + 0.2).abs() < 1e-9, "{scored:?}");
+    }
+
+    #[test]
+    fn a_day_needs_three_other_days_within_two_weeks() {
+        let all = [check(at(20, 9, 0), Some(1), None)];
+        // Days 5 (15 days before) and 18 and 19: only two within two weeks.
+        let mut runs = vec![(at(5, 10, 0), 0.3), (at(18, 10, 0), 0.0), (at(19, 10, 0), 0.0), (at(20, 10, 0), -0.1)];
+        let r = build(&all, &runs, &time(), at(20, 12, 0));
+        assert_eq!((stat(&r, Question::Feeling, 1).days, stat(&r, Question::Feeling, 1).change), (0, None));
+        runs.push((at(30, 10, 0), 0.02));
+        let r = build(&all, &runs, &time(), at(20, 12, 0));
         let bad = stat(&r, Question::Feeling, 1);
-        assert_eq!((bad.days, bad.runs), (1, 2));
-        assert!((bad.change.unwrap() + 0.2).abs() < 1e-9, "{:?}", bad.change);
-        assert_eq!(bad.spread, None, "one day has no range");
+        assert_eq!((bad.days, bad.runs, bad.spread), (1, 1, None));
+        assert!((bad.change.unwrap() - against(-0.1, &[0.0, 0.0, 0.02])).abs() < 1e-9, "{:?}", bad.change);
     }
 
     #[test]
@@ -495,13 +558,24 @@ mod tests {
         let mut runs: Vec<(NaiveDateTime, f64)> = (0..5).map(|i| (at(10, 10, i), -0.10)).collect();
         runs.push((at(11, 10, 0), -0.08));
         runs.push((at(12, 10, 0), -0.12));
+        runs.extend(plain(1..=5));
         let r = build(&all, &runs, &time(), at(12, 20, 0));
         let low = stat(&r, Question::Energy, 1);
-        assert_eq!((low.days, low.runs), (3, 7));
-        assert!((low.change.unwrap() + 0.10).abs() < 1e-9, "each day weighs the same");
+        assert_eq!((low.days, low.runs), (3, 7), "the days around it aren't its runs");
+        // Each day once, however many runs it had, against the five plain days and the
+        // other two checked-in days.
+        let z = [0.0; 5];
+        let with = |a: f64, b: f64| [&z[..], &[a, b]].concat();
+        let days = [
+            against(-0.10, &with(-0.08, -0.12)),
+            against(-0.08, &with(-0.10, -0.12)),
+            against(-0.12, &with(-0.10, -0.08)),
+        ];
+        let m = days.iter().sum::<f64>() / 3.0;
+        assert!((low.change.unwrap() - m).abs() < 1e-9, "{:?} against {m}", low.change);
+        let sd = (days.iter().map(|d| (d - m).powi(2)).sum::<f64>() / 2.0).sqrt();
         let sp = low.spread.unwrap();
-        // The days' figures have a standard deviation of 0.02, so a standard error of 0.02/√3.
-        assert!((sp.high - sp.low - 2.0 * 0.02 / 3f64.sqrt()).abs() < 1e-9);
+        assert!((sp.high - sp.low - 2.0 * sd / 3f64.sqrt()).abs() < 1e-9, "one standard error either side");
         assert!(!sp.noise);
         let s = r.standout.unwrap();
         assert_eq!((s.question, s.answer, s.days), (Question::Energy, 1, 3));
@@ -511,8 +585,9 @@ mod tests {
     fn no_standout_under_three_days_inside_noise_or_under_three_percent() {
         let days = |figures: &[f64]| {
             let all: Vec<CheckIn> = (0..figures.len() as u32).map(|i| check(at(10 + i, 9, 0), Some(1), None)).collect();
-            let runs: Vec<(NaiveDateTime, f64)> =
+            let mut runs: Vec<(NaiveDateTime, f64)> =
                 figures.iter().enumerate().map(|(i, f)| (at(10 + i as u32, 10, 0), *f)).collect();
+            runs.extend(plain(1..=9));
             build(&all, &runs, &time(), at(20, 9, 0)).standout
         };
         assert!(days(&[-0.2, -0.21, -0.19]).is_some());
@@ -524,7 +599,7 @@ mod tests {
     #[test]
     fn the_standout_is_the_answer_furthest_from_usual() {
         let mut all: Vec<CheckIn> = (0..3).map(|i| check(at(10 + i, 9, 0), Some(3), Some(1))).collect();
-        let mut runs = Vec::new();
+        let mut runs = plain(1..=9);
         for i in 0..3 {
             runs.push((at(10 + i, 10, 0), -0.05 - 0.001 * f64::from(i)));
         }
@@ -540,6 +615,39 @@ mod tests {
         }
         let s = build(&all, &runs, &time(), at(20, 9, 0)).standout.unwrap();
         assert_eq!((s.question, s.answer, s.days), (Question::Energy, 1, 6));
+    }
+
+    /// Bug, found retaking the README pictures: the bot's runs came out below the
+    /// trainer's plan on every day, so every answer read as below your usual, and the
+    /// note named whichever answer was lowest ("Feeling okay: 5% below your usual").
+    /// A plan that runs high or low for a player does the same. Each day is now
+    /// compared with the days around it.
+    #[test]
+    fn a_plan_that_runs_high_every_day_puts_no_answer_below_usual() {
+        let all: Vec<CheckIn> = (0..6).map(|i| check(at(10 + i, 9, 0), Some(1 + (i % 3) as u8), None)).collect();
+        let runs: Vec<(NaiveDateTime, f64)> = (3..16).map(|d| (at(d, 10, 0), -0.08)).collect();
+        let r = build(&all, &runs, &time(), at(20, 9, 0));
+        for s in &r.feeling {
+            assert_eq!(s.days, 2, "answer {}", s.answer);
+            assert!(s.change.unwrap().abs() < 1e-9, "answer {}: {:?}", s.answer, s.change);
+        }
+        assert_eq!(r.standout, None);
+    }
+
+    /// The same bug from the other side: checking in only on bad days compared them
+    /// with the plan, not with the other days.
+    #[test]
+    fn checking_in_only_on_bad_days_compares_them_with_the_other_days() {
+        let all: Vec<CheckIn> = (15..18).map(|d| check(at(d, 9, 0), None, Some(1))).collect();
+        let mut runs: Vec<(NaiveDateTime, f64)> = (5..15).map(|d| (at(d, 10, 0), -0.08)).collect();
+        runs.extend((15..18).map(|d| (at(d, 10, 0), -0.18)));
+        let r = build(&all, &runs, &time(), at(20, 9, 0));
+        // Each bad day against ten days at -0.08 and the two other bad days.
+        let want = 0.82 / (1.0 + (10.0 * -0.08 + 2.0 * -0.18) / 12.0) - 1.0;
+        let low = stat(&r, Question::Energy, 1);
+        assert!((low.change.unwrap() - want).abs() < 1e-9, "{:?} against {want}", low.change);
+        let s = r.standout.unwrap();
+        assert_eq!((s.question, s.answer, s.days), (Question::Energy, 1, 3));
     }
 
     #[test]

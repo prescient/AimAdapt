@@ -1583,3 +1583,14 @@ fn a_percent_change_that_rounds_to_zero_has_no_sign() {
     let span = decl(&program, "changeSpan");
     assert!(span.contains("shown > 0 ? \"pos\" : shown < 0 ? \"neg\" : \"muted\""), "{span}");
 }
+
+/// Bug, found retaking the README pictures: on Progress › Skills, a check-in answer with
+/// one day has no range, and its figure was drawn blue or salmon like a change that is
+/// clear of noise. One day can't be told from noise, so it is grey.
+#[test]
+fn a_check_in_answer_without_a_range_is_grey() {
+    let today = ui("today.js");
+    let row = decl(&today, "checkinStatRow");
+    assert!(row.contains("s.spread ? changeSpan(s.change, s.spread)"), "{row}");
+    assert!(row.contains("class=\"muted\""), "{row}");
+}
