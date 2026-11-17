@@ -17,7 +17,7 @@ use aimadapt_core::progress::{
     self, ColdStart, FatigueBucket, ProgressSettings, ScenarioRun, ScenarioStats, SensPeriod,
 };
 use aimadapt_core::training::{self, TimeSettings, TrainingReport};
-use aimadapt_core::{Db, ImportReport, discover, import};
+use aimadapt_core::{Db, ImportReport, checkins, discover, import};
 use chrono::Local;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -69,6 +69,8 @@ struct Snapshot {
     cold_starts: Vec<ColdStart>,
     fatigue: Vec<FatigueBucket>,
     game: Option<aimadapt_core::trainer_runs::GameInfo>,
+    /// Today's feeling and energy, and how runs have gone with each answer.
+    checkins: checkins::Report,
 }
 
 #[derive(Serialize)]
@@ -98,9 +100,11 @@ fn build_snapshot(state: &AppData) -> Result<Snapshot, String> {
     }
     let db = state.db.lock().map_err(err)?;
     let time = state.time();
-    let training = training::report(&db, &time, Local::now().naive_local()).map_err(err)?;
+    let now = Local::now().naive_local();
+    let training = training::report(&db, &time, now).map_err(err)?;
     let p = progress::load(&db, &time).map_err(err)?;
     let game = db.latest_game_info().map_err(err)?;
+    let checkins = checkins::report(&db, &p, &time, now).map_err(err)?;
     Ok(Snapshot {
         db_path: state.db_path.display().to_string(),
         stats_dir: state.stats_dir.as_ref().map(|d| d.display().to_string()),
@@ -114,7 +118,34 @@ fn build_snapshot(state: &AppData) -> Result<Snapshot, String> {
         cold_starts: p.cold_starts(),
         fatigue: p.fatigue(&state.progress),
         game,
+        checkins,
     })
+}
+
+/// Saves today's feeling and energy as they now stand, each 1 (low) to 3 (high) or
+/// `None`, and returns the check-in report again.
+#[tauri::command(async)]
+fn check_in(state: State<'_, AppData>, feeling: Option<u8>, energy: Option<u8>) -> Result<checkins::Report, String> {
+    if let Some(e) = &state.startup_error {
+        return Err(e.clone());
+    }
+    check_answers(feeling, energy)?;
+    let db = state.db.lock().map_err(err)?;
+    let time = state.time();
+    let now = Local::now().naive_local();
+    checkins::save(&db, now, &time, feeling, energy).map_err(err)?;
+    let p = progress::load(&db, &time).map_err(err)?;
+    checkins::report(&db, &p, &time, now).map_err(err)
+}
+
+/// A plain message for an answer that isn't one of the three faces.
+fn check_answers(feeling: Option<u8>, energy: Option<u8>) -> Result<(), String> {
+    for (name, v) in [("feeling", feeling), ("energy", energy)] {
+        if let Some(v) = v.filter(|v| !(1..=checkins::MAX_ANSWER).contains(v)) {
+            return Err(format!("{v} isn't an answer for {name}: answers are 1 to {}", checkins::MAX_ANSWER));
+        }
+    }
+    Ok(())
 }
 
 fn build_scenario(state: &AppData, name: &str) -> Result<Option<ScenarioDetail>, String> {
@@ -355,6 +386,7 @@ fn main() {
             snapshot,
             scenario,
             rescan,
+            check_in,
             trainer::trainer,
             trainer::check_scenario,
             trainer::save_scenario,
@@ -422,6 +454,14 @@ mod tests {
             aimadapt_sim::prefs::TrainingPrefs::default().daily_goal_min,
             TimeSettings::default().daily_goal_min
         );
+    }
+
+    #[test]
+    fn check_in_answers_are_one_to_three() {
+        assert!(check_answers(Some(1), Some(3)).is_ok());
+        assert!(check_answers(None, None).is_ok());
+        assert_eq!(check_answers(Some(0), None).unwrap_err(), "0 isn't an answer for feeling: answers are 1 to 3");
+        assert!(check_answers(Some(2), Some(4)).unwrap_err().contains("energy"));
     }
 
     fn args(a: &[&str]) -> Vec<String> {

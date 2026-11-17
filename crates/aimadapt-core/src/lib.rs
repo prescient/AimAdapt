@@ -1,6 +1,7 @@
 //! AimAdapt core: parsing KovaaK's stats files, storing them in SQLite, and the
 //! stats built on top. No UI code lives here so everything can be tested directly.
 
+pub mod checkins;
 pub mod db;
 pub mod discover;
 pub mod import;

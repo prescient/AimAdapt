@@ -118,6 +118,7 @@ CREATE INDEX runs_source ON runs (source, scenario);
     crate::telemetry::MIGRATION_SLOPE_SD,
     crate::telemetry::MIGRATION_EVIDENCE,
     crate::slips::MIGRATION,
+    crate::checkins::MIGRATION,
 ];
 
 /// Steps in Rust that run right after the SQL of the given schema version, in the same
@@ -809,7 +810,7 @@ mod tests {
         drop(conn);
 
         let db = Db::open(&path).unwrap();
-        assert_eq!(db.schema_version().unwrap(), 10);
+        assert_eq!(db.schema_version().unwrap(), MIGRATIONS.len() as u32, "upgraded to the latest");
         for ((id, o), old) in old_runs.iter().zip(&before) {
             let dh = o.slope * (logit_counting_slips(o.goal) - (o.goal / (1.0 - o.goal)).ln());
             let got = stored(db.conn(), "engine_runs", *id);

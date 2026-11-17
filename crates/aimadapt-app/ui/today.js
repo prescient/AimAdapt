@@ -1,6 +1,7 @@
 // Today: the home page. Today's program workout with each drill's runs and rating,
-// the Last session card (lastSessionCard, in session.js), the week at a glance, your favorites and
-// what you played last (each with its play button), and the top note from your history.
+// the Last session card (lastSessionCard, in session.js), how you feel today (the check-in),
+// the week at a glance, your favorites and what you played last (each with its play button),
+// and the top note from your history.
 // Loaded after program.js and scenarios.js and draws with their helpers.
 
 function today() {
@@ -20,7 +21,7 @@ function today() {
     ${trainerBanners()}
     <div class="row" style="align-items:flex-start">
       <div style="flex:3 1 520px;min-width:0;display:flex;flex-direction:column;gap:16px">${todayWorkout()}${lastSessionCard()}</div>
-      <div style="flex:2 1 300px;min-width:0;display:flex;flex-direction:column;gap:16px">${weekStrip()}${favoritesCard()}${recentlyPlayed()}</div>
+      <div style="flex:2 1 300px;min-width:0;display:flex;flex-direction:column;gap:16px">${checkinCard()}${weekStrip()}${favoritesCard()}${recentlyPlayed()}</div>
     </div>
     ${worthKnowing()}
   </div>`;
@@ -105,4 +106,99 @@ function worthKnowing() {
   const [note] = rankedNotes();
   if (!note) return "";
   return `<section class="card"><div class="card-head"><h2>Worth knowing</h2><a class="small" href="#progress/skills">All notes</a></div>${noteView(note)}</section>`;
+}
+
+// ---------- the check-in ----------
+//
+// How you feel and how much energy you have today, three faces each (1 low, 2 okay,
+// 3 high). Saved with the `check_in` command; how runs go with each answer is on
+// Progress › Skills (checkinStatsCard) and can be a Worth knowing note. The rules for
+// which runs a check-in covers are in crates/aimadapt-core/src/checkins.rs.
+
+// Words for each answer, by question: on the buttons, in a note's title, and in its body.
+const CHECKIN = {
+  feeling: { label: "Feeling", words: ["", "Bad", "Okay", "Good"], title: ["", "Feeling bad", "Feeling okay", "Feeling good"], body: ["", "feeling bad", "feeling okay", "feeling good"] },
+  energy: { label: "Energy", words: ["", "Low", "Okay", "High"], title: ["", "Low energy", "Okay energy", "High energy"], body: ["", "with low energy", "with okay energy", "with high energy"] },
+};
+
+// A face for an answer: a frown, a straight mouth or a smile.
+function faceIcon(answer, size = 24) {
+  const mouth = { 1: "M8 16.6q4-3.6 8 0", 2: "M8.5 15.6h7", 3: "M8 14.4q4 3.6 8 0" }[answer];
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+    <circle cx="12" cy="12" r="9.5"></circle><circle cx="9" cy="10" r="1.1" fill="currentColor" stroke="none"></circle><circle cx="15" cy="10" r="1.1" fill="currentColor" stroke="none"></circle><path d="${mouth}"></path></svg>`;
+}
+
+function checkinRow(q, today) {
+  const v = today?.[q] ?? null;
+  const c = CHECKIN[q];
+  return `<div class="checkin-row"><span class="checkin-q" id="checkin-${q}">${c.label}</span>
+    <span class="faces" role="group" aria-labelledby="checkin-${q}">${[1, 2, 3].map((a) =>
+      `<button type="button" class="face${v === a ? " on" : ""}" data-action="check-in" data-q="${q}" data-a="${a}" aria-pressed="${v === a}">${faceIcon(a)}<span>${c.words[a]}</span></button>`).join("")}</span></div>`;
+}
+
+function checkinCard() {
+  const r = ui.snap.checkins;
+  const t = r.today;
+  const answered = t && (t.feeling !== null || t.energy !== null);
+  return `<section class="card" aria-label="Check in"><div class="card-head"><h2>How are you today?</h2>${r.days ? `<a class="small" href="#progress/skills">How it shows</a>` : ""}</div>
+    ${checkinRow("feeling", t)}${checkinRow("energy", t)}
+    <div class="small muted">${answered ? "Saved with today's runs. Change it if that changes; pick a face again to clear it." : "Pick a face for each. After a few days, Progress shows how you play with each answer."}</div>
+    ${ui.checkinError ? `<div class="small neg">${esc(ui.checkinError)}</div>` : ""}
+  </section>`;
+}
+
+// Saves the answers with one changed: the chosen face again clears it. The page shows the
+// new answers at once, so a quick second click builds on the first.
+async function checkIn(q, a) {
+  const r = ui.snap.checkins;
+  const answers = { feeling: r.today?.feeling ?? null, energy: r.today?.energy ?? null };
+  answers[q] = answers[q] === a ? null : a;
+  r.today = { at: r.today?.at ?? null, ...answers };
+  render();
+  try {
+    ui.snap.checkins = await invoke("check_in", answers);
+    ui.checkinError = null;
+  } catch (e) {
+    ui.checkinError = `Couldn't save: ${e}`;
+  }
+  render();
+}
+
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest('[data-action="check-in"]');
+  if (btn) checkIn(btn.dataset.q, Number(btn.dataset.a));
+});
+
+// One answer's row on Progress: its face, days and runs, and the change from your usual.
+function checkinStatRow(q, s) {
+  return `<div class="list-row"><span class="face-mark" aria-hidden="true">${faceIcon(s.answer, 22)}</span>
+    <div class="main"><div class="title">${CHECKIN[q].words[s.answer]}</div><div class="sub">${s.days ? `${plural(s.days, "day")} · ${plural(s.runs, "run")}` : "No runs yet"}</div></div>
+    <div class="num">${s.change === null ? "–" : changeSpan(s.change, s.spread)}</div></div>`;
+}
+
+// Progress › Skills: how runs went with each answer.
+function checkinStatsCard() {
+  const r = ui.snap.checkins;
+  const head = `<div class="card-head"><h2>Feeling and energy</h2>${r.days ? `<span class="small muted">${plural(r.days, "day")} checked in</span>` : ""}</div>`;
+  if (!r.days) {
+    return `<section class="card">${head}<div class="note-body">Check in on <a href="#today">Today</a> with how you feel and how much energy you have. After a few days, this shows how your runs go with each answer.</div></section>`;
+  }
+  const side = (q) => `<div style="flex:1 1 260px;min-width:0"><h3>${CHECKIN[q].label}</h3>${r[q].map((s) => checkinStatRow(q, s)).join("")}</div>`;
+  return `<section class="card">${head}
+    <div class="row" style="align-items:flex-start">${side("feeling")}${side("energy")}</div>
+    <div class="small muted">Each figure is how your runs went against what's usual for you, averaged over days. An adaptive run counts the targets you got against the chance the trainer planned at your rating. A scored run counts its score against your median on that scenario over the two weeks either side. The ± is the likely range; a grey figure may be noise.</div>
+  </section>`;
+}
+
+// The Worth knowing note for the answer furthest from your usual, or null.
+function checkinNote() {
+  const so = ui.snap.checkins.standout;
+  if (!so) return null;
+  const c = CHECKIN[so.question];
+  const size = `${Math.abs(shownPct(so.change))}% ${so.change < 0 ? "below" : "above"}`;
+  return {
+    title: `${c.title[so.answer]}: ${size} your usual`,
+    body: `On the ${so.days} days you checked in ${c.body[so.answer]}, your runs came out ${size} what's usual for you (likely ${rangeText(so.spread)}).` +
+      (so.change < 0 ? " Worth remembering when a rating dips on a day like that." : ""),
+  };
 }

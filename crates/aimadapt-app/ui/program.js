@@ -125,6 +125,8 @@ function rankedNotes() {
       body: `Your first run of the day on a scenario is typically ${Math.abs(warmMedian).toFixed(0)}% below your later runs that day (${warm.length} days measured). Start with an easy scenario.`,
     });
   }
+  const feel = checkinNote();
+  if (feel) notes.push(feel);
   const perScenario = runs / Math.max(1, sc.length);
   if (runs && perScenario < 3) {
     const played = sc.filter((x) => x.counted_runs >= 5);
@@ -187,6 +189,7 @@ function skillsTab() {
       ${profileCard(p.profile, s)}
       ${notesCard()}
     </div>
+    ${checkinStatsCard()}
     ${sessionsCard(p.sessions, p.carry)}
     ${weekCard(d)}
     ${planCheckCard(d.plan)}`;

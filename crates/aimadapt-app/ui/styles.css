@@ -426,3 +426,12 @@ th[aria-sort] .sort-btn { color: var(--text-strong); }
   .lib-table .c-skill, .lib-table .c-owner { display: none; }
   .lib-table th.c-figure { white-space: normal; min-width: 96px; }
 }
+
+/* The check-in on Today: three faces per question. */
+.checkin-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 0; }
+.checkin-q { color: var(--muted); font-size: 13px; }
+.faces { display: flex; gap: 8px; }
+.face { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 58px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 10px; background: transparent; color: var(--faint); font: 500 12px var(--font); cursor: pointer; }
+.face:hover { color: var(--text); border-color: var(--control); }
+.face.on { color: var(--rust-text); border-color: var(--rust-border); background: var(--rust-tint); }
+.face-mark { display: flex; color: var(--dim); }

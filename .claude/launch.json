@@ -6,6 +6,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "8765", "--bind", "127.0.0.1", "--directory", "crates/aimadapt-app"],
       "port": 8765
+    },
+    {
+      "name": "ui-preview-linux",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8765", "--bind", "127.0.0.1", "--directory", "crates/aimadapt-app"],
+      "port": 8765
     }
   ]
 }

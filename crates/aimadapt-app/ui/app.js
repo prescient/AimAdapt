@@ -24,6 +24,7 @@ const PREVIEW = {
   snapshot: (d) => d.snapshot,
   scenario: (d, a) => d.scenarios[a.name] ?? null,
   rescan: (d) => d.snapshot.last_import,
+  check_in: (d, a) => ((d.snapshot.checkins.today = { at: new Date().toISOString().slice(0, 23), feeling: a.feeling, energy: a.energy }), d.snapshot.checkins),
   trainer: (d) => d.trainer,
   check_scenario: () => [],
   check_profiles: () => [[], []],
