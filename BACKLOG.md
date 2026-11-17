@@ -33,6 +33,7 @@ Last reviewed: Nov 11, 2026 (after the layout review, the adaptive review and th
 - [x] Regen with a delay, and "finished in time" ratings for regen targets, so smoothness drills reward unbroken tracking. Insights shows unbroken stretches on target.
 - [x] At least two scenarios per sub-skill (29 built-ins), with Core Week alternating each drill and its variant week by week.
 - [x] The results screen shows a chart of the scenario's last ten ratings (scores for a standard run) with the run marked, and one note from its recent runs, picked to be what a player can change next. When the app started the trainer, V closes it and opens the run's replay, and I opens the scenario's page (plan L3a). The list at the end of a workout has one line for each scenario, and the chart and note are left out when the window is too short for them. Ratings and scoring are unchanged and there is no migration.
+- [x] Each frame runs in a set order: aim, then the shot, then drawing (found checking sphere hits, Nov 17, 2026). The frame's systems had been ordered only as two groups, and Bevy ran the systems inside each group backwards, so a shot was tested along the previous frame's aim and targets were drawn a frame behind where they were shot at. A test builds the frame with Bevy's ambiguity check on. Hit tests themselves were exact: on a day of real sphere runs at about 750 fps, no hit landed outside a sphere and the screen agreed with them to about 0.05°.
 
 ### To do
 - [ ] `todo` P1 Pause menu and pausing on focus loss (Esc quits straight away today).

@@ -15,6 +15,8 @@ use aimadapt_sim::sim::from_angles;
 use aimadapt_sim::{Event, Input, Phase, PlayerSettings, RunResult, Scenario, Sim};
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::{ClearColorConfig, Viewport};
+use bevy::ecs::schedule::ScheduleConfigs;
+use bevy::ecs::system::ScheduleSystem;
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::math::Affine2;
@@ -128,26 +130,32 @@ pub fn run(opts: PlayOptions) -> AppExit {
         .insert_resource(game)
         .init_resource::<CursorLock>()
         .add_systems(Startup, (setup_cameras, setup_hud))
-        .add_systems(
-            Update,
-            (
-                (exclusive_video_mode, play_area, rebuild_world),
-                (
-                    keys,
-                    cursor,
-                    look,
-                    step,
-                    sync_targets,
-                    sync_bars,
-                    update_hud,
-                    update_overlay,
-                    results_panel::update,
-                    smoke_capture,
-                ),
-            )
-                .chain(),
-        )
+        .add_systems(Update, frame_systems())
         .run()
+}
+
+/// The systems that run every frame, each group in the order written. The order matters: the
+/// mouse moves the aim (`look`), the shot is tested along that aim (`step`), and the targets are
+/// drawn where the shot met them (`sync_targets`), so what you see is what was shot at. Each
+/// group needs its own `chain`: an outer one orders the groups, not what's inside them.
+fn frame_systems() -> ScheduleConfigs<ScheduleSystem> {
+    (
+        (exclusive_video_mode, play_area, rebuild_world).chain(),
+        (
+            keys,
+            cursor,
+            look,
+            step,
+            sync_targets,
+            sync_bars,
+            update_hud,
+            update_overlay,
+            results_panel::update,
+            smoke_capture,
+        )
+            .chain(),
+    )
+        .chain()
 }
 
 #[derive(Default, Clone, Copy)]
@@ -1565,6 +1573,74 @@ fn rate_word(knob: Knob, per_target: bool) -> &'static str {
 mod tests {
     use super::*;
     use aimadapt_sim::world::{World, WorldVolume};
+
+    /// The frame's systems in the order Bevy runs them, and why the schedule wouldn't build if it
+    /// wouldn't. Ambiguity checks are on, so any two systems that touch the same data without an
+    /// order between them stop the build. Systems are named by their type: Bevy only keeps their
+    /// names with its debug feature.
+    fn frame_order() -> (Vec<&'static str>, Option<String>) {
+        fn of<M>(name: &'static str, s: impl IntoSystem<(), (), M>) -> (&'static str, std::any::TypeId) {
+            (name, IntoSystem::into_system(s).system_type())
+        }
+        let known = [
+            of("exclusive_video_mode", exclusive_video_mode),
+            of("play_area", play_area),
+            of("rebuild_world", rebuild_world),
+            of("keys", keys),
+            of("cursor", cursor),
+            of("look", look),
+            of("step", step),
+            of("sync_targets", sync_targets),
+            of("sync_bars", sync_bars),
+            of("update_hud", update_hud),
+            of("update_overlay", update_overlay),
+            of("results_panel::update", results_panel::update),
+            of("smoke_capture", smoke_capture),
+        ];
+        let mut app = App::new();
+        app.add_systems(Update, frame_systems());
+        app.edit_schedule(Update, |s| {
+            s.set_build_settings(bevy::ecs::schedule::ScheduleBuildSettings {
+                ambiguity_detection: bevy::ecs::schedule::LogLevel::Error,
+                ..default()
+            });
+        });
+        let world = app.world_mut();
+        let mut update = world.resource_mut::<Schedules>().remove(Update).unwrap();
+        let error = match update.initialize(world) {
+            Ok(_) => None,
+            Err(e) => Some(e.to_string(update.graph(), world)),
+        };
+        if error.is_some() {
+            // Build it again without the checks, to see the order Bevy picks.
+            update.set_build_settings(bevy::ecs::schedule::ScheduleBuildSettings::default());
+            update.initialize(world).unwrap();
+        }
+        let names = update
+            .systems()
+            .unwrap()
+            .filter_map(|(_, s)| known.iter().find(|(_, id)| *id == s.system_type()).map(|(name, _)| *name))
+            .collect();
+        (names, error)
+    }
+
+    /// Found when spheres seemed to take hits the crosshair had already left. The frame's
+    /// systems were ordered only as two groups: inside each, Bevy could run them in any order,
+    /// so a shot could be tested along the previous frame's aim (`step` before `look`), and
+    /// targets drawn a frame away from where the shot met them (`sync_targets` before `step`).
+    /// Every system that runs each frame now has a set order.
+    #[test]
+    fn the_frame_runs_aim_then_shot_then_drawing_in_a_set_order() {
+        let (names, error) = frame_order();
+        let at = |name: &str| {
+            names.iter().position(|n| *n == name).unwrap_or_else(|| panic!("{name} isn't in the frame: {names:?}"))
+        };
+        assert_eq!(names.len(), 13, "every frame system is found: {names:?}");
+        let count = error.as_deref().map(|e| e.lines().next().unwrap_or_default().to_string());
+        assert!(error.is_none(), "systems left unordered ({count:?}); Bevy runs them as {names:?}");
+        assert!(at("look") < at("step"), "the shot runs before the aim moves: {names:?}");
+        assert!(at("step") < at("sync_targets"), "targets are drawn before the shot: {names:?}");
+    }
 
     /// Plan K12a: only the volumes marked shown are drawn (a teleporter's is not), each as the eight corners
     /// of its box, from its corner along its three edges.
