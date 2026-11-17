@@ -17,7 +17,7 @@ use notify::{RecursiveMode, Watcher};
 #[derive(Parser)]
 #[command(name = "aimadapt", about = "Track your KovaaK's aim training")]
 struct Cli {
-    /// Database file. Defaults to %APPDATA%\AimAdapt\rustyaim.db
+    /// Database file. Defaults to %APPDATA%\AimAdapt\aimadapt.db (~/.local/share/AimAdapt on Linux)
     #[arg(long, global = true)]
     db: Option<PathBuf>,
 

@@ -182,6 +182,14 @@ AimAdapt used to be called RustyAim. On its first run it moves `%APPDATA%\RustyA
 
 Needs Rust (stable, MSVC toolchain) and the Visual Studio C++ build tools.
 
+Releases are for Windows only, but the workspace also builds and tests on Linux, for development. There it needs these packages (Debian and Ubuntu names):
+
+```bash
+sudo apt install pkg-config libwayland-dev libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev libdbus-1-dev
+```
+
+On Linux the app, the trainer and `aimadapt-cli` keep their files in `$XDG_DATA_HOME/AimAdapt`, normally `~/.local/share/AimAdapt`, instead of `%APPDATA%\AimAdapt`. Setting `APPDATA` moves them there too. The pre-commit hook builds `dist/AimAdapt` instead of `dist/AimAdapt.exe`.
+
 | Crate | Contents |
 |---|---|
 | `aimadapt-core` | KovaaK's parsing, SQLite storage, reports, Insights and program progress |

@@ -150,7 +150,8 @@ const OLD_DATA_DIR: &str = "RustyAim";
 const DB_FILE: &str = "aimadapt.db";
 const OLD_DB_FILE: &str = "rustyaim.db";
 
-/// `%APPDATA%\AimAdapt\aimadapt.db`, creating the folder if needed. Shared by the CLI and app.
+/// `aimadapt.db` in the data folder ([`data_dir`]), creating the folder if needed.
+/// Shared by the CLI and app.
 pub fn default_path() -> std::io::Result<std::path::PathBuf> {
     Ok(db_in(&data_dir()?))
 }
@@ -188,12 +189,32 @@ pub fn require_test_db(args: &[String], dev_flags: &[&str]) -> Result<(), String
 }
 
 /// `%APPDATA%\AimAdapt`, created if needed. Holds the database, engine settings and
-/// the player's own scenarios and workouts.
+/// the player's own scenarios and workouts. On Linux, where AimAdapt is only built for
+/// development, it's `~/.local/share/AimAdapt` unless `APPDATA` is set (see [`data_base`]).
 pub fn data_dir() -> std::io::Result<std::path::PathBuf> {
-    let base = std::env::var_os("APPDATA")
-        .map(std::path::PathBuf::from)
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "APPDATA isn't set"))?;
+    let var = |name| std::env::var_os(name).map(std::path::PathBuf::from);
+    let base = data_base(cfg!(windows), var("APPDATA"), var("XDG_DATA_HOME"), var("HOME")).ok_or_else(|| {
+        let missing = if cfg!(windows) { "APPDATA isn't set" } else { "neither APPDATA nor HOME is set" };
+        std::io::Error::new(std::io::ErrorKind::NotFound, missing)
+    })?;
     data_dir_in(&base)
+}
+
+/// The folder the data folder goes in. `APPDATA` wins when it's set, so Windows is
+/// unchanged and a Linux checkout can still point it elsewhere. Elsewhere than Windows,
+/// without it: `XDG_DATA_HOME`, else `~/.local/share`. Relative paths are ignored, as the
+/// XDG spec says, so an empty variable can't put the data in the current folder.
+fn data_base(
+    windows: bool,
+    appdata: Option<std::path::PathBuf>,
+    xdg_data_home: Option<std::path::PathBuf>,
+    home: Option<std::path::PathBuf>,
+) -> Option<std::path::PathBuf> {
+    if appdata.is_some() || windows {
+        return appdata;
+    }
+    let absolute = |p: &std::path::PathBuf| p.is_absolute();
+    xdg_data_home.filter(absolute).or_else(|| home.filter(absolute).map(|h| h.join(".local").join("share")))
 }
 
 /// The data folder inside `base`. On the first run after the rename, the old
@@ -937,5 +958,40 @@ mod tests {
         std::fs::remove_file(dir.join("rustyaim.db-wal")).unwrap();
         assert_eq!(db_in(&dir), dir.join("aimadapt.db"));
         assert!(!dir.join("rustyaim.db").exists());
+    }
+
+    /// Paths that are absolute wherever the tests run (`/x` isn't on Windows).
+    fn abs(name: &str) -> Option<std::path::PathBuf> {
+        Some(std::env::temp_dir().join(name))
+    }
+
+    /// `APPDATA` decides on Windows as it always has, and on Linux when it's set.
+    #[test]
+    fn appdata_wins_whenever_it_is_set() {
+        for windows in [true, false] {
+            assert_eq!(data_base(windows, abs("roaming"), abs("xdg"), abs("home")), abs("roaming"));
+        }
+    }
+
+    /// Windows has no fallback: without `APPDATA` there's no data folder, as before.
+    #[test]
+    fn windows_without_appdata_has_no_data_folder() {
+        assert_eq!(data_base(true, None, abs("xdg"), abs("home")), None);
+    }
+
+    /// Linux has no `APPDATA`, so the app, trainer and CLI stopped there with
+    /// "APPDATA isn't set". They now use the XDG data folder.
+    #[test]
+    fn linux_without_appdata_uses_the_xdg_data_folder() {
+        let local_share = abs("home").map(|h| h.join(".local").join("share"));
+        assert_eq!(data_base(false, None, abs("xdg"), abs("home")), abs("xdg"));
+        assert_eq!(data_base(false, None, None, abs("home")), local_share);
+        // A relative XDG_DATA_HOME (an empty one too) is ignored, as the spec says.
+        assert_eq!(data_base(false, None, Some("rel".into()), abs("home")), local_share);
+        assert_eq!(data_base(false, None, Some("".into()), abs("home")), local_share);
+        // With no usable home either, there's no data folder rather than one in the
+        // current folder.
+        assert_eq!(data_base(false, None, None, Some("".into())), None);
+        assert_eq!(data_base(false, None, None, None), None);
     }
 }

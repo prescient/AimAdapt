@@ -34,5 +34,12 @@ features = [
     "ui_bevy_render",
 ]
 
+# For building and testing on Linux: the window needs X11 or Wayland there (Windows
+# needs neither). Wayland is used when the desktop runs it, X11 otherwise.
+[target.'cfg(target_os = "linux")'.dependencies.bevy]
+version = "0.20.1"
+default-features = false
+features = ["x11", "wayland"]
+
 [lints]
 workspace = true
