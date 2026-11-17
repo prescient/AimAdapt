@@ -32,8 +32,8 @@ speed = [4.0, 6.0]
 change_every_s = [0.5, 1.4]
 accel = 45.0
 jump_every_s = [0.8, 2.0]
-jump_height = 1.1
-jump_air_s = 0.65
+jump_height = 2.0
+jump_air_s = 0.9
 
 [scoring]
 per_kill = 0.0

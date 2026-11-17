@@ -124,6 +124,35 @@ mod tests {
         }
     }
 
+    /// Found while playing: in Hop Clicks, Hop Strafe Track and Hop Switch a hop was
+    /// lower than the body was tall, so the top of the body stayed where it was through
+    /// every hop, and a crosshair held there never had to follow it up. A built-in hop
+    /// now lifts the whole body clear of where it stood.
+    #[test]
+    fn built_in_hops_lift_the_body_clear_of_where_it_stood() {
+        let mut hoppers = 0;
+        for e in builtins() {
+            let s = e.scenario.unwrap();
+            let (t, mv) = (&s.targets, &s.targets.movement);
+            if !mv.jumps() {
+                continue;
+            }
+            hoppers += 1;
+            let tall = match t.shape {
+                crate::scenario::Shape::Sphere => 2.0 * t.radius,
+                crate::scenario::Shape::Capsule | crate::scenario::Shape::Box => t.height,
+            };
+            assert!(
+                mv.jump_height >= tall + 0.25,
+                "{}: a {} m hop on a {tall} m body leaves its top {:.2} m covered",
+                e.id,
+                mv.jump_height,
+                tall - mv.jump_height,
+            );
+        }
+        assert!(hoppers >= 3, "the hop scenarios weren't found: {hoppers}");
+    }
+
     #[test]
     fn save_load_and_delete_user_scenarios() {
         let dir = tempfile::tempdir().unwrap();
