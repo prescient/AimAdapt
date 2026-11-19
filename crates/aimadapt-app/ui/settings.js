@@ -263,6 +263,14 @@ function profileEditor(p) {
       </div>
       ${crosshairPreview(st.crosshair)}
     </section>
+    <section class="card"><h2>Sound</h2>
+      <div class="form-grid">
+        ${num_("Volume", "settings.sound.volume", 'min="0" max="100" step="5"', "%", "0 turns every sound off.")}
+        <label class="form-row check"><input type="checkbox" data-pfield="settings.sound.shots" ${st.sound.shots ? "checked" : ""}><span>A soft pop on every shot</span></label>
+        <label class="form-row check"><input type="checkbox" data-pfield="settings.sound.hits" ${st.sound.hits ? "checked" : ""}><span>A tick when a shot hits and a chime when it kills</span></label>
+      </div>
+      <div class="small muted">The trainer makes these sounds itself. A beam only chimes on a kill, since it hits many times a second.</div>
+    </section>
     <section class="card"><h2>Display</h2>
       <div class="form-grid">
         <label class="form-row"><span>Mode</span><select class="select" data-pfield="settings.display.mode">

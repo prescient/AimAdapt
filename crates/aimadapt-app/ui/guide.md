@@ -100,6 +100,8 @@ The trainer is a separate game window. It opens over the app window: centered ac
 - **Top right:** your success rate so far (named for what's counted: "Hit rate", "On target", "On pace" or "Finished in time") beside what it is measured against. That is the goal, or on a stretch or easy run what the plan expects ("about 6 in 10 expected"). Under it are kills and kills a minute. Kill-pace scenarios also show how long you have for the next kill.
 - **Targets:** timed targets show a bar that empties as their time runs out, and change color by wave so newer ones stand out (three red, then three blue, then red again on Timed Grid). Switching targets show a health bar.
 
+**Sounds:** every shot makes a soft pop, so you know you fired, closer to an air gun than a gunshot. A shot that hits adds a short tick, and one that kills a chime. A beam hits many times a second, so it only chimes on a kill. The trainer makes these sounds itself. Set the volume, or turn the pop or the hit sounds off, under Sound on [Settings](#help/settings).
+
 **After a run** the results show your rating and its likely range, your success rate, accuracy, kills, timeouts and average time to kill. Once a scenario has a rating, a line also says how the run went. A run at your level is judged against the 85% goal: you held it, you reached it in a run too short to count, or you came in below. A stretch or easy run is judged against its own plan: "As planned", "Above plan" or "Below plan", with what the plan expected. "As planned" allows for the luck of a run that length and never less than five points either way, so a short run has more room than a long one. A stretch run that holds 85% says so. The line only describes the run: every run counts toward your rating in the same way. A breakthrough gets a banner (see [Adaptive mode](#help/adaptive)).
 
 Under the figures is a small chart of your last ten ratings on the scenario (scores for a standard run), oldest on the left, with this run marked in green. Up is always better, so on a scenario rated in seconds the shortest time is at the top. Runs of an older version of the scenario are left out, and the chart appears from the second run. **V** closes the trainer and opens this run's replay, and **I** opens the scenario's page. In a workout both end the workout where it is. When you close the trainer, the app opens the [session summary](#help/session). On a small window the chart is left out when it doesn't fit, so the keys always stay on the screen.
@@ -305,7 +307,7 @@ A replay is redrawn from what the run recorded: your aim 240 times a second and 
 
 Settings has four tabs: **Aim and display**, **Training**, **KovaaK's** and **Your data**.
 
-**Aim and display** holds your profiles. Each profile has its own sensitivity, DPI, field of view, crosshair and display settings, typically one per game. The trainer plays with the active one (Scenarios shows which); **Use this one** makes the selected profile active. **Add**, **Duplicate** and **Delete** manage them. Changes aren't used until you press **Save settings**; **Undo changes** throws them away.
+**Aim and display** holds your profiles. Each profile has its own sensitivity, DPI, field of view, crosshair, sound and display settings, typically one per game. The trainer plays with the active one (Scenarios shows which); **Use this one** makes the selected profile active. **Add**, **Duplicate** and **Delete** manage them. Changes aren't used until you press **Save settings**; **Undo changes** throws them away.
 
 **Aim**
 - **Game:** pick the game, then type your sensitivity exactly as it is in that game. AimAdapt converts it to cm/360 at your DPI. Choose cm/360 to enter it directly.
@@ -314,6 +316,8 @@ Settings has four tabs: **Aim and display**, **Training**, **KovaaK's** and **Yo
 - **Match my KovaaK's settings** copies the sensitivity, DPI and FOV of your latest KovaaK's run.
 
 **Crosshair:** color, arm length (0 for a dot only), thickness, gap and a center dot, with a preview at actual size. **Show FPS** turns on the counter (F2 toggles it in game).
+
+**Sound:** **Volume** from 0 to 100 (50 to start, and 0 turns every sound off), **A soft pop on every shot**, and **A tick when a shot hits and a chime when it kills** (see [In the trainer](#help/trainer)). The trainer uses it from the next time it opens, after **Save settings**.
 
 **Display**
 - **Mode:** Borderless (full screen at your desktop resolution), Exclusive full screen (any resolution and refresh rate your monitor supports, for example stretched 4:3) or Window.
@@ -359,12 +363,14 @@ Nothing is sent anywhere. Deleting one of your scenarios or workouts removes the
 - **A calibration run on a scenario you've played before.** You were away from it for a few days, so the trainer finds your level again, starting from your old rating (see [Adaptive mode](#help/adaptive)).
 - **No KovaaK's runs.** Settings › KovaaK's shows where AimAdapt looked. It searches every Steam library for FPSAimTrainer\stats. Use **Rescan folder** after installing KovaaK's.
 - **The trainer opens in the wrong place.** It opens over the app window, so move the app window where you want the trainer, or use full screen.
+- **No sound in the trainer.** Check the volume under Sound on Settings, and that the sound device you want is the default one. If the trainer can't open a sound device, it plays silently.
 - **The trainer closed straight away.** The app shows why in a banner, such as a scenario file it couldn't load.
 - **"Couldn't load data" when the app opens.** The message says why. If your history was saved by a newer version of AimAdapt, update AimAdapt to open it; the older version won't write to it.
 
 ## What's new {#whats-new}
 
 **November 2026**
+- New: the trainer has sounds. Every shot makes a soft pop, a hit adds a tick and a kill a chime. Set the volume or turn either off under Sound on Settings. Ratings and scoring are unchanged.
 - The coaching notes are gone: **What to work on** on a scenario's page, the note on the trainer's results screen and the note in the session summary. Some of their advice was wrong. "You stop short" told you to commit to the full flick, but landing a little short and then correcting is how people normally flick. The charts on the Insights tab and the key figures stay. The Worth knowing notes on Today and Progress, about your training habits, stay too. Ratings and scoring are unchanged.
 - New: a check-in on Today. Pick a face for how you feel and one for how much energy you have, and Progress › Skills shows how your runs go with each answer against your other days in the two weeks around them. Once one answer stands clear of the noise over three days, Worth knowing says how far from your usual it puts you.
 - Fixed: the trainer worked out each shot along where the crosshair was a frame earlier, and drew targets a frame behind where they were shot at. A click during a fast flick could hit a target the crosshair had just left, or miss one it was on. Shots now go exactly where the crosshair is drawn. At high frame rates the gap was tiny (a frame is about 1 ms at 750 fps), and it was bigger at low frame rates and when clicking mid-flick. Ratings and scoring are unchanged.

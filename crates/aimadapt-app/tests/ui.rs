@@ -1613,3 +1613,25 @@ fn no_page_draws_coaching_notes() {
     let segments = decl(&insights, "segmentCard");
     assert!(!segments.contains("suggests"), "{segments}");
 }
+
+/// Every field on a settings profile's form names a setting the trainer has, so an edit
+/// can't vanish into a misspelt path. Written when the Sound card's three fields were
+/// added (Nov 19, 2026).
+#[test]
+fn profile_fields_name_real_settings() {
+    let settings = ui("settings.js");
+    let defaults = serde_json::to_value(aimadapt_sim::PlayerSettings::default()).unwrap();
+    let mut paths = Vec::new();
+    for part in settings.split("\"settings.").skip(1) {
+        let path = &part[..part.find('"').unwrap()];
+        assert!(
+            path.split('.').try_fold(&defaults, |v, k| v.get(k)).is_some(),
+            "settings.{path} isn't one of the trainer's settings"
+        );
+        paths.push(path);
+    }
+    assert!(paths.len() >= 15, "{paths:?}");
+    for path in ["sound.volume", "sound.shots", "sound.hits"] {
+        assert!(paths.contains(&path), "the Sound card has no {path} field: {paths:?}");
+    }
+}

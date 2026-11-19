@@ -10,6 +10,7 @@ mod config;
 mod game;
 pub mod record;
 mod results;
+mod sound;
 
 use std::path::PathBuf;
 

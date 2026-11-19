@@ -28,6 +28,7 @@ Requirements: Windows 10 or 11 with the WebView2 runtime (included with Windows 
   - **Tracking:** precise, reactive, control.
   - **Switching:** speed, evasive, stability.
 - Hitscan and beam weapons; click, hold or always-on triggers.
+- Sounds the trainer makes itself (no sound files): a soft pop on every shot, a tick on a hit and a chime on a kill, with a volume and an on/off for each in the settings profile.
 - Sphere, capsule and box targets, with optional lifetime, shrink, and health regeneration with a delay.
 - Timed targets show a time-left bar and change color by wave (three red, then three blue, then three red on Timed Grid), so newer targets stand out from older ones. Optional health bars.
 - Movement: still, strafing, random or curved (steady speed with a turning heading, on Control Track), with optional acceleration (targets slow down and speed back up at each turn, and random turns curve), movement toward and away from you, and jumps with gravity.
@@ -142,7 +143,7 @@ Each run can also be **replayed** from your own view at any speed, with the targ
 
 - **Scenarios** are TOML files. The editor is a form built from the engine's list of supported fields, and checks values as you type. Built-in scenarios are copied before editing. [SCENARIOS.md](SCENARIOS.md) documents every field, the adaptive settings, workouts and programs.
 - **Workouts** are lists of scenarios with a run count and a mode for each, played back to back in one session.
-- **Settings profiles** each hold sensitivity, DPI, FOV, crosshair and display settings, typically one per game. The first profile is matched to your latest KovaaK's run, if there is one.
+- **Settings profiles** each hold sensitivity, DPI, FOV, crosshair, sound and display settings, typically one per game. The first profile is matched to your latest KovaaK's run, if there is one.
 - **Training settings** hold for every profile: the adaptive mix and the daily goal (30 minutes of active time unless you change it).
 
 ![Scenario editor](docs/screenshots/editor.png)
@@ -184,7 +185,7 @@ Needs Rust (stable, MSVC toolchain) and the Visual Studio C++ build tools.
 Releases are for Windows only, but the workspace also builds and tests on Linux, for development. There it needs these packages (Debian and Ubuntu names):
 
 ```bash
-sudo apt install pkg-config libwayland-dev libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev libdbus-1-dev
+sudo apt install pkg-config libwayland-dev libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev libdbus-1-dev libasound2-dev
 ```
 
 On Linux the app, the trainer and `aimadapt-cli` keep their files in `$XDG_DATA_HOME/AimAdapt`, normally `~/.local/share/AimAdapt`, instead of `%APPDATA%\AimAdapt`. Setting `APPDATA` moves them there too. The pre-commit hook builds `dist/AimAdapt` instead of `dist/AimAdapt.exe`.

@@ -1,4 +1,4 @@
-//! The player's own settings: sensitivity, field of view and crosshair. These stay
+//! The player's own settings: sensitivity, field of view, crosshair and sound. These stay
 //! the same across scenarios, so they live in their own file
 //! (`%APPDATA%\AimAdapt\engine.toml`) instead of in each scenario.
 
@@ -21,6 +21,7 @@ pub struct PlayerSettings {
     pub challenge: crate::adaptive::Mix,
     pub show_fps: bool,
     pub crosshair: Crosshair,
+    pub sound: Sound,
 }
 
 impl Default for PlayerSettings {
@@ -33,6 +34,7 @@ impl Default for PlayerSettings {
             challenge: crate::adaptive::Mix::default(),
             show_fps: false,
             crosshair: Crosshair::default(),
+            sound: Sound::default(),
         }
     }
 }
@@ -109,6 +111,24 @@ impl Default for Crosshair {
     }
 }
 
+/// The trainer's sounds, which it makes itself (there are no sound files).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Sound {
+    /// How loud every sound is, 0 (off) to 100.
+    pub volume: u32,
+    /// A soft pop on every shot, so you know you fired.
+    pub shots: bool,
+    /// A tick on a hit and a chime on a kill.
+    pub hits: bool,
+}
+
+impl Default for Sound {
+    fn default() -> Self {
+        Sound { volume: 50, shots: true, hits: true }
+    }
+}
+
 impl PlayerSettings {
     /// Degrees of turn per mouse count.
     pub fn degrees_per_count(&self) -> f32 {
@@ -162,6 +182,9 @@ impl PlayerSettings {
         if !(0.0..=30.0).contains(&c.gap) {
             p.push("crosshair gap must be 0–30 px".into());
         }
+        if self.sound.volume > 100 {
+            p.push("sound volume must be 0–100".into());
+        }
         p
     }
 
@@ -192,6 +215,19 @@ mod tests {
             assert!(!s.problems().is_empty(), "{:?}", s.crosshair);
         }
         assert!(PlayerSettings::default().problems().is_empty());
+    }
+
+    /// Sound was added after engine.toml files were written. A file without it plays the
+    /// default sounds, and a volume past 100 is refused.
+    #[test]
+    fn sound_settings_default_and_are_checked() {
+        let old = "cm_per_360 = 40.0\ndpi = 800\nfov = 103.0\n";
+        let s = PlayerSettings::from_toml(old).unwrap();
+        assert_eq!(s.sound, Sound { volume: 50, shots: true, hits: true });
+        let quiet = PlayerSettings { sound: Sound { volume: 0, shots: false, ..Sound::default() }, ..s.clone() };
+        assert_eq!(PlayerSettings::from_toml(&quiet.to_toml()).unwrap(), quiet);
+        let loud = PlayerSettings { sound: Sound { volume: 101, ..Sound::default() }, ..s };
+        assert!(loud.problems().iter().any(|p| p.contains("sound volume")), "{:?}", loud.problems());
     }
 
     #[test]

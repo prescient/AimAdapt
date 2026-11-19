@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use aimadapt_sim::adaptive::{Knob, Pick, PlanVerdict, judge_against_plan};
-use aimadapt_sim::scenario::{Shape, parse_color};
+use aimadapt_sim::scenario::{Shape, WeaponKind, parse_color};
 use aimadapt_sim::settings::DisplayMode;
 use aimadapt_sim::sim::from_angles;
 use aimadapt_sim::{Event, Input, Phase, PlayerSettings, RunResult, Scenario, Sim};
@@ -31,6 +31,7 @@ use chrono::{Local, NaiveDateTime};
 
 use crate::record::{self, RunInfo};
 use crate::results::{self, Keys, Open, Outcome, StepDone};
+use crate::sound::{self, Speaker};
 
 mod results_panel;
 
@@ -123,11 +124,14 @@ pub fn run(opts: PlayOptions) -> AppExit {
         bot: crate::bot::Bot::new(opts.seed),
     };
     game.begin_step(0);
+    // The bot test plays silently.
+    let speaker = if game.smoke.is_some() { Speaker::default() } else { Speaker::open() };
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin { primary_window: Some(window), ..default() }))
         .insert_resource(ClearColor(Color::srgb(0.05, 0.06, 0.08)))
         .insert_resource(GlobalAmbientLight { color: Color::WHITE, brightness: 600.0, ..default() })
         .insert_resource(game)
+        .insert_resource(speaker)
         .init_resource::<CursorLock>()
         .add_systems(Startup, (setup_cameras, setup_hud))
         .add_systems(Update, frame_systems())
@@ -961,6 +965,7 @@ fn step(
     cursor: Single<&CursorOptions>,
     camera: Single<&Camera, With<PlayerCamera>>,
     window: Single<&Window>,
+    speaker: Res<Speaker>,
     mut game: ResMut<Game>,
 ) {
     let dt = time.delta_secs();
@@ -980,6 +985,12 @@ fn step(
     }
     let was = game.sim.phase();
     let events = game.sim.step(dt, input);
+    // Sounds go out as soon as the shot is worked out, before anything is drawn.
+    let beam = game.sim.scenario().weapon.kind == WeaponKind::Beam;
+    let settings = &game.session.settings.sound;
+    for cue in sound::cues(&events, beam, settings) {
+        speaker.play(cue, sound::gain(settings.volume));
+    }
     let now = game.sim.phase();
     if was == Phase::Countdown && now != Phase::Countdown {
         game.run.started_at = Some(Local::now().naive_local());
