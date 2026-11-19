@@ -37,7 +37,7 @@ Last reviewed: Nov 11, 2026 (after the layout review, the adaptive review and th
 
 ### To do
 - [ ] `todo` P1 Pause menu and pausing on focus loss (Esc quits straight away today).
-- [ ] `todo` P1 Hit and kill sounds (generated, no asset files), with volume in settings.
+- [ ] `todo` P1 Shot, hit and kill sounds (generated, no asset files), with volume in settings. The shot sound (asked for Nov 19, 2026): a short, soft click or puff on every shot, something like an airsoft pop, so you know you fired. Not a gunshot, and quiet enough not to wear on you over hundreds of shots. Our own design: KovaaK's has a sound like this, but don't copy it.
 - [ ] `todo` P2 Measure input-to-photon latency and frame pacing; optional frame cap.
 - [ ] `todo` P2 List the monitor's real video modes in Settings instead of free-typed resolutions (the engine can already read them).
 - [ ] `todo` P2 More crosshair options: outline, and a color change on hit.
@@ -146,6 +146,8 @@ Last reviewed: Nov 11, 2026 (after the layout review, the adaptive review and th
 - [x] Feeling and energy check-ins (Nov 17, 2026): three faces each on Today, saved with the time, so each run counts with the answers it was played with. Progress › Skills shows how runs went with each answer against what's usual for you (each run against what was expected: adaptive runs against the planned chance, scored runs against the scenario's median over two weeks either side; then each checked-in day against the other days within two weeks), averaged over days with a likely range, and a Worth knowing note names the answer furthest from usual once it has three days and is clear of noise.
 
 ### To do
+- [ ] `todo` P1 Remove the text suggestions from the coaching notes (asked for Nov 19, 2026): they aren't accurate. On Timed Flicks the note said "You stop short" and to "commit to the full flick", but landing a little short and then making a small correction is how people normally flick. Covers the What to work on card on Insights, the note on the results screen and the session summary's note. The charts and figures stay. Decide whether the Worth knowing notes on Today and Progress stay too: they're about training habits (warming up, repeating a scenario), not aim technique.
+- [ ] `spike` P2 Research how players really aim before adding suggestions back: what aim coaches and players write about flicking and tracking, and pointing studies (the usual finding is a first movement that lands a little short, then a small correction). Only bring a suggestion back with its threshold checked against that and against real play, not the bot. Goes with "Tune against real play" under Adaptive rating.
 - [ ] `todo` P2 Flick shape from the trace: peak speed, deceleration, and where corrections start.
 - [ ] `todo` P3 Rate of improvement per sub-skill (gain per week), with a projection.
 
