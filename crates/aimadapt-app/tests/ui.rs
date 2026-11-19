@@ -175,7 +175,7 @@ fn every_invoke_names_a_registered_command() {
 }
 
 /// Playtest: whole degrees per second were too coarse; the app shows one decimal,
-/// like the trainer and Insights notes.
+/// like the trainer.
 #[test]
 fn target_speed_shows_one_decimal() {
     let trainer = ui("trainer.js");
@@ -614,7 +614,7 @@ fn scenario_pages_draw_tabs_and_no_jump_buttons() {
     assert!(!kovaaks.contains("insights\""), "a KovaaK's page has no Insights tab");
     assert!(kovaaks.contains("if (!cached) return"), "no history, no tabs");
     // The Overview tab is the bare address; the others add their id.
-    assert!(trainer.contains("scenarioHref(e.id, \"runs\")") && trainer.contains("scenarioHref(e.id, \"insights\")"));
+    assert!(trainer.contains("scenarioHref(e.id, \"runs\")"), "{trainer}");
     // The header's figures line says what the latest rating and best held are.
     let line = decl(&ui("insights.js"), "ratingLine").to_string();
     assert!(line.contains("best held") && line.contains("likely"), "{line}");
@@ -1593,4 +1593,23 @@ fn a_check_in_answer_without_a_range_is_grey() {
     let row = decl(&today, "checkinStatRow");
     assert!(row.contains("s.spread ? changeSpan(s.change, s.spread)"), "{row}");
     assert!(row.contains("class=\"muted\""), "{row}");
+}
+
+/// Feedback, Nov 19, 2026: the coaching notes gave aim advice that was wrong. On Timed
+/// Flicks "You stop short" said to commit to the full flick, but landing a little short
+/// and then correcting is how people normally flick. The notes are gone until advice can
+/// be checked against how players really aim, so no page draws them: not What to work on
+/// on a scenario's page, not the session summary's note.
+#[test]
+fn no_page_draws_coaching_notes() {
+    for (file, src) in scripts() {
+        assert!(!src.contains("What to work on"), "{file} still has the What to work on card");
+        assert!(!src.contains("d.notes"), "{file} still draws a scenario's notes");
+    }
+    let session = ui("session.js");
+    assert!(!session.contains("r.note"), "the session summary still draws a note");
+    // The segments chart only says what happened, not why.
+    let insights = ui("insights.js");
+    let segments = decl(&insights, "segmentCard");
+    assert!(!segments.contains("suggests"), "{segments}");
 }

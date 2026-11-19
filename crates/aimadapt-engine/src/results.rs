@@ -99,25 +99,6 @@ pub fn caption(points: usize, adaptive: bool) -> String {
     format!("Your last {points} {what}, this run marked. Up is better.")
 }
 
-/// Makes text safe for the game font, which has only plain ASCII.
-pub fn game_text(s: &str) -> String {
-    let s = s.replace(" \u{b0}", " deg").replace('\u{b0}', " deg");
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '\u{2013}' | '\u{2014}' | '\u{2212}' => out.push('-'),
-            '\u{d7}' => out.push('x'),
-            '\u{2026}' => out.push_str("..."),
-            '\u{b1}' => out.push_str("+/-"),
-            '\u{2018}' | '\u{2019}' => out.push('\''),
-            '\u{201c}' | '\u{201d}' => out.push('"'),
-            c if c == '\n' || (' '..='~').contains(&c) => out.push(c),
-            _ => out.push('?'),
-        }
-    }
-    out
-}
-
 /// What the key hints depend on.
 #[derive(Debug, Clone, Copy)]
 pub struct Keys {
@@ -224,23 +205,15 @@ const LINE_H: f32 = 26.0;
 /// Height of what surrounds the text: the panel's padding, the gap above the key
 /// hints and a margin to the window's edges.
 const AROUND_H: f32 = 100.0;
-/// Height the chart takes, and the note at its longest.
+/// Height the chart takes.
 const CHART_H: f32 = 110.0;
-const NOTE_H: f32 = 130.0;
 
-/// Whether the chart and the note fit on the results screen: `(chart, note)`.
-/// `text_lines` counts the lines of the results and of the key hints, and
-/// `window_height` is the window's height in the same pixels the text is laid out in.
-/// The chart goes in first. Whatever does not fit is left out, so the key hints
-/// always stay on the screen.
-pub fn room(window_height: f32, text_lines: usize, has_chart: bool, has_note: bool) -> (bool, bool) {
-    let mut used = AROUND_H + text_lines as f32 * LINE_H;
-    let chart = has_chart && used + CHART_H <= window_height;
-    if chart {
-        used += CHART_H;
-    }
-    let note = has_note && used + NOTE_H <= window_height;
-    (chart, note)
+/// Whether the chart fits on the results screen. `text_lines` counts the lines of the
+/// results and of the key hints, and `window_height` is the window's height in the
+/// same pixels the text is laid out in. When it does not fit it is left out, so the
+/// key hints always stay on the screen.
+pub fn room(window_height: f32, text_lines: usize, has_chart: bool) -> bool {
+    has_chart && AROUND_H + text_lines as f32 * LINE_H + CHART_H <= window_height
 }
 
 #[cfg(test)]
@@ -323,24 +296,22 @@ mod tests {
         assert!(!workout_summary(&just_fits).last().unwrap().starts_with("and "));
     }
 
-    /// With the chart and the note added, the results could be taller than the window,
-    /// and what overflows is cut off at both ends: the scenario's name and the keys.
+    /// With the chart added, the results could be taller than the window, and what
+    /// overflows is cut off at both ends: the scenario's name and the keys.
     #[test]
-    fn the_chart_and_the_note_give_way_when_the_window_is_short() {
+    fn the_chart_gives_way_when_the_window_is_short() {
         // One run: nine lines of results and two of keys.
-        assert_eq!(room(900.0, 11, true, true), (true, true));
-        assert_eq!(room(720.0, 11, true, true), (true, true));
+        assert!(room(900.0, 11, true));
+        assert!(room(720.0, 11, true));
         // The longest workout summary: the results, "Workout complete", twelve lines, a gap and the keys.
         let longest = 9 + 1 + SUMMARY_LINES + 1 + 2;
-        assert_eq!(room(900.0, longest, true, true), (true, false));
-        assert_eq!(room(720.0, longest, true, true), (false, false));
+        assert!(room(900.0, longest, true));
+        assert!(!room(720.0, longest, true));
         // A Core Week day: six scenarios.
-        assert_eq!(room(900.0, 19, true, true), (true, true));
-        assert_eq!(room(720.0, 19, true, true), (true, false));
-        // Nothing to show is never shown, and the note does not wait for a chart.
-        assert_eq!(room(900.0, 11, false, false), (false, false));
-        assert_eq!(room(900.0, 11, false, true), (false, true));
-        assert_eq!(room(400.0, 11, true, true), (false, false));
+        assert!(room(720.0, 19, true));
+        // Nothing to show is never shown.
+        assert!(!room(900.0, 11, false));
+        assert!(!room(400.0, 11, true));
     }
 
     #[test]
@@ -417,18 +388,6 @@ mod tests {
     fn the_caption_counts_the_runs_and_names_what_they_are() {
         assert_eq!(caption(8, true), "Your last 8 ratings, this run marked. Up is better.");
         assert_eq!(caption(3, false), "Your last 3 scores, this run marked. Up is better.");
-    }
-
-    /// The game font has only ASCII, and notes are written with degree signs and dashes.
-    #[test]
-    fn game_text_is_always_ascii() {
-        assert_eq!(game_text("sits 0.40\u{b0} behind"), "sits 0.40 deg behind");
-        assert_eq!(game_text("12.0 \u{b0}/s"), "12.0 deg/s");
-        let all = game_text(
-            "a\u{2013}b\u{2014}c\u{2212}d \u{d7} e\u{2026} \u{b1}f \u{2018}g\u{2019} \u{201c}h\u{201d} \u{e9}\nz",
-        );
-        assert_eq!(all, "a-b-c-d x e... +/-f 'g' \"h\" ?\nz");
-        assert!(all.is_ascii());
     }
 
     #[test]

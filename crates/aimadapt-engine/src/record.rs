@@ -335,8 +335,8 @@ pub fn save(db_path: &Path, info: &RunInfo) -> Result<i64, String> {
         .ok_or_else(|| "the run was not found after saving".to_string())
 }
 
-/// The chart and note for the results screen of the run just saved. `None` when
-/// they can't be read: the results then show without them.
+/// The chart for the results screen of the run just saved. `None` when it can't
+/// be read: the results then show without it.
 pub fn extras(db_path: &Path, scenario: &Scenario, run_id: i64) -> Option<aimadapt_core::results::RunExtras> {
     let db = Db::open(db_path).ok()?;
     aimadapt_core::results::for_run(&db, &scenario.name, run_id).ok().flatten()

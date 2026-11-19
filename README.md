@@ -31,7 +31,7 @@ Requirements: Windows 10 or 11 with the WebView2 runtime (included with Windows 
 - Sphere, capsule and box targets, with optional lifetime, shrink, and health regeneration with a delay.
 - Timed targets show a time-left bar and change color by wave (three red, then three blue, then three red on Timed Grid), so newer targets stand out from older ones. Optional health bars.
 - Movement: still, strafing, random or curved (steady speed with a turning heading, on Control Track), with optional acceleration (targets slow down and speed back up at each turn, and random turns curve), movement toward and away from you, and jumps with gravity.
-- The results screen shows the run's rating and how it went against its plan, a chart of your last ten ratings on the scenario, and one note from your recent runs. V opens the run's replay in the app and I the scenario's page.
+- The results screen shows the run's rating and how it went against its plan, and a chart of your last ten ratings on the scenario. V opens the run's replay in the app and I the scenario's page.
 
 ![Results screen](docs/screenshots/game-results.jpg)
 
@@ -93,7 +93,7 @@ Today shows today's day. Scenarios › Program shows the whole week, with every 
 Four pages, in the sidebar:
 
 - **Today:** today's program workout with each drill's runs and 85% rating, and Start session, Continue session or Repeat session. Also what your last session changed (each scenario's rating before and after, with the change and its likely range), a check-in with three faces each for how you feel and how much energy you have, the week at a glance (**Whole week** opens the Program tab), your favorites and what you played last (each with Play, or Start session for a workout), and the top note from your history.
-- **Scenarios:** everything you can play or have played (the trainer's scenarios, your workouts and your KovaaK's scenarios) in three tabs across the page: Browse (every scenario, the trainer's and your KovaaK's files, with tag chips; it opens on what you played last once you've played something), Workouts and Program (the week's plan: a card for each day with its drills, your progress and a Start session button). Browse and Workouts are tables you can sort by any column, with a search over names, skills, tags and descriptions and filters for skill, type, played or not, your own scenarios and favorites. One column shows your 85% rating on an AimAdapt scenario or your best score where there is no rating. Star favorites and hide what you don't want listed. Each scenario and workout has its own page: Play (adaptive) and Standard run at the top with your latest rating, then three tabs: Overview (key figures, rating chart, latest runs and a few notes), Insights (what to work on and the charts below) and Runs (every run, with replays). A KovaaK's scenario's page has Overview (score history) and Runs.
+- **Scenarios:** everything you can play or have played (the trainer's scenarios, your workouts and your KovaaK's scenarios) in three tabs across the page: Browse (every scenario, the trainer's and your KovaaK's files, with tag chips; it opens on what you played last once you've played something), Workouts and Program (the week's plan: a card for each day with its drills, your progress and a Start session button). Browse and Workouts are tables you can sort by any column, with a search over names, skills, tags and descriptions and filters for skill, type, played or not, your own scenarios and favorites. One column shows your 85% rating on an AimAdapt scenario or your best score where there is no rating. Star favorites and hide what you don't want listed. Each scenario and workout has its own page: Play (adaptive) and Standard run at the top with your latest rating, then three tabs: Overview (key figures, rating chart and latest runs), Insights (the charts below) and Runs (every run, with replays). A KovaaK's scenario's page has Overview (score history) and Runs.
 - **Progress:** three tabs.
   - **Skills:** the skill profile (the change in each of the nine sub-skills, each group and overall, measured from the end of your first day on each drill) beside the notes (every note, most important first), reps and carry-over (a By drill carry-over summary after three sessions of a drill, then rep 1 against the last rep of each drill and how much of the previous session's rating carried over), how your runs go with each check-in answer (feeling bad, okay or good, and low, okay or high energy, each against what's usual for you), and the week's results (each day done, partial or missed, its minutes and its main drills against the same day last week). Every change shows its likely range and is greyed when zero is inside it, because a change that small may be noise.
   - **Benchmarks from KovaaK's:** your Voltaic Season 5 bests, read from your KovaaK's stats.
@@ -104,7 +104,7 @@ Four pages, in the sidebar:
   - **KovaaK's:** the stats folder, import status and sensitivity history.
   - **Your data:** where your files are.
 
-Closing the trainer opens a session summary: each scenario's rating before and after the session, the change with its likely range, breakthroughs, the time played and one note.
+Closing the trainer opens a session summary: each scenario's rating before and after the session, the change with its likely range, breakthroughs and the time played.
 
 Help is at the bottom of the sidebar, and every page links to its section of the user guide.
 
@@ -127,11 +127,10 @@ Every run stores each target, each shot, tracking samples 30 times a second, a 2
 - **Flick speed:** time to kill vs. difficulty, as a Fitts' law fit and throughput in bits per second.
 - **By direction and distance:** hit rate and median time in 8 flick directions and 5 distance bands.
 - **Shot placement** relative to the target, aligned to the flick direction: overshooting vs. stopping short, and any vertical bias.
-- **Reaction time:** a histogram, with the median compared with earlier runs. On lifetime ratings a note splits the rating into your reaction time and the part you control, which improves by more than the rating shows.
+- **Reaction time:** a histogram, with the median compared with earlier runs.
 - **Tracking:** time on target by target speed, recovery after direction changes, how far ahead of or behind the target you are, unbroken stretches on target (half your time on target came in stretches at least this long), and centering (median distance from the target's center while on it).
 - **Within a run:** success in 10-second segments.
 - **Planned against actual** (on the Runs tab, and for all scenarios on Progress › Skills): for runs at your level, stretch runs and easy runs, how many you played, the chance the trainer planned, how often you succeeded and the gap. A gap is marked only when it is bigger than luck explains for that many targets, and never under five points. The Runs table also names each run's kind and tags breakthroughs.
-- **Notes** generated from the figures above.
 
 Each run can also be **replayed** from your own view at any speed, with the targets, your shots and the crosshair's trail. Replays are redrawn from the aim trace and the targets' positions, recorded 60 times a second, so they're small and record nothing outside the trainer. Each scenario keeps the replays of its latest 50 runs and of its best run; older runs keep their stats and insights without one.
 

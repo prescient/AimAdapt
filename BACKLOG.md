@@ -140,13 +140,12 @@ Last reviewed: Nov 11, 2026 (after the layout review, the adaptive review and th
   - Hit rate and time by direction and by distance.
   - Shot placement, reaction histogram and 10-second segments.
   - Tracking: time on target by speed, recovery after direction changes, and lead or lag.
-  - Coaching notes.
 - [x] Skill profile across the nine sub-skills, three groups and overall (on Progress › Skills).
 - [x] Replay a run from its aim trace and recorded target positions (60 Hz), from the player's view, at any speed.
 - [x] Feeling and energy check-ins (Nov 17, 2026): three faces each on Today, saved with the time, so each run counts with the answers it was played with. Progress › Skills shows how runs went with each answer against what's usual for you (each run against what was expected: adaptive runs against the planned chance, scored runs against the scenario's median over two weeks either side; then each checked-in day against the other days within two weeks), averaged over days with a likely range, and a Worth knowing note names the answer furthest from usual once it has three days and is clear of noise.
+- [x] Coaching notes removed (asked for Nov 19, 2026): their advice wasn't accurate. On Timed Flicks "You stop short" said to commit to the full flick, but landing a little short and then making a small correction is how people normally flick. Gone: What to work on on a scenario's page, the note on the trainer's results screen and the session summary's note, with the code that wrote them (`insights::notes`, `results::top_note`, the recap's note). The charts, the key figures and the Worth knowing notes on Today and Progress stay: those are about training habits, not aim technique. The old notes are in git history for the spike below.
 
 ### To do
-- [ ] `todo` P1 Remove the text suggestions from the coaching notes (asked for Nov 19, 2026): they aren't accurate. On Timed Flicks the note said "You stop short" and to "commit to the full flick", but landing a little short and then making a small correction is how people normally flick. Covers the What to work on card on Insights, the note on the results screen and the session summary's note. The charts and figures stay. Decide whether the Worth knowing notes on Today and Progress stay too: they're about training habits (warming up, repeating a scenario), not aim technique.
 - [ ] `spike` P2 Research how players really aim before adding suggestions back: what aim coaches and players write about flicking and tracking, and pointing studies (the usual finding is a first movement that lands a little short, then a small correction). Only bring a suggestion back with its threshold checked against that and against real play, not the bot. Goes with "Tune against real play" under Adaptive rating.
 - [ ] `todo` P2 Flick shape from the trace: peak speed, deceleration, and where corrections start.
 - [ ] `todo` P3 Rate of improvement per sub-skill (gain per week), with a projection.

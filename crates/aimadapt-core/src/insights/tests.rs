@@ -115,23 +115,6 @@ pub(crate) fn clicking_run(rating: f64) -> EngineRun {
     }
 }
 
-/// Bug: the notes compared the latest rating with the first one of any knob, so
-/// after a scenario moved from lifetime to kill pace it said you were better
-/// "than your first rating" in a different measure.
-#[test]
-fn notes_compare_ratings_of_the_same_knob() {
-    let mut db = Db::open_in_memory().unwrap();
-    save(&mut db, 1, &clicking_run(1.2));
-    for (n, rating) in [(2, 0.8), (3, 0.7)] {
-        let mut run = clicking_run(rating);
-        run.knob = Some("kill_pace".into());
-        save(&mut db, n, &run);
-    }
-    let i = scenario(&db, "Timed Flicks").unwrap().unwrap();
-    let note = i.notes.iter().find(|n| n.title.starts_with("85% kill pace")).expect("the rating note");
-    assert!(note.body.contains("Your first rating was 0.80 s 1 run ago"), "{}", note.body);
-}
-
 /// Two versions of one scenario: the old one rated 0.40 s and 0.42 s (runs 1 and 2), the
 /// current one 0.70 s and 0.66 s (runs 3 and 4).
 fn two_versions() -> Db {
@@ -153,18 +136,14 @@ fn overview_best_comes_from_the_current_version() {
     assert!((fastest - 0.66 * 0.8).abs() < 1e-9, "best held of the current version only: {fastest}");
 }
 
-/// Bug: the run list and the notes mixed versions of a scenario. Runs from other
-/// versions stay in the list but are marked, and the notes use only the current one.
+/// Bug: the run list mixed versions of a scenario. Runs from other versions stay in
+/// the list but are marked.
 #[test]
-fn insights_mark_and_note_only_the_current_version() {
+fn insights_mark_runs_of_other_versions() {
     let i = scenario(&two_versions(), "Timed Flicks").unwrap().unwrap();
     assert_eq!(i.runs.len(), 4, "every run stays in the list");
     let current: Vec<bool> = i.runs.iter().map(|r| r.current).collect();
     assert_eq!(current, [false, false, true, true]);
-    let note = i.notes.iter().find(|n| n.title.starts_with("85% speed")).expect("the rating note");
-    assert!(note.body.contains("Your first rating was 0.70 s 1 run ago"), "{}", note.body);
-    let best = i.notes.iter().find(|n| n.title.starts_with("Best held")).expect("the best held note");
-    assert_eq!(best.title, "Best held: 0.53 s", "not the old version's 0.32 s");
 }
 
 /// Two runs without a hash are one version, and a run with a hash is another.
@@ -232,18 +211,6 @@ fn clicking_insights_find_the_weak_side_and_overshoot() {
     assert!((m.vertical_deg.unwrap() + 0.2).abs() < 1e-9);
     let r = i.reaction.as_ref().unwrap();
     assert!((r.median_ms - 220.0).abs() < 1.0, "{r:?}");
-    let titles: Vec<&str> = i.notes.iter().map(|n| n.title.as_str()).collect();
-    assert!(titles.contains(&"Weakest direction: left"), "{titles:?}");
-    assert!(titles.contains(&"You overshoot"), "{titles:?}");
-    assert!(titles.contains(&"Shots land low"), "{titles:?}");
-    assert!(titles.contains(&"85% speed: 0.62 s"), "{titles:?}");
-    assert!(titles.contains(&"Best held: 0.50 s"), "{titles:?}");
-    let better = &i.notes.iter().find(|n| n.title.starts_with("85% speed")).unwrap().body;
-    assert!(better.contains("better by 0.18 s"), "{better}");
-    // Scoring review, finding 9: the reaction floor. 0.80 → 0.62 s is 23% on the
-    // rating, but the part you control fell from 0.58 to 0.40 s, 31%.
-    let floor = &i.notes.iter().find(|n| n.title == "Of that, 0.22 s is reaction").unwrap().body;
-    assert!(floor.contains("other 0.40 s") && floor.contains("down 31%") && floor.contains("down 23%"), "{floor}");
 
     let o = overview(&db).unwrap();
     assert_eq!(o[0].scenario, "Timed Flicks");
@@ -297,9 +264,7 @@ fn switching_insights_split_acquisition_from_time_on_target() {
     assert!((sw.acquire_ms.unwrap() - 250.0).abs() < 1.0, "{sw:?}");
     assert!((sw.engaged_on_target.unwrap() - 0.8).abs() < 1e-9, "travel isn't counted: {sw:?}");
     assert!(i.tracking.as_ref().unwrap().on_target < 0.5, "all samples: {:?}", i.tracking);
-    let titles: Vec<&str> = i.notes.iter().map(|n| n.title.as_str()).collect();
     assert!((sw.kills_per_min.unwrap() - 80.0).abs() < 1e-6, "80 kills in a minute: {sw:?}");
-    assert!(titles.contains(&"Switching: 80 kills a minute"), "{titles:?}");
     // Not shown for other categories.
     save(&mut db, 2, &clicking_run(0.6));
     assert!(scenario(&db, "Timed Flicks").unwrap().unwrap().switching.is_none());
@@ -374,9 +339,6 @@ fn tracking_insights_measure_lag_and_recovery() {
     assert_eq!(t.recovery_s, Some(0.2), "{t:?}");
     assert!(t.after_change[0].on_target < 0.01);
     assert!(i.runs[0].on_target.unwrap() > 0.6);
-    let titles: Vec<&str> = i.notes.iter().map(|n| n.title.as_str()).collect();
-    assert!(titles.contains(&"You trail the target"), "{titles:?}");
-    assert!(titles.iter().any(|t| t.starts_with("Direction changes cost you 200 ms")), "{titles:?}");
 }
 
 /// How long a scenario's insights take to load with a long tracking history: 200

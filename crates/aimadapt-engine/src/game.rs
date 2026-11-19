@@ -199,7 +199,7 @@ struct Run {
     best: Option<f64>,
     /// What happened when the finished run was saved: its id, or why not.
     saved: Option<Result<i64, String>>,
-    /// The chart and note for the results screen, read once after the run is saved.
+    /// The chart for the results screen, read once after the run is saved.
     extras: Option<aimadapt_core::results::RunExtras>,
     /// The finished run's result, built once: the results screen reads it every
     /// frame, and building it copies the run's whole telemetry.

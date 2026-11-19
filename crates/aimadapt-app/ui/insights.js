@@ -120,7 +120,7 @@ function insightRunsTable(d) {
         <td class="r mono">${r.throughput ? `${r.throughput.toFixed(1)}` : "–"}</td><td class="r mono">${ms(r.reaction_ms)}</td><td class="r mono">${share(r.on_target)}</td><td class="muted">${esc(r.workout ?? "")}</td>
         <td>${r.replay ? `<a href="#replay/${r.run_id}" title="Watch this run again">Replay</a>` : ""}</td></tr>`).join("")}
     </tbody></table></div>
-    ${shown.some((r) => r.rating !== null && !r.current) ? `<div class="small muted" style="margin-top:8px">Greyed ratings are from before this scenario's settings changed. They're on another scale, so your best, the rating chart and the notes leave them out.</div>` : ""}
+    ${shown.some((r) => r.rating !== null && !r.current) ? `<div class="small muted" style="margin-top:8px">Greyed ratings are from before this scenario's settings changed. They're on another scale, so your best and the rating chart leave them out.</div>` : ""}
     ${rows.length > RUNS_SHOWN ? `<button type="button" class="link-btn" data-action="all-runs">${ui.allRuns ? `Show the latest ${RUNS_SHOWN}` : `Show all ${rows.length} runs`}</button>` : ""}`;
 }
 
@@ -135,16 +135,6 @@ function ratingLine(d, adaptive) {
     ? ` (likely ${fmtKnob(d.knob, low).split(" ")[0]}–${fmtKnob(d.knob, high)})` : "";
   const held = fastest !== null ? ` · best held ${fmtKnob(d.knob, fastest)}` : "";
   return `85% ${knobWord(d.knob)} ${fmtKnob(d.knob, latest.rating)}${range}${held}`;
-}
-
-// "What to work on": the first `limit` notes, or all of them. `moreHref` links to the
-// rest when some are left out.
-function workOnCard(d, limit = Infinity, moreHref = "") {
-  const shown = d.notes.slice(0, limit);
-  return `<section class="card"><h2>What to work on</h2>
-    ${shown.length ? `<div class="grid">${shown.map((n) => `<div class="note"><div class="note-title">${esc(n.title)}</div><div class="note-body">${esc(n.body)}</div></div>`).join("")}</div>` : `<div class="note-body">Play a few more runs for notes on what to work on.</div>`}
-    ${shown.length < d.notes.length && moreHref ? `<a class="small" href="${moreHref}">All ${d.notes.length} notes on the Insights tab</a>` : ""}
-  </section>`;
 }
 
 // The latest five runs with their Replay links, and a link to the whole table.
@@ -365,6 +355,5 @@ function trackingCard(t) {
 function segmentCard(segs) {
   return `<section class="card"><div class="card-head"><h2>Within a run</h2><span class="small muted">Share hit by 10-second segment</span></div>
     ${bars(segs.filter((s) => s.success !== null).map((s) => [`${s.from_s}–${s.to_s} s`, s.success, ""]), share)}
-    <div class="small muted">A drop at the end suggests fatigue; a low start suggests you need a warm-up.</div>
   </section>`;
 }

@@ -85,11 +85,6 @@ function sessionScenarios(r) {
   </section>`;
 }
 
-function sessionNote(r) {
-  if (!r.note) return "";
-  return `<section class="card"><div class="card-head"><h2>Worth knowing</h2><a class="small" href="${scenarioHref(`name:${r.note.scenario}`, "insights")}">${esc(r.note.scenario)}</a></div>${noteView({ title: r.note.title, body: r.note.body })}</section>`;
-}
-
 function sessionPage() {
   const wait = waitFor([sessionNeed()], "Loading the session…");
   if (wait) return wait;
@@ -98,7 +93,7 @@ function sessionPage() {
     return `<div class="page">${sessionHead(null)}
       <div class="empty-state">No sessions in the trainer yet. Play a scenario and its summary shows here.</div></div>`;
   }
-  return `<div class="page">${sessionHead(r)}${sessionTiles(r)}${sessionScenarios(r)}${sessionNote(r)}</div>`;
+  return `<div class="page">${sessionHead(r)}${sessionTiles(r)}${sessionScenarios(r)}</div>`;
 }
 
 // ---------- the card on Today ----------

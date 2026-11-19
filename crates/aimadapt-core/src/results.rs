@@ -1,8 +1,8 @@
 //! What the trainer's results screen shows beyond the run's own figures: a chart of
-//! the scenario's recent ratings and the most useful note. Built on [`insights`].
+//! the scenario's recent ratings. Built on [`insights`].
 
 use crate::db::{Db, DbError};
-use crate::insights::{self, Note, NoteKind, RunPoint};
+use crate::insights::{self, RunPoint};
 use crate::knob::Knob;
 
 /// Runs on the results chart, counting the one just played.
@@ -36,7 +36,6 @@ impl RunChart {
 pub struct RunExtras {
     pub run_id: i64,
     pub chart: Option<RunChart>,
-    pub note: Option<Note>,
     /// The run recorded replay frames, so it can be watched again.
     pub replay: bool,
 }
@@ -63,27 +62,7 @@ pub fn chart(runs: &[RunPoint], run_id: i64) -> Option<RunChart> {
     (last_is_this && points.len() >= 2).then_some(RunChart { knob, points })
 }
 
-/// The kinds of note in the order they are chosen from: what a player can change on
-/// the next run comes ahead of what only describes them.
-const NOTE_ORDER: [NoteKind; 9] = [
-    NoteKind::Shots,
-    NoteKind::Entries,
-    NoteKind::Tracking,
-    NoteKind::Direction,
-    NoteKind::Segments,
-    NoteKind::Curve,
-    NoteKind::Switching,
-    NoteKind::Reaction,
-    NoteKind::Fitts,
-];
-
-/// The note most worth showing after a run. Never a rating note: the screen already
-/// shows the rating.
-pub fn top_note(notes: &[Note]) -> Option<&Note> {
-    NOTE_ORDER.iter().find_map(|kind| notes.iter().find(|n| n.kind == *kind))
-}
-
-/// The chart, note and replay flag for the results screen of the run `run_id` of
+/// The chart and replay flag for the results screen of the run `run_id` of
 /// `base_scenario`. `None` when the scenario has no insights or the run is not in them.
 pub fn for_run(db: &Db, base_scenario: &str, run_id: i64) -> Result<Option<RunExtras>, DbError> {
     let Some(i) = insights::scenario(db, base_scenario)? else {
@@ -92,12 +71,7 @@ pub fn for_run(db: &Db, base_scenario: &str, run_id: i64) -> Result<Option<RunEx
     let Some(this) = i.runs.iter().find(|r| r.run_id == run_id) else {
         return Ok(None);
     };
-    Ok(Some(RunExtras {
-        run_id,
-        chart: chart(&i.runs, run_id),
-        note: top_note(&i.notes).cloned(),
-        replay: this.replay,
-    }))
+    Ok(Some(RunExtras { run_id, chart: chart(&i.runs, run_id), replay: this.replay }))
 }
 
 #[cfg(test)]
@@ -131,10 +105,6 @@ mod tests {
 
     fn rated(n: i64) -> Vec<RunPoint> {
         (1..=n).map(|i| point(i, true, Some("lifetime"), Some(1.0 + i as f64 / 10.0), true)).collect()
-    }
-
-    fn note(kind: NoteKind, title: &str) -> Note {
-        Note { kind, title: title.into(), body: String::new() }
     }
 
     #[test]
@@ -197,28 +167,6 @@ mod tests {
         assert!(!c(Some("lifetime")).higher_is_better());
         assert!(c(Some("target_speed")).higher_is_better());
         assert!(c(None).higher_is_better());
-    }
-
-    #[test]
-    fn the_top_note_is_never_the_rating() {
-        assert_eq!(top_note(&[note(NoteKind::Rating, "a"), note(NoteKind::Rating, "b")]), None);
-        assert_eq!(top_note(&[]), None);
-    }
-
-    #[test]
-    fn the_top_note_puts_what_you_can_change_first() {
-        let all = [
-            note(NoteKind::Rating, "rating"),
-            note(NoteKind::Curve, "curve"),
-            note(NoteKind::Direction, "direction"),
-            note(NoteKind::Shots, "shots"),
-            note(NoteKind::Reaction, "reaction"),
-        ];
-        assert_eq!(top_note(&all).unwrap().title, "shots");
-        let some = [note(NoteKind::Curve, "curve"), note(NoteKind::Reaction, "reaction")];
-        assert_eq!(top_note(&some).unwrap().title, "curve");
-        let two = [note(NoteKind::Shots, "first"), note(NoteKind::Shots, "second")];
-        assert_eq!(top_note(&two).unwrap().title, "first");
     }
 
     #[test]

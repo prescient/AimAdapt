@@ -1,6 +1,6 @@
 //! What the last session changed: each scenario's rating before and after it, the
-//! breakthroughs, the time played and one note. The app shows it when the trainer
-//! closes and on Today.
+//! breakthroughs and the time played. The app shows it when the trainer closes and
+//! on Today.
 
 use chrono::{NaiveDate, NaiveDateTime};
 
@@ -8,11 +8,7 @@ use super::{Row, Spread, load, sd_of_diff};
 use crate::db::{Db, DbError};
 use crate::insights::{self, Held};
 use crate::knob::Knob;
-use crate::results;
 use crate::training::{self, Session, TimeSettings};
-
-/// How many of the session's scenarios are asked for a note, most played first.
-const NOTE_SCENARIOS: usize = 3;
 
 /// A program drill's change since the same day of the program before.
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
@@ -52,15 +48,6 @@ pub struct ScenarioRecap {
     pub week: Option<WeekChange>,
 }
 
-/// The note shown with the session, and the scenario it is about.
-#[cfg_attr(feature = "serde", derive(serde::Serialize))]
-#[derive(Debug, Clone, PartialEq)]
-pub struct RecapNote {
-    pub scenario: String,
-    pub title: String,
-    pub body: String,
-}
-
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct SessionRecap {
@@ -76,7 +63,6 @@ pub struct SessionRecap {
     /// In the order first played.
     pub scenarios: Vec<ScenarioRecap>,
     pub breakthroughs: usize,
-    pub note: Option<RecapNote>,
 }
 
 /// The session that holds the latest trainer run, or `None` before the first one.
@@ -89,17 +75,14 @@ pub fn last_session(db: &Db, time: &TimeSettings) -> Result<Option<SessionRecap>
     let Some(session) = sessions.iter().rev().find(|s| s.start <= last.finished && last.finished <= s.end) else {
         return Ok(None);
     };
-    let mut recap = recap_of(session, &rows);
-    recap.note = note(db, &recap.scenarios)?;
-    Ok(Some(recap))
+    Ok(Some(recap_of(session, &rows)))
 }
 
 fn inside(session: &Session, r: &Row) -> bool {
     session.start <= r.finished && r.finished <= session.end
 }
 
-/// The session's figures from every trainer run, oldest first. The note is added by
-/// [`last_session`].
+/// The session's figures from every trainer run, oldest first.
 fn recap_of(session: &Session, rows: &[Row]) -> SessionRecap {
     let mut names: Vec<&str> = Vec::new();
     for r in rows.iter().filter(|r| inside(session, r)) {
@@ -124,7 +107,6 @@ fn recap_of(session: &Session, rows: &[Row]) -> SessionRecap {
         length_s: session.length_s(),
         breakthroughs: scenarios.iter().map(|s| s.breakthroughs).sum(),
         scenarios,
-        note: None,
     }
 }
 
@@ -187,26 +169,6 @@ fn scenario_recap(name: &str, all: &[&Row], session: &Session) -> ScenarioRecap 
     out
 }
 
-/// The scenarios to ask for a note: the most played first, and of two played as
-/// much, the one played later.
-fn note_order(scenarios: &[ScenarioRecap]) -> Vec<&str> {
-    let mut order: Vec<(usize, &ScenarioRecap)> = scenarios.iter().enumerate().collect();
-    order.sort_by(|a, b| b.1.runs.cmp(&a.1.runs).then(b.0.cmp(&a.0)));
-    order.into_iter().take(NOTE_SCENARIOS).map(|(_, s)| s.scenario.as_str()).collect()
-}
-
-/// The session's note: the top note (see [`results::top_note`]) of the most played
-/// scenario that has one.
-fn note(db: &Db, scenarios: &[ScenarioRecap]) -> Result<Option<RecapNote>, DbError> {
-    for name in note_order(scenarios) {
-        let Some(i) = insights::scenario(db, name)? else { continue };
-        if let Some(n) = results::top_note(&i.notes) {
-            return Ok(Some(RecapNote { scenario: name.to_string(), title: n.title.clone(), body: n.body.clone() }));
-        }
-    }
-    Ok(None)
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -214,7 +176,6 @@ mod tests {
     use chrono::Duration;
 
     use super::*;
-    use crate::insights::tests::{clicking_run, save};
     use crate::parse::RunFile;
     use crate::telemetry::EngineRun;
 
@@ -504,42 +465,5 @@ mod tests {
         let r = recap(&db);
         let order: Vec<(&str, usize)> = r.scenarios.iter().map(|s| (s.scenario.as_str(), s.runs)).collect();
         assert_eq!(order, [("B Flicks", 2), ("A Flicks", 1)]);
-    }
-
-    fn with_runs(name: &str, runs: usize) -> ScenarioRecap {
-        ScenarioRecap {
-            scenario: name.into(),
-            runs,
-            knob: None,
-            before: None,
-            before_date: None,
-            after: None,
-            change: None,
-            spread: None,
-            breakthroughs: 0,
-            best_score: None,
-            week: None,
-        }
-    }
-
-    #[test]
-    fn the_note_comes_from_the_most_played_scenarios() {
-        let three = [with_runs("a", 2), with_runs("b", 5), with_runs("c", 5)];
-        assert_eq!(note_order(&three), ["c", "b", "a"], "of two played as much, the later one first");
-        let five: Vec<ScenarioRecap> = (0..5).map(|i| with_runs(&format!("s{i}"), 1 + i)).collect();
-        assert_eq!(note_order(&five), ["s4", "s3", "s2"]);
-
-        let mut db = Db::open_in_memory().unwrap();
-        assert_eq!(note(&db, &three).unwrap(), None, "no insights for those scenarios");
-        for (n, rating) in [(1, 1.2), (2, 1.1), (3, 1.0)] {
-            save(&mut db, n, &clicking_run(rating));
-        }
-        let r = recap(&db);
-        let name = &r.scenarios[0].scenario;
-        let insights = insights::scenario(&db, name).unwrap().unwrap();
-        let expected = results::top_note(&insights.notes).map(|n| (n.title.clone(), n.body.clone()));
-        assert!(expected.is_some(), "the data has a note to show");
-        let got = r.note.as_ref().map(|n| (n.scenario.as_str(), n.title.clone(), n.body.clone()));
-        assert_eq!(got, expected.map(|(t, b)| (name.as_str(), t, b)));
     }
 }

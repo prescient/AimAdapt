@@ -630,13 +630,13 @@ function trainerDetail(e, askedTab) {
       d.tracking ? trackingCard(d.tracking) : "",
       d.segments.some((x) => x.success !== null) ? segmentCard(d.segments) : "",
     ].filter(Boolean);
-    body = `${workOnCard(d)}
-      ${sections.length ? `<div class="insights-head"><h2>Insights</h2><span class="small muted">From your last ${d.recent_runs} runs</span></div><div class="insight-cols">${sections.join("")}</div>` : ""}`;
+    body = sections.length
+      ? `<div class="insights-head"><h2>Insights</h2><span class="small muted">From your last ${d.recent_runs} runs</span></div><div class="insight-cols">${sections.join("")}</div>`
+      : `<section class="card"><div class="note-body">Play a few more runs for the charts here.</div></section>`;
   } else {
     body = `<section class="kpis" aria-label="Key figures">${insightKpis(d, false).slice(0, 4).join("")}</section>
       ${adaptive.length ? ratingCard(d, adaptive) : ""}
-      ${latestRunsCard(d, scenarioHref(e.id, "runs"))}
-      ${workOnCard(d, 3, scenarioHref(e.id, "insights"))}`;
+      ${latestRunsCard(d, scenarioHref(e.id, "runs"))}`;
   }
   return `${header}${row}${body}`;
 }
