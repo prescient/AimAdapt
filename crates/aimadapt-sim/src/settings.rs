@@ -111,21 +111,41 @@ impl Default for Crosshair {
     }
 }
 
-/// The trainer's sounds, which it makes itself (there are no sound files).
+/// The trainer's sound: a pop on every shot, which it makes itself (there are no sound files).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(from = "SavedSound")]
 pub struct Sound {
-    /// How loud every sound is, 0 (off) to 100.
+    /// How loud the pop is, 0 (off) to 100.
     pub volume: u32,
-    /// A soft pop on every shot, so you know you fired.
-    pub shots: bool,
-    /// A tick on a hit and a chime on a kill.
-    pub hits: bool,
 }
 
 impl Default for Sound {
     fn default() -> Self {
-        Sound { volume: 50, shots: true, hits: true }
+        Sound { volume: 50 }
+    }
+}
+
+/// `sound` as it may be saved. From 19 to 21 November 2026 it also had two switches: `shots` for the pop and
+/// `hits` for a tick and a chime on hits. They went with the tick and the chime, and files that still have them
+/// load: a pop that was switched off is kept off, at volume 0.
+#[derive(Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct SavedSound {
+    volume: u32,
+    shots: bool,
+    #[serde(rename = "hits")]
+    _hits: Option<serde::de::IgnoredAny>,
+}
+
+impl Default for SavedSound {
+    fn default() -> Self {
+        SavedSound { volume: Sound::default().volume, shots: true, _hits: None }
+    }
+}
+
+impl From<SavedSound> for Sound {
+    fn from(s: SavedSound) -> Sound {
+        Sound { volume: if s.shots { s.volume } else { 0 } }
     }
 }
 
@@ -218,16 +238,30 @@ mod tests {
     }
 
     /// Sound was added after engine.toml files were written. A file without it plays the
-    /// default sounds, and a volume past 100 is refused.
+    /// default pop, and a volume past 100 is refused.
     #[test]
     fn sound_settings_default_and_are_checked() {
         let old = "cm_per_360 = 40.0\ndpi = 800\nfov = 103.0\n";
         let s = PlayerSettings::from_toml(old).unwrap();
-        assert_eq!(s.sound, Sound { volume: 50, shots: true, hits: true });
-        let quiet = PlayerSettings { sound: Sound { volume: 0, shots: false, ..Sound::default() }, ..s.clone() };
+        assert_eq!(s.sound, Sound { volume: 50 });
+        let quiet = PlayerSettings { sound: Sound { volume: 0 }, ..s.clone() };
         assert_eq!(PlayerSettings::from_toml(&quiet.to_toml()).unwrap(), quiet);
-        let loud = PlayerSettings { sound: Sound { volume: 101, ..Sound::default() }, ..s };
+        assert!(!quiet.to_toml().contains("shots"), "{}", quiet.to_toml());
+        let loud = PlayerSettings { sound: Sound { volume: 101 }, ..s };
         assert!(loud.problems().iter().any(|p| p.contains("sound volume")), "{:?}", loud.problems());
+        let typo = format!("{old}[sound]\nvolumee = 40\n");
+        assert!(PlayerSettings::from_toml(&typo).is_err(), "an unknown sound key is still refused");
+    }
+
+    /// Bug guard (21 Nov 2026): the tick, the chime and their two switches went, and profiles saved with the
+    /// switches (19-21 Nov) have to keep loading instead of being set aside as unusable.
+    #[test]
+    fn sound_saved_with_the_old_switches_still_loads() {
+        let base = "cm_per_360 = 40.0\ndpi = 800\nfov = 103.0\n";
+        let on = format!("{base}[sound]\nvolume = 70\nshots = true\nhits = false\n");
+        assert_eq!(PlayerSettings::from_toml(&on).unwrap().sound, Sound { volume: 70 });
+        let off = format!("{base}[sound]\nvolume = 70\nshots = false\nhits = true\n");
+        assert_eq!(PlayerSettings::from_toml(&off).unwrap().sound, Sound { volume: 0 }, "a pop switched off stays off");
     }
 
     #[test]

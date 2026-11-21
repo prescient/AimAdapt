@@ -208,6 +208,8 @@ svg text { font-family: var(--font); }
 
 /* Play screen and scenario editor */
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px 18px; align-items: start; }
+/* Keeps the empty columns, so a card with one field shows it as wide as the fields on the other cards. */
+.form-grid.keep-columns { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
 .form-row { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .form-row > span:first-child, .form-row > label { font-size: 12px; font-weight: 600; color: var(--muted); }
 .form-row.check { flex-direction: row; align-items: center; gap: 10px; min-height: 44px; }

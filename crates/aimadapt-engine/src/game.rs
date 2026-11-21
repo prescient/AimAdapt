@@ -985,11 +985,11 @@ fn step(
     }
     let was = game.sim.phase();
     let events = game.sim.step(dt, input);
-    // Sounds go out as soon as the shot is worked out, before anything is drawn.
+    // The pop goes out as soon as the shot is worked out, before anything is drawn.
     let beam = game.sim.scenario().weapon.kind == WeaponKind::Beam;
     let settings = &game.session.settings.sound;
-    for cue in sound::cues(&events, beam, settings) {
-        speaker.play(cue, sound::gain(settings.volume));
+    if sound::pops(&events, beam, settings) {
+        speaker.play(sound::gain(settings.volume));
     }
     let now = game.sim.phase();
     if was == Phase::Countdown && now != Phase::Countdown {

@@ -1615,8 +1615,9 @@ fn no_page_draws_coaching_notes() {
 }
 
 /// Every field on a settings profile's form names a setting the trainer has, so an edit
-/// can't vanish into a misspelt path. Written when the Sound card's three fields were
-/// added (Nov 19, 2026).
+/// can't vanish into a misspelt path. Written when the Sound card's fields were added
+/// (Nov 19, 2026); its two switches went with the tick and the chime (Nov 21), and a field
+/// left behind for one would fail here.
 #[test]
 fn profile_fields_name_real_settings() {
     let settings = ui("settings.js");
@@ -1630,8 +1631,6 @@ fn profile_fields_name_real_settings() {
         );
         paths.push(path);
     }
-    assert!(paths.len() >= 15, "{paths:?}");
-    for path in ["sound.volume", "sound.shots", "sound.hits"] {
-        assert!(paths.contains(&path), "the Sound card has no {path} field: {paths:?}");
-    }
+    assert!(paths.len() >= 10, "{paths:?}");
+    assert!(paths.contains(&"sound.volume"), "the Sound card has no volume field: {paths:?}");
 }

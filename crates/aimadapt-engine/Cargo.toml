@@ -11,7 +11,7 @@ aimadapt-core.workspace = true
 aimadapt-sim.workspace = true
 aimadapt-sce.workspace = true
 
-# The shot, hit and kill sounds (see src/sound.rs): WASAPI on Windows, ALSA on Linux
+# The shot sound (see src/sound.rs): WASAPI on Windows, ALSA on Linux
 # (building there needs the ALSA headers, libasound2-dev).
 cpal = "0.18.2"
 
@@ -23,7 +23,7 @@ tempfile.workspace = true
 version = "0.20.1"
 default-features = false
 # Only what a 3D trainer with a text HUD needs: no glTF, scenes, picking or gamepads, and
-# no Bevy audio (the trainer's few sounds go straight to cpal, for a short delay).
+# no Bevy audio (the shot sound goes straight to cpal, for a short delay).
 features = [
     "std",
     "multi_threaded",
