@@ -38,6 +38,7 @@ All of these have regression tests (see [TESTING.md](TESTING.md)).
 ## Notes: Nov 24, 2026
 
 ### Not working
+- **Fixed: "on tracking I just get a constant buzz".** Held KovaaK's tracking weapons fire 100 shots a second and each started the shot sound. Now held fire sounds on the press and then every 250 ms, as the player suggested; clicks sound every time. Regression test: 2 s of held fire was 200 sounds, now 8.
 - **The shot pop "sounds terrible".** The player found a pistol recording they liked, low-passed at 3 kHz and cut to 150 ms. Its pack has no license we could find, so it isn't in AimAdapt: the trainer now plays a WAV of the player's own from `sounds/shot.wav` in the data folder instead of the pop, and theirs is there.
 - **Fixed: the lines on far walls don't render cleanly** ("they will be missing, come in and out"). The grid texture had no smaller copies for distant walls, so where a line is thinner than a pixel each pixel caught a line or missed it. It now has every mip level and is sampled between them and anisotropically, so far lines fade evenly and hold still. Regression test on the texture; the bot's screenshots of a wall 80 m away show whole lines where they were dashes.
 

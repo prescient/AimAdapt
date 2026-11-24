@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use aimadapt_sim::adaptive::{Knob, Pick, PlanVerdict, judge_against_plan};
-use aimadapt_sim::scenario::{Shape, WeaponKind, parse_color};
+use aimadapt_sim::scenario::{Shape, parse_color};
 use aimadapt_sim::settings::DisplayMode;
 use aimadapt_sim::sim::from_angles;
 use aimadapt_sim::{Event, Input, Phase, PlayerSettings, RunResult, Scenario, Sim};
@@ -121,6 +121,7 @@ pub fn run(opts: PlayOptions) -> AppExit {
         fps: 0.0,
         world_dirty: true,
         display_note: None,
+        pacer: sound::Pacer::default(),
         video_mode_set: false,
         smoke: opts.smoke.map(|dir| Smoke { dir, taken: 0, after_finish: 0.0 }),
         bot: crate::bot::Bot::new(opts.seed),
@@ -227,6 +228,8 @@ struct Game {
     fps: f32,
     world_dirty: bool,
     display_note: Option<String>,
+    /// Which shots pop: every click, and held fire four times a second.
+    pacer: sound::Pacer,
     video_mode_set: bool,
     smoke: Option<Smoke>,
     bot: crate::bot::Bot,
@@ -1022,12 +1025,13 @@ fn step(
         input = bot.input(sim, &mut look.yaw, &mut look.pitch, dt);
     }
     let was = game.sim.phase();
+    let pressed = input.fire_pressed;
     let events = game.sim.step(dt, input);
     // The pop goes out as soon as the shot is worked out, before anything is drawn.
-    let beam = game.sim.scenario().weapon.kind == WeaponKind::Beam;
-    let settings = &game.session.settings.sound;
-    if sound::pops(&events, beam, settings) {
-        speaker.play(sound::gain(settings.volume));
+    let Game { sim, session, pacer, .. } = &mut *game;
+    let heard = &session.settings.sound;
+    if pacer.pops(time.elapsed_secs_f64(), pressed, &events, &sim.scenario().weapon, heard) {
+        speaker.play(sound::gain(heard.volume));
     }
     let now = game.sim.phase();
     if was == Phase::Countdown && now != Phase::Countdown {

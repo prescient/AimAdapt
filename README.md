@@ -28,7 +28,7 @@ Requirements: Windows 10 or 11 with the WebView2 runtime (included with Windows 
   - **Tracking:** precise, reactive, control.
   - **Switching:** speed, evasive, stability.
 - Hitscan and beam weapons; click, hold or always-on triggers.
-- A sound the trainer makes itself (no sound files): a soft pop on every shot, hit or miss, with its volume in the settings profile. Or your own: a WAV file saved as `sounds\shot.wav` in the data folder plays in its place.
+- A sound the trainer makes itself (no sound files): a soft pop on every click, hit or miss, and four times a second while a held weapon fires, with its volume in the settings profile. Or your own: a WAV file saved as `sounds\shot.wav` in the data folder plays in its place.
 - Sphere, capsule and box targets, with optional lifetime, shrink, and health regeneration with a delay.
 - Timed targets show a time-left bar. With several up at once, as on Timed Grid, their color says which to go for: red is closest to running out, then blue, then white. With one at a time, each new target switches color. Optional health bars.
 - Movement: still, strafing, random or curved (steady speed with a turning heading, on Control Track), with optional acceleration (targets slow down and speed back up at each turn, and random turns curve), movement toward and away from you, and jumps with gravity.

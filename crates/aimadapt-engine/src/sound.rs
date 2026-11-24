@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Sender};
 
 use aimadapt_sim::Event;
+use aimadapt_sim::scenario::{Trigger, Weapon, WeaponKind};
 use aimadapt_sim::settings::Sound;
 use bevy::prelude::Resource;
 
@@ -29,11 +30,40 @@ pub fn gain(volume: u32) -> f32 {
     v * v
 }
 
-/// Whether one frame's events pop: any hitscan shot does, hit or miss. A long frame can
-/// fire several shots, and it still pops once. A beam makes no sound: it isn't a click,
-/// and it hits 60 times a second.
-pub fn pops(events: &[Event], beam: bool, sound: &Sound) -> bool {
-    sound.volume > 0 && !beam && events.iter().any(|e| matches!(e, Event::Hit { .. } | Event::Miss))
+/// Least time between pops while a held trigger keeps firing. A tracking weapon held down
+/// fires up to 100 shots a second, and a pop on each one ran together into a buzz.
+pub const HELD_EVERY: f64 = 0.25;
+
+/// Decides which frames pop, so the sound says "you fired" without running together.
+#[derive(Debug, Default)]
+pub struct Pacer {
+    /// When the last pop played, in seconds on the trainer's clock.
+    last: Option<f64>,
+    /// The trigger has been pressed since the last pop.
+    pressed: bool,
+}
+
+impl Pacer {
+    /// Whether this frame pops, at `now` seconds, with `pressed` set when the trigger went
+    /// down this frame. A frame pops when it fires a hitscan shot (hit or miss) that is the
+    /// first since a press, or comes [`HELD_EVERY`] or more after the last pop. So every
+    /// click pops, and held fire pops when it starts and then four times a second. A long
+    /// frame can fire several shots, and it still pops once. A beam makes no sound (it isn't
+    /// a click, and it hits 60 times a second), and nor does a weapon that fires with
+    /// nothing held: there's no press for the sound to answer.
+    pub fn pops(&mut self, now: f64, pressed: bool, events: &[Event], weapon: &Weapon, sound: &Sound) -> bool {
+        self.pressed |= pressed;
+        let silent = sound.volume == 0 || weapon.kind == WeaponKind::Beam || weapon.trigger == Trigger::Always;
+        let shot = events.iter().any(|e| matches!(e, Event::Hit { .. } | Event::Miss));
+        if silent || !shot {
+            return false;
+        }
+        let due = self.pressed || self.last.is_none_or(|t| now - t >= HELD_EVERY);
+        if due {
+            (self.last, self.pressed) = (Some(now), false);
+        }
+        due
+    }
 }
 
 /// The pop's samples at `rate` samples a second: one channel, starting and ending at 0.
@@ -468,27 +498,66 @@ mod tests {
     }
 
     /// Hits and kills used to add a tick and a chime; since 21 Nov 2026 every shot only pops.
-    #[test]
-    fn every_shot_pops_hit_or_miss_and_nothing_else_does() {
-        let on = sound(50);
-        assert!(pops(&[Event::Miss], false, &on));
-        assert!(pops(&[Event::Hit { id: 1 }], false, &on));
-        assert!(pops(&[Event::Hit { id: 1 }, Event::Killed { id: 1 }], false, &on));
-        assert!(!pops(&[Event::Spawned { id: 2 }, Event::TimedOut { id: 1 }, Event::Finished], false, &on));
-        assert!(!pops(&[], false, &on));
+    fn weapon(kind: WeaponKind, trigger: Trigger) -> Weapon {
+        Weapon { kind, trigger, ..Weapon::default() }
     }
 
     #[test]
-    fn a_beam_makes_no_sound() {
+    fn every_click_pops_hit_or_miss_and_nothing_else_does() {
+        let (on, click) = (sound(50), weapon(WeaponKind::Hitscan, Trigger::Click));
+        let mut p = Pacer::default();
+        assert!(p.pops(0.0, true, &[Event::Miss], &click, &on));
+        assert!(p.pops(0.01, true, &[Event::Hit { id: 1 }], &click, &on), "a fresh click pops however soon");
+        assert!(p.pops(0.02, true, &[Event::Hit { id: 1 }, Event::Killed { id: 1 }], &click, &on));
+        let others = [Event::Spawned { id: 2 }, Event::TimedOut { id: 1 }, Event::Finished];
+        assert!(!p.pops(1.0, true, &others, &click, &on));
+        assert!(!p.pops(2.0, false, &[], &click, &on));
+        // A click the weapon wasn't ready for still pops on the shot it fires next.
+        assert!(!p.pops(3.0, true, &[], &click, &on));
+        assert!(p.pops(3.01, false, &[Event::Miss], &click, &on));
+    }
+
+    // Playtest (Nov 24, 2026): "on tracking I just get a constant buzz". A KovaaK's tracking
+    // weapon held down fires 100 shots a second, and each one started a pop, up to 16 at once.
+    #[test]
+    fn held_fire_pops_when_pressed_and_then_four_times_a_second() {
+        let (on, auto) = (sound(50), weapon(WeaponKind::Hitscan, Trigger::Hold));
+        let mut p = Pacer::default();
+        let mut popped = Vec::new();
+        // Two seconds at 800 frames a second, holding from the start, a shot every 10 ms.
+        for frame in 0..1600 {
+            let now = f64::from(frame) / 800.0;
+            let events = if frame % 8 == 0 { vec![Event::Hit { id: 1 }] } else { Vec::new() };
+            if p.pops(now, frame == 0, &events, &auto, &on) {
+                popped.push(now);
+            }
+        }
+        assert_eq!(popped.first(), Some(&0.0), "the press pops at once");
+        assert_eq!(popped.len(), 8, "{popped:?}");
+        assert!(popped.windows(2).all(|w| w[1] - w[0] >= HELD_EVERY), "{popped:?}");
+        // Let go and press again: the first shot pops at once, within the quarter second.
+        let last = *popped.last().unwrap();
+        assert!(p.pops(last + 0.1, true, &[Event::Miss], &auto, &on));
+        assert!(!p.pops(last + 0.11, false, &[Event::Miss], &auto, &on));
+    }
+
+    #[test]
+    fn a_beam_or_fire_with_nothing_held_makes_no_sound() {
         let on = sound(50);
-        assert!(!pops(&[Event::Hit { id: 1 }, Event::Hit { id: 1 }], true, &on));
-        assert!(!pops(&[Event::Hit { id: 1 }, Event::Killed { id: 1 }], true, &on));
+        let mut p = Pacer::default();
+        for w in [weapon(WeaponKind::Beam, Trigger::Hold), weapon(WeaponKind::Beam, Trigger::Always)] {
+            assert!(!p.pops(0.0, true, &[Event::Hit { id: 1 }, Event::Hit { id: 1 }], &w, &on));
+            assert!(!p.pops(1.0, true, &[Event::Hit { id: 1 }, Event::Killed { id: 1 }], &w, &on));
+        }
+        let always = weapon(WeaponKind::Hitscan, Trigger::Always);
+        assert!(!p.pops(5.0, false, &[Event::Hit { id: 1 }], &always, &on));
     }
 
     #[test]
     fn volume_0_turns_the_pop_off() {
-        assert!(!pops(&[Event::Miss], false, &sound(0)));
-        assert!(pops(&[Event::Miss], false, &sound(5)));
+        let click = weapon(WeaponKind::Hitscan, Trigger::Click);
+        assert!(!Pacer::default().pops(0.0, true, &[Event::Miss], &click, &sound(0)));
+        assert!(Pacer::default().pops(0.0, true, &[Event::Miss], &click, &sound(5)));
     }
 
     #[test]
