@@ -1,6 +1,6 @@
 # Adaptive play for imported KovaaK's scenarios (BACKLOG 9, Phase 5)
 
-Status: approved Nov 24, 2026; building. Step 1 (the sim) is done.
+Status: approved Nov 24, 2026; building. Steps 1 (the sim) and 2 (the trainer) are done.
 
 Today a `.sce` file the trainer can play runs only in standard mode: `aimadapt-engine` refuses `--sce` with `--adaptive`, and the app offers only Play in AimAdapt (standard). This plan lets every playable file run adaptively, with a rating kept per file, so Play on an imported Viscose Easier scenario gives an adaptive run with a rating.
 

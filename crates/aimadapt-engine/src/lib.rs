@@ -34,7 +34,7 @@ pub use results::Open;
 /// - `--play <scenario id or .toml path> [--adaptive]`: one scenario.
 /// - `--workout <workout id or .toml path>`: every run of a workout in turn.
 /// - `--program <id> [--day mon…sun]`: a program day (today by default).
-/// - `--sce <file>`: a KovaaK's scenario file, on its own map (standard mode).
+/// - `--sce <file> [--adaptive]`: a KovaaK's scenario file, on its own map.
 ///
 /// Options: `--profile <name>` (default: the active settings profile), `--db <file>`, `--windowed`, `--no-save`, `--seed <n>`,
 /// `--handoff` (the app is waiting: the results screen offers keys that open a page in it), and
@@ -121,25 +121,10 @@ fn parse_and_run(args: &[String]) -> Result<(), String> {
     };
     let mut program_day = None;
     let (mut steps, workout_name) = match (program_id, workout_id, id) {
-        // A KovaaK's scenario file, played on its own map (standard mode for now).
+        // A KovaaK's scenario file, played on its own map.
         _ if sce_path.is_some() => {
             let path = sce_path.as_deref().unwrap_or(std::path::Path::new(""));
-            if adaptive {
-                return Err("imported KovaaK's scenarios play in standard mode for now".into());
-            }
-            let imported = aimadapt_sce::import(path).map_err(|r| format!("can't play this yet: {}", join(&r)))?;
-            for n in &imported.notes {
-                eprintln!("aimadapt: note: {n}");
-            }
-            let step = PlayStep {
-                scenario: imported.scenario,
-                adaptive: false,
-                label: None,
-                rep: 1,
-                reps: 1,
-                block: workout::Block::None,
-            };
-            (vec![step], None)
+            (vec![sce_step(path, adaptive)?], None)
         }
         (Some(p), _, _) => {
             let prog = program::resolve(&p)?;
@@ -214,6 +199,16 @@ fn parse_and_run(args: &[String]) -> Result<(), String> {
         shot,
     });
     Ok(())
+}
+
+/// The run of a KovaaK's scenario file: standard, or adaptive on the knob its kind gets (speed or kill
+/// pace, see `aimadapt_sim::adaptive::imported_rule`). The importer's notes go to the console.
+fn sce_step(path: &std::path::Path, adaptive: bool) -> Result<PlayStep, String> {
+    let imported = aimadapt_sce::import(path).map_err(|r| format!("can't play this yet: {}", join(&r)))?;
+    for n in &imported.notes {
+        eprintln!("aimadapt: note: {n}");
+    }
+    Ok(PlayStep { scenario: imported.scenario, adaptive, label: None, rep: 1, reps: 1, block: workout::Block::None })
 }
 
 /// `--anchor x,y,width`: the app window's outer position and width in physical
@@ -313,6 +308,22 @@ mod tests {
         assert_eq!(game::window_position([100, 50, 2400], 2120), [240, 50]);
         // A game window wider than the app still centers on it.
         assert_eq!(game::window_position([500, 80, 1200], 2120), [40, 80]);
+    }
+
+    /// Phase 5 (BACKLOG 9): `--sce` with `--adaptive` was refused ("imported KovaaK's scenarios play in
+    /// standard mode for now"). It now plays the file adaptively, on the knob its kind gets.
+    #[test]
+    fn a_kovaaks_file_plays_adaptively() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../aimadapt-sce/tests/fixtures");
+        for (name, knob) in [("Slow Strafe", "time_scale"), ("Slow Taps", "kill_pace")] {
+            let step = sce_step(&dir.join(format!("AimAdapt Test - {name}.sce")), true).unwrap();
+            assert!(step.adaptive, "{name}");
+            let s = &step.scenario;
+            assert_eq!(record::knob_id(s.adaptive.resolve(s).knob), knob, "{name}");
+        }
+        let standard = sce_step(&dir.join("AimAdapt Test - Slow Strafe.sce"), false).unwrap();
+        assert!(!standard.adaptive);
+        assert!(sce_step(&dir.join("AimAdapt Test - Slow Gate.sce"), true).is_err(), "a file that can't play");
     }
 
     /// Bot runs must never land in a player's history, so `--smoke` needs `--db`.

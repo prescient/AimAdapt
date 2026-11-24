@@ -417,6 +417,51 @@ mod tests {
         assert_eq!(run.field("Play Time"), Some("20.000"));
     }
 
+    /// Phase 5 (BACKLOG 9): an adaptive run of an imported file is kept as a built-in's is, under
+    /// "<name> (Adaptive)" in the adaptive mode with the file's fingerprint and the speed knob, and the
+    /// next run starts from it. A standard run of the same file stays an imported run under the plain name,
+    /// with its own best, and never feeds the rating. A changed file starts over.
+    #[test]
+    fn an_imported_files_adaptive_runs_keep_its_rating_apart() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../aimadapt-sce/tests/fixtures");
+        let scenario = aimadapt_sce::import(&dir.join("AimAdapt Test - Slow Strafe.sce")).unwrap().scenario;
+        let name = scenario.name.clone();
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("t.db");
+        let settings = PlayerSettings::default();
+        let first = play(&scenario, true, None);
+        save(&path, &info(&scenario, &first, &settings, 1)).unwrap();
+        let standard = play(&scenario, false, None);
+        save(&path, &info(&scenario, &standard, &settings, 3)).unwrap();
+
+        let db = Db::open(&path).unwrap();
+        let rows: Vec<(String, String, Option<String>)> = db
+            .conn()
+            .prepare(
+                "SELECT r.scenario, r.mode, e.knob FROM runs r JOIN engine_runs e ON e.run_id = r.id ORDER BY r.id",
+            )
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        let adaptive = (format!("{name} (Adaptive)"), MODE_ADAPTIVE.to_string(), Some("time_scale".to_string()));
+        assert_eq!(rows[0], adaptive);
+        assert_eq!((rows[1].0.as_str(), rows[1].1.as_str()), (name.as_str(), aimadapt_core::db::MODE_IMPORTED));
+
+        let rating = f64::from(first.adaptive.as_ref().unwrap().value);
+        let p = prior(&db, &scenario, finished() + chrono::Duration::days(1)).expect("the next run starts from it");
+        let start = play(&scenario, true, Some(p)).adaptive.unwrap().start_value;
+        assert!((f64::from(start) / rating - 1.0).abs() < 0.003, "starts at {start}, the rating was {rating}");
+        assert!(best_rating(&db, &scenario).is_some());
+        assert_eq!(best_score(&db, &scenario), Some(f64::from(standard.score)), "the standard best is its own");
+        assert_eq!(db.imported_played(&name).unwrap().0, 1, "one standard run counted as played in AimAdapt");
+
+        let mut changed = scenario.clone();
+        changed.world.as_mut().unwrap().source_hash = "another file".into();
+        assert!(prior(&db, &changed, finished()).is_none(), "a changed file starts over");
+    }
+
     #[test]
     fn engine_runs_show_up_like_kovaaks_runs() {
         let scenario = Scenario { name: "Test Grid".into(), ..Default::default() };

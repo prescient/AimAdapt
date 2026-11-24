@@ -1337,7 +1337,7 @@ fn update_hud(
 ) {
     let sim = &game.sim;
     let st = sim.stats();
-    texts.p0().0 = format!("{:.1}", sim.time_left().max(0.0));
+    texts.p0().0 = format!("{:.1}", timer_secs(sim).max(0.0));
     let acc = st.accuracy().map_or("-".into(), |a| format!("{:.1}%", a * 100.0));
     match sim.rating() {
         Some((knob, value, rate)) => {
@@ -1622,10 +1622,19 @@ fn smoke_capture(mut commands: Commands, time: Res<Time>, mut game: ResMut<Game>
     }
 }
 
-/// A rating in the knob's units. The game font has no degree sign, so speeds read
-/// "deg/s" in game.
+/// A rating in the knob's units. The game font has no degree sign or times sign, so
+/// speeds read "deg/s" and an imported file's speed "x0.85" in game.
 fn fmt_value(knob: Knob, v: f32) -> String {
-    knob.format(v).replace("°/s", "deg/s")
+    knob.format(v).replace("°/s", "deg/s").replace('×', "x")
+}
+
+/// Seconds left on the run's timer: game seconds, as KovaaK's counts them, except on
+/// a speed run, whose game clock changes rate with the speed, so it counts real ones.
+fn timer_secs(sim: &Sim) -> f32 {
+    match sim.rating() {
+        Some((Knob::TimeScale, _, _)) => sim.real_time_left(),
+        _ => sim.time_left(),
+    }
 }
 
 fn kills_line(sim: &Sim) -> String {
@@ -1638,8 +1647,8 @@ fn kills_line(sim: &Sim) -> String {
 
 fn rate_word(knob: Knob, per_target: bool) -> &'static str {
     match knob {
-        Knob::TargetSpeed if per_target => "Finished in time",
-        Knob::TargetSpeed => "On target",
+        Knob::TargetSpeed | Knob::TimeScale if per_target => "Finished in time",
+        Knob::TargetSpeed | Knob::TimeScale => "On target",
         // Precise Track: size rated per tracking segment.
         Knob::Radius if !per_target => "On target",
         Knob::KillPace => "On pace",
@@ -2116,6 +2125,25 @@ mod tests {
         assert_eq!(rate_word(Knob::Radius, false), "On target");
         assert_eq!(rate_word(Knob::Radius, true), "Hit rate");
         assert_eq!(rate_word(Knob::KillPace, false), "On pace");
+        // An imported file's speed: tracking files count time on target, timed ones each bot.
+        assert_eq!(rate_word(Knob::TimeScale, false), "On target");
+        assert_eq!(rate_word(Knob::TimeScale, true), "Finished in time");
+    }
+
+    /// Phase 5 (BACKLOG 9): an imported file's speed reads "x0.85" in the game font, and a speed run's timer
+    /// counts real seconds (its game clock runs at the file's rate times the speed). A standard run of the same
+    /// file counts game seconds, as before: Slow Strafe's 16 s at 0.8.
+    #[test]
+    fn a_speed_run_shows_its_speed_and_real_seconds_left() {
+        assert_eq!(fmt_value(Knob::TimeScale, 0.851), "x0.85");
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../aimadapt-sce/tests/fixtures");
+        let mut s = aimadapt_sce::import(&dir.join("AimAdapt Test - Slow Strafe.sce")).unwrap().scenario;
+        s.timing.countdown_s = 0.0;
+        let speed = Sim::adaptive(s.clone(), 1, None, aimadapt_sim::adaptive::Mix::Balanced);
+        assert_eq!(speed.rating().map(|r| r.0), Some(Knob::TimeScale));
+        assert!((timer_secs(&speed) - 20.0).abs() < 1e-3, "{}", timer_secs(&speed));
+        let standard = Sim::new(s, 1);
+        assert!((timer_secs(&standard) - 16.0).abs() < 1e-3, "{}", timer_secs(&standard));
     }
 
     /// Playtest: after alt-tabbing out and back, the mouse was hard to lock to the

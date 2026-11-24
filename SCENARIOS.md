@@ -261,4 +261,4 @@ Workout items can carry a `block` (`warmup`, `main`, `secondary` or `maintenance
 cargo run -p aimadapt-engine -- builtin:static-grid --windowed
 ```
 
-The argument can be `builtin:<name>`, `user:<file name without .toml>`, or a path to any `.toml` file. Options: `--adaptive`, `--workout <id>` or `--program <id> [--day mon…sun]` (instead of a scenario), `--windowed`, `--no-save`, `--db <file>` and `--seed <n>`. The same seed with the same mouse input replays the same run.
+The argument can be `builtin:<name>`, `user:<file name without .toml>`, or a path to any `.toml` file. Options: `--adaptive`, `--workout <id>` or `--program <id> [--day mon…sun]` (instead of a scenario), `--windowed`, `--no-save`, `--db <file>` and `--seed <n>`. The same seed with the same mouse input replays the same run. `--sce <file>` plays a KovaaK's scenario file instead, and `--sce <file> --adaptive` plays it adaptively on its speed or kill pace (see Imported KovaaK's scenarios above).
