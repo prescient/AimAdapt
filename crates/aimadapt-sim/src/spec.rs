@@ -228,10 +228,10 @@ pub const FIELDS: &[Field] = &[
         "targets.alternate_colors",
         "Targets",
         "Alternate colors",
-        "Targets that time out switch between the two colors, so each new one looks different from the last.",
+        "Timed targets show which to go for. With several up, the one closest to running out takes the first color, the next the second and the rest white. With one at a time, each new one switches between the two.",
         Kind::Toggle,
     ),
-    f("targets.alt_color", "Targets", "Second color", "Used by every other target when colors alternate.", Kind::Color),
+    f("targets.alt_color", "Targets", "Second color", "The second color when colors alternate.", Kind::Color),
     f("targets.health_bar", "Targets", "Health bar", "Show each target's health above it.", Kind::Toggle),
     f(
         "targets.timer_bar",

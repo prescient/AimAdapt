@@ -35,6 +35,12 @@ All of these have regression tests (see [TESTING.md](TESTING.md)).
 - **Insights for switching** shows kills a minute, acquisition time (kill to reaching the next target) and on-target share while killing, as separate numbers.
 - Not done yet: offering another calibration run after a long break, and kill pace for Timed Grid if the bars and colors aren't enough (both in [BACKLOG.md](BACKLOG.md)).
 
+## Notes: Nov 23, 2026
+
+### Not working
+- **Fixed: Timed Grid's colors don't say which target to go for.** Wanted three colors. With two colors by wave, once a whole wave was up all three targets were one color. They're now colored by time left: the one closest to running out is red, the next blue and the newest white, and when one goes the others move up a color, so "go for red" always holds, in whatever order you clear them. Regression test on the colors.
+- **Fixed: the shot pop is tinny** ("less tingy, more bass and oomph"). Nearly half of its energy was above 5 kHz and 2% below 300 Hz. It's now a low thump (falling from 220 to 110 Hz) under a softer puff of air: 56% of its energy below 300 Hz and 3% above 5 kHz, about as loud to the ear as before. Regression test on its spectrum.
+
 ## Session 3: Nov 5, 2026 (Core Week, Thursday)
 
 ### Not working

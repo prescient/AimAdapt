@@ -98,9 +98,9 @@ The trainer is a separate game window. It opens over the app window: centered ac
 - **Top left:** on a calibration run, "Calibration run" with your rating ("85%: 0.62 s"). On every other run there are two lines: the kind of run with its difficulty, then what to expect. A stretch run reads "Stretch run: 0.52 s" over "About 6 in 10 expected", an easy run "Easy run: 0.71 s" over "About 19 in 20 expected", and a run at your level "At your level: 0.60 s" over "Goal 85%". A calibration run after a long break also says how many days it has been.
 - **Top center:** the time left.
 - **Top right:** your success rate so far (named for what's counted: "Hit rate", "On target", "On pace" or "Finished in time") beside what it is measured against. That is the goal, or on a stretch or easy run what the plan expects ("about 6 in 10 expected"). Under it are kills and kills a minute. Kill-pace scenarios also show how long you have for the next kill.
-- **Targets:** timed targets show a bar that empties as their time runs out, and change color by wave so newer ones stand out (three red, then three blue, then red again on Timed Grid). Switching targets show a health bar.
+- **Targets:** timed targets show a bar that empties as their time runs out. With several up at once, as on Timed Grid, their color says which to go for: the one closest to running out is red, the next blue and the newest white. When one goes, the others move up a color. With one at a time, each new target switches between red and blue. Switching targets show a health bar.
 
-**Sound:** every shot makes a soft pop, hit or miss, so you know you fired, closer to an air gun than a gunshot. It's the only sound: hits and kills make none, and neither does a beam. The trainer makes the pop itself. Set its volume, or turn it off, under Sound on [Settings](#help/settings).
+**Sound:** every shot makes a soft, low pop, hit or miss, so you know you fired: a thump with a puff of air, closer to an air gun than a gunshot. It's the only sound: hits and kills make none, and neither does a beam. The trainer makes the pop itself. Set its volume, or turn it off, under Sound on [Settings](#help/settings).
 
 **After a run** the results show your rating and its likely range, your success rate, accuracy, kills, timeouts and average time to kill. Once a scenario has a rating, a line also says how the run went. A run at your level is judged against the 85% goal: you held it, you reached it in a run too short to count, or you came in below. A stretch or easy run is judged against its own plan: "As planned", "Above plan" or "Below plan", with what the plan expected. "As planned" allows for the luck of a run that length and never less than five points either way, so a short run has more room than a long one. A stretch run that holds 85% says so. The line only describes the run: every run counts toward your rating in the same way. A breakthrough gets a banner (see [Adaptive mode](#help/adaptive)).
 
@@ -167,7 +167,7 @@ There are 29 built-ins across nine sub-skills, at least two for each. In the Cor
 | Wide Flicks | One small untimed target at a time, always far from the last. | Kill pace |
 | Micro Flicks | Tiny targets next to the last one, each up for 1.5 s. Precision, not reaction speed. | Target size |
 | Static Grid | Three still targets; a new one appears as each goes. | Kill pace |
-| Timed Grid | Three targets, each on its own 2 s timer. Clear the oldest first. | Kill pace |
+| Timed Grid | Three targets, each on its own 2 s timer. Clear the oldest first: it's the red one. | Kill pace |
 | Shrink Reflex | Targets that shrink and vanish after 1.2 s. | Target lifetime |
 
 **Dynamic and linear clicking**
@@ -370,7 +370,8 @@ Nothing is sent anywhere. Deleting one of your scenarios or workouts removes the
 ## What's new {#whats-new}
 
 **November 2026**
-- New: every shot in the trainer makes a soft pop, hit or miss, so you know you fired. Set its volume under Sound on Settings. Ratings and scoring are unchanged.
+- New: every shot in the trainer makes a soft, low pop, hit or miss, so you know you fired. Set its volume under Sound on Settings. Ratings and scoring are unchanged.
+- Timed Grid's targets now come in three colors by time left: the one closest to running out is red, the next blue and the newest white, and when you clear one the others move up a color. Before, they changed color by wave, so once a whole wave was up all three were one color. Ratings and scoring are unchanged.
 - The coaching notes are gone: **What to work on** on a scenario's page, the note on the trainer's results screen and the note in the session summary. Some of their advice was wrong. "You stop short" told you to commit to the full flick, but landing a little short and then correcting is how people normally flick. The charts on the Insights tab and the key figures stay. The Worth knowing notes on Today and Progress, about your training habits, stay too. Ratings and scoring are unchanged.
 - New: a check-in on Today. Pick a face for how you feel and one for how much energy you have, and Progress › Skills shows how your runs go with each answer against your other days in the two weeks around them. Once one answer stands clear of the noise over three days, Worth knowing says how far from your usual it puts you.
 - Fixed: the trainer worked out each shot along where the crosshair was a frame earlier, and drew targets a frame behind where they were shot at. A click during a fast flick could hit a target the crosshair had just left, or miss one it was on. Shots now go exactly where the crosshair is drawn. At high frame rates the gap was tiny (a frame is about 1 ms at 750 fps), and it was bigger at low frame rates and when clicking mid-flick. Ratings and scoring are unchanged.

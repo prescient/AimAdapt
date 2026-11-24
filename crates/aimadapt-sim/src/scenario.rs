@@ -335,8 +335,9 @@ pub struct Targets {
     pub health_bar: bool,
     /// Show the time left above targets that time out.
     pub timer_bar: bool,
-    /// Targets that time out alternate between `color` and `alt_color`, so a new
-    /// target looks different from the one before it.
+    /// Targets that time out show which to go for. With several up at once, the one
+    /// closest to running out is `color`, the next `alt_color` and the rest white; with
+    /// one at a time, each new target switches between `color` and `alt_color`.
     pub alternate_colors: bool,
     pub alt_color: String,
     pub spawn: Spawn,

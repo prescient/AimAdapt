@@ -350,8 +350,8 @@ struct TargetAssets {
     kind_heads: Vec<Option<Color>>,
     /// The second color for timed targets, when colors alternate.
     alt: Option<Color>,
-    /// Targets per wave: the scenario's target count.
-    wave: u32,
+    /// Targets up at once: the scenario's target count.
+    up_at_once: u32,
     radius: f32,
     /// A 1 m square facing +Z, and the bar materials: background, health, time left.
     bar: Handle<Mesh>,
@@ -651,7 +651,7 @@ fn rebuild_world(
         head: head_color(&tc.head),
         kind_heads: s.world.iter().flat_map(|w| &w.kinds).map(|k| head_color(&k.head)).collect(),
         alt: tc.alternate_colors.then(|| color(&tc.alt_color)),
-        wave: tc.count.max(1),
+        up_at_once: tc.count.max(1),
         radius: tc.radius,
         bar: meshes.add(Rectangle::new(1.0, 1.0)),
         bar_back: materials.add(flat(Color::srgba(0.0, 0.0, 0.0, 1.0))),
@@ -1074,6 +1074,7 @@ fn sync_targets(
         return;
     }
     let live: HashMap<u64, &aimadapt_sim::sim::Target> = game.sim.targets().iter().map(|t| (t.id, t)).collect();
+    let ranks = time_ranks(game.sim.targets());
     let mut shown = Vec::new();
     let mut shown_heads = Vec::new();
     for (entity, view, mut tf) in &mut views {
@@ -1085,7 +1086,7 @@ fn sync_targets(
         *tf = body_pose(&assets, t);
         if let Some(mut m) = materials.get_mut(&view.material) {
             m.base_color =
-                target_color(base_color(&assets, t), t.health_fraction(), game.run.flashes.contains_key(&t.id));
+                target_color(base_color(&assets, t, &ranks), t.health_fraction(), game.run.flashes.contains_key(&t.id));
         }
     }
     // A head goes when its target goes, and scales, dims and flashes with it.
@@ -1104,7 +1105,7 @@ fn sync_targets(
     for t in game.sim.targets() {
         if !shown.contains(&t.id) {
             let material = materials.add(StandardMaterial {
-                base_color: base_color(&assets, t),
+                base_color: base_color(&assets, t, &ranks),
                 perceptual_roughness: 0.5,
                 ..default()
             });
@@ -1157,17 +1158,41 @@ fn body_of<'a>(assets: &'a TargetAssets, t: &aimadapt_sim::sim::Target) -> (&'a 
     }
 }
 
-/// A target's own color. When the scenario alternates colors, timed targets
-/// change color by wave: with three targets up, the first three are one color, the
-/// next three the other, and so on. A wave's color says how old its targets are.
-fn base_color(assets: &TargetAssets, t: &aimadapt_sim::sim::Target) -> Color {
+/// The third color of timed targets, when several are up and colors alternate: the
+/// newest ones. White stands out from the usual red and blue by brightness alone, so
+/// it also works for color-blind players.
+const NEWEST: Color = Color::srgb(0.94, 0.94, 0.94);
+
+/// Where each timed target stands in the order they'll run out: 0 for the one closest
+/// to running out. Targets that appeared together go in the order they appeared.
+fn time_ranks(targets: &[aimadapt_sim::sim::Target]) -> HashMap<u64, usize> {
+    let mut timed: Vec<_> = targets.iter().filter_map(|t| Some((t.time_left()?, t.no(), t.id))).collect();
+    timed.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+    timed.into_iter().enumerate().map(|(rank, (_, _, id))| (id, rank)).collect()
+}
+
+/// A target's own color. When the scenario alternates colors, timed targets show which
+/// to go for. With several up at once, the one closest to running out has the
+/// scenario's color, the next the second color and the rest white; as one goes, the
+/// others move up a color. With one at a time, each new target switches color.
+/// `ranks` is [`time_ranks`] of the targets up.
+fn base_color(assets: &TargetAssets, t: &aimadapt_sim::sim::Target, ranks: &HashMap<u64, usize>) -> Color {
     if let Some((_, _, c)) = t.kind().and_then(|k| assets.kinds.get(k as usize)) {
         return *c;
     }
-    let wave = (t.no().max(1) - 1) / assets.wave;
-    match assets.alt {
-        Some(alt) if t.time_left().is_some() && wave % 2 == 1 => alt,
-        _ => assets.base,
+    let Some(alt) = assets.alt.filter(|_| t.time_left().is_some()) else {
+        return assets.base;
+    };
+    if assets.up_at_once > 1 {
+        match ranks.get(&t.id) {
+            Some(1) => alt,
+            Some(r) if *r >= 2 => NEWEST,
+            _ => assets.base,
+        }
+    } else if t.no().is_multiple_of(2) {
+        alt
+    } else {
+        assets.base
     }
 }
 
@@ -1803,7 +1828,7 @@ mod tests {
             head: s.targets.head.as_ref().map(|h| color(&h.color)),
             kind_heads: Vec::new(),
             alt: s.targets.alternate_colors.then(|| color(&s.targets.alt_color)),
-            wave: s.targets.count.max(1),
+            up_at_once: s.targets.count.max(1),
             radius: s.targets.radius,
             bar: Handle::default(),
             bar_back: Handle::default(),
@@ -1834,39 +1859,69 @@ mod tests {
         assert!(bars_for(&track, &sim.targets()[0]).is_empty());
     }
 
-    /// Playtest: alternating every target made Timed Grid open with mixed colors
-    /// (red, blue, red), as confusing as one color. Colors go by wave instead: the
-    /// first three are one color, the next three the other, and so on.
+    /// Playtest (Nov 23, 2026): Timed Grid's two colors by wave (three red, then three blue) didn't say which
+    /// target to go for: once a whole wave was up, all three were one color. Now the target closest to running out is
+    /// red, the next blue and the newest white, so "go for red" always holds, in whatever order they're cleared.
+    /// (Before that, on Nov 4, alternating every target had opened with mixed colors.)
     #[test]
-    fn timed_targets_change_color_by_wave() {
+    fn timed_grid_colors_targets_by_time_left() {
         let s = builtin("builtin:timed-grid");
         assert_eq!(s.targets.count, 3);
         let a = assets(&s);
+        let order = [a.base, a.alt.unwrap(), NEWEST];
+        assert!(order[0] != order[1] && order[1] != order[2] && order[0] != order[2]);
         let mut sim = Sim::new(s.clone(), 1);
-        let mut seen: std::collections::BTreeMap<u32, Color> = Default::default();
-        for _ in 0..(240 * 20) {
-            for t in sim.targets() {
-                seen.insert(t.no(), base_color(&a, t));
+        let (mut full, mut shots) = (0, 0);
+        for frame in 0..(240 * 30) {
+            let ranks = time_ranks(sim.targets());
+            let mut up: Vec<&aimadapt_sim::sim::Target> = sim.targets().iter().collect();
+            up.sort_by(|x, y| x.time_left().unwrap().total_cmp(&y.time_left().unwrap()).then(x.no().cmp(&y.no())));
+            for (i, t) in up.iter().enumerate() {
+                assert_eq!(
+                    base_color(&a, t, &ranks),
+                    order[i.min(2)],
+                    "frame {frame}: target {} has {i} to go before it",
+                    t.no()
+                );
             }
-            let aim = sim.targets()[0].pos.normalize();
-            sim.step(1.0 / 240.0, Input { aim, fire_pressed: true, fire_held: true });
-            sim.step(1.0 / 240.0, Input { aim: Vec3::Y, fire_pressed: false, fire_held: false });
+            full += usize::from(up.len() == 3);
+            // A shot every quarter second: every third one at the newest target, so they go out of order too.
+            let fire = frame % 60 == 0 && !up.is_empty();
+            let aim = match (fire, shots % 3) {
+                (false, _) => Vec3::Y,
+                (true, 2) => up.last().unwrap().pos.normalize(),
+                (true, _) => up[0].pos.normalize(),
+            };
+            shots += usize::from(fire);
+            sim.step(1.0 / 240.0, Input { aim, fire_pressed: fire, fire_held: fire });
         }
-        assert!(seen.len() >= 9, "{} targets", seen.len());
-        for (&no, &c) in &seen {
-            let wave_color = if ((no - 1) / 3) % 2 == 0 { a.base } else { a.alt.unwrap() };
-            assert_eq!(c, wave_color, "target {no}");
-        }
-        // One target at a time: every new target switches color.
+        assert!(full > 240 * 10, "three up for {full} frames");
+        assert!(sim.stats().kills >= 60, "{} kills", sim.stats().kills);
+    }
+
+    #[test]
+    fn one_timed_target_at_a_time_switches_color_and_untimed_ones_keep_theirs() {
         let one = builtin("builtin:timed-flicks");
         let a = assets(&one);
-        let sim = Sim::new(one, 1);
-        assert_eq!(base_color(&a, &sim.targets()[0]), a.base);
-        // Untimed targets keep one color.
+        let mut sim = Sim::new(one, 1);
+        let mut seen = Vec::new();
+        for frame in 0..(240 * 10) {
+            let ranks = time_ranks(sim.targets());
+            for t in sim.targets() {
+                let c = base_color(&a, t, &ranks);
+                assert_eq!(c, if t.no() % 2 == 1 { a.base } else { a.alt.unwrap() }, "target {}", t.no());
+                seen.push(t.no());
+            }
+            let fire = frame % 60 == 0;
+            let aim = sim.targets().first().map_or(Vec3::Y, |t| t.pos.normalize());
+            sim.step(1.0 / 240.0, Input { aim, fire_pressed: fire, fire_held: fire });
+        }
+        assert!(seen.iter().max().unwrap() >= &4);
         let track = builtin("builtin:switch-track");
         let a = assets(&track);
         let sim = Sim::new(track, 1);
-        assert!(sim.targets().iter().all(|t| base_color(&a, t) == a.base));
+        let ranks = time_ranks(sim.targets());
+        assert!(sim.targets().iter().all(|t| base_color(&a, t, &ranks) == a.base));
     }
 
     /// Bot check: on capsules (bodies) the health bar sat one radius above the

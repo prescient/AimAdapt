@@ -30,7 +30,7 @@ Requirements: Windows 10 or 11 with the WebView2 runtime (included with Windows 
 - Hitscan and beam weapons; click, hold or always-on triggers.
 - A sound the trainer makes itself (no sound files): a soft pop on every shot, hit or miss, with its volume in the settings profile.
 - Sphere, capsule and box targets, with optional lifetime, shrink, and health regeneration with a delay.
-- Timed targets show a time-left bar and change color by wave (three red, then three blue, then three red on Timed Grid), so newer targets stand out from older ones. Optional health bars.
+- Timed targets show a time-left bar. With several up at once, as on Timed Grid, their color says which to go for: red is closest to running out, then blue, then white. With one at a time, each new target switches color. Optional health bars.
 - Movement: still, strafing, random or curved (steady speed with a turning heading, on Control Track), with optional acceleration (targets slow down and speed back up at each turn, and random turns curve), movement toward and away from you, and jumps with gravity.
 - The results screen shows the run's rating and how it went against its plan, and a chart of your last ten ratings on the scenario. V opens the run's replay in the app and I the scenario's page.
 

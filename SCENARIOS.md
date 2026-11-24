@@ -90,8 +90,8 @@ per_miss = -30.0
 | `targets.lifetime_s` | `0.0` | A target disappears as a timeout after this many seconds. 0 means it stays until it's destroyed. |
 | `targets.shrink_to` | `1.0` | Size at the end of its lifetime, as a share of the radius. Needs `lifetime_s`. |
 | `targets.timer_bar` | `true` | Show a bar above each target that times out, emptying as its time runs out. |
-| `targets.alternate_colors` | `true` | Targets that time out change color by wave: the first `count` targets use `color`, the next `count` use `alt_color`, and so on. With three targets up, the grid turns over from three of one color to three of the other, so a target's color says which wave it's from. |
-| `targets.alt_color` | `"#4da3ff"` | The second color. The default blue against the default orange-red stays distinct for common kinds of color blindness. |
+| `targets.alternate_colors` | `true` | Targets that time out show which to go for. With several up at once, the one closest to running out uses `color`, the next `alt_color` and any after that white; when one goes, the others move up a color. With one at a time, each new target switches between `color` and `alt_color`. |
+| `targets.alt_color` | `"#4da3ff"` | The second color. The default blue against the default orange-red stays distinct for common kinds of color blindness, and the white third color stands out from both by brightness. |
 | `targets.health_bar` | `false` | Show each target's health in a bar above it. Useful with `regen_per_s`, so you can see a target healing. |
 
 ### `[targets.head]`

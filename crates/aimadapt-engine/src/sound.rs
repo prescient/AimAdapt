@@ -2,9 +2,9 @@
 //! from a few lines of maths when the trainer starts, so there are no sound files, and it
 //! plays on a thread of its own so a shot is heard as soon as it is fired.
 //!
-//! The pop is a short puff of filtered noise with a dull knock under it, closer to an air
-//! gun than a gunshot. It's the only sound: a tick on a hit and a chime on a kill went on
-//! 21 November 2026, as the player wanted just the pop.
+//! The pop is a low thump with a short puff of air over it, closer to an air gun than a
+//! gunshot. It's the only sound: a tick on a hit and a chime on a kill went on 21 November
+//! 2026, as the player wanted just the pop.
 
 use std::sync::mpsc::{self, Sender};
 
@@ -15,9 +15,9 @@ use bevy::prelude::Resource;
 /// Most pops playing at once. A new one past this stops the oldest.
 const MAX_VOICES: usize = 16;
 
-/// The pop's loudest sample at full volume: half of full scale, so it's soft at its
-/// sharpest moment and the volume setting has room to turn it up.
-const PEAK: f32 = 0.5;
+/// The pop's loudest sample at full volume. A low thump needs more room than a click to
+/// sound as loud, and at the default volume this is still under a fifth of full scale.
+const PEAK: f32 = 0.7;
 
 /// How loud the pop plays at a volume setting of 0–100, as a share of its full loudness.
 /// Ears hear loudness on a curve, so the setting is squared: 50 plays at a quarter.
@@ -40,22 +40,24 @@ pub fn pop(rate: u32) -> Vec<f32> {
     let tau = std::f32::consts::TAU;
     // Rises from 0 over `a` seconds, then holds.
     let attack = |t: f32, a: f32| (t / a).min(1.0);
-    // A puff of noise between about 700 Hz and 4.5 kHz (the difference of two smoothed
-    // copies), mostly gone in 10 ms, over a knock that falls from about 450 to 240 Hz.
+    // The body: a thump that falls from 220 to 110 Hz in about 10 ms and dies away over
+    // 20 ms. Over it, the air: a puff of noise between about 300 Hz and 2.5 kHz, gone in
+    // 10 ms. The noise is smoothed twice, so little is left above 2.5 kHz to sound tinny.
     let mut noise = Noise(0x9e37_79b9);
     let smooth = |hz: f32| 1.0 - (-tau * hz / r).exp();
-    let (high, low) = (smooth(4500.0), smooth(700.0));
-    let (mut a, mut b, mut phase) = (0.0f32, 0.0f32, 0.0f32);
-    let mut out: Vec<f32> = (0..len(0.06))
+    let (high, low) = (smooth(2500.0), smooth(300.0));
+    let (mut a1, mut a2, mut b, mut phase) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+    let mut out: Vec<f32> = (0..len(0.09))
         .map(|i| {
             let t = i as f32 / r;
             let x = noise.next();
-            a += high * (x - a);
-            b += low * (x - b);
-            let puff = 4.0 * (a - b) * attack(t, 0.0004) * (-t / 0.008).exp();
-            phase += tau * (240.0 + 210.0 * (-t / 0.006).exp()) / r;
-            let knock = 0.3 * phase.sin() * attack(t, 0.001) * (-t / 0.010).exp();
-            puff + knock
+            a1 += high * (x - a1);
+            a2 += high * (a1 - a2);
+            b += low * (a2 - b);
+            let puff = 6.0 * (a2 - b) * attack(t, 0.0005) * (-t / 0.010).exp();
+            phase += tau * (110.0 + 110.0 * (-t / 0.010).exp()) / r;
+            let thump = phase.sin() * attack(t, 0.003) * (-t / 0.020).exp();
+            thump + puff
         })
         .collect();
     // The last few milliseconds fade to nothing, so the pop never ends on a click.
@@ -64,10 +66,6 @@ pub fn pop(rate: u32) -> Vec<f32> {
     for (k, s) in out[n.saturating_sub(fade)..].iter_mut().enumerate() {
         *s *= 1.0 - (k + 1) as f32 / fade as f32;
     }
-    // Rounding off the puff's sharpest peaks (a soft clip) makes it fuller for the same
-    // peak, so it can be heard without being sharp.
-    scale_to(&mut out, 1.0);
-    out.iter_mut().for_each(|s| *s = (2.0 * *s).tanh());
     scale_to(&mut out, PEAK);
     out
 }
@@ -263,40 +261,64 @@ mod tests {
         s.iter().map(|x| x * x).sum()
     }
 
-    /// The pop has to be short and soft: a click that tells you a shot went off, not a gunshot that wears on you
-    /// over hundreds of shots (asked for Nov 19, 2026).
+    /// Share of `s`'s energy below `hz`, from its spectrum (zero-padded to 8192 samples at `RATE`).
+    fn share_below(s: &[f32], hz: f64) -> f64 {
+        let n = 8192usize.max(s.len().next_power_of_two());
+        let total: f64 = s.iter().map(|&x| f64::from(x) * f64::from(x)).sum();
+        let top = (hz * n as f64 / f64::from(RATE)).ceil() as usize;
+        let mut below = 0.0;
+        for k in 0..top.min(n / 2) {
+            let step = -std::f64::consts::TAU * k as f64 / n as f64;
+            let (mut re, mut im) = (0.0, 0.0);
+            for (i, &x) in s.iter().enumerate() {
+                let (sin, cos) = (step * i as f64).sin_cos();
+                re += f64::from(x) * cos;
+                im += f64::from(x) * sin;
+            }
+            // Each bin past 0 stands for itself and its mirror above half the rate.
+            below += if k == 0 { 1.0 } else { 2.0 } * (re * re + im * im);
+        }
+        below / (n as f64 * total)
+    }
+
+    /// The pop has to be short and soft: a pop that tells you a shot went off, not a gunshot that wears on you over
+    /// hundreds of shots (asked for Nov 19, 2026).
     #[test]
     fn the_pop_is_short_and_soft() {
         let pop = pop(RATE);
-        assert!(ms(pop.len()) <= 80.0, "{} ms", ms(pop.len()));
+        assert!(ms(pop.len()) <= 100.0, "{} ms", ms(pop.len()));
         let loudest = pop.iter().fold(0.0f32, |m, s| m.max(s.abs()));
-        assert!((loudest - PEAK).abs() < 1e-6 && PEAK <= 0.5, "{loudest}");
-        // Nearly all of its energy is in the first 25 ms: a pop, not a hiss.
-        let early = energy(&pop[..(RATE as usize * 25 / 1000)]);
+        assert!((loudest - PEAK).abs() < 1e-6 && PEAK <= 0.7, "{loudest}");
+        // Nearly all of its energy is in the first 50 ms: a pop, not a hiss or a boom.
+        let early = energy(&pop[..(RATE as usize * 50 / 1000)]);
         assert!(early > 0.9 * energy(&pop), "{early} of {}", energy(&pop));
-        // And most of it is above 500 Hz, where small speakers and headsets play it: a
-        // snap, not a thump. The first version was mostly a 150 Hz knock (29% of its
-        // energy was up there).
-        let k = 1.0 - (-std::f32::consts::TAU * 500.0 / RATE as f32).exp();
-        let mut low = 0.0;
-        let high: Vec<f32> = pop
-            .iter()
-            .map(|x| {
-                low += k * (x - low);
-                x - low
-            })
-            .collect();
-        let share = energy(&high) / energy(&pop);
-        assert!(share > 0.7, "{share}");
+    }
+
+    /// Asked for Nov 23, 2026: the pop was "tingy", with no bass or oomph. Nearly half of its energy was above 5 kHz
+    /// and 2% below 300 Hz. Now a low thump carries much of it and little is left up high. (Before that, on Nov 19,
+    /// the first version had gone too far the other way: a 150 Hz knock with 29% of its energy above 500 Hz, which
+    /// small speakers barely play, so the mid-range puff stays.)
+    #[test]
+    fn the_pop_has_bass_and_isnt_tinny() {
+        let pop = pop(RATE);
+        let bass = share_below(&pop, 300.0);
+        let tinny = 1.0 - share_below(&pop, 5000.0);
+        assert!(bass >= 0.4, "{:.0}% below 300 Hz", bass * 100.0);
+        assert!(tinny <= 0.1, "{:.0}% above 5 kHz", tinny * 100.0);
+        let mid = share_below(&pop, 5000.0) - share_below(&pop, 500.0);
+        assert!(mid >= 0.2, "{:.0}% between 500 Hz and 5 kHz, where every speaker plays", mid * 100.0);
     }
 
     /// Bug (21 Nov 2026): the pop couldn't be heard. It was over in a few milliseconds, so over the 100 ms or so the
     /// ear takes in at once it came to -34 dBFS at full volume, 13 dB under the kill chime that played with it.
+    /// Bass adds energy the ear hears less of, so the part above 300 Hz has to be loud enough on its own too.
     #[test]
     fn the_pop_is_loud_enough_to_hear() {
         let pop = pop(RATE);
-        let db = 10.0 * (energy(&pop) / (RATE as f32 * 0.1)).log10();
-        assert!(db >= -24.0, "{db:.1} dBFS over 100 ms");
+        let db = |share: f64| 10.0 * (share * f64::from(energy(&pop)) / (f64::from(RATE) * 0.1)).log10();
+        assert!(db(1.0) >= -24.0, "{:.1} dBFS over 100 ms", db(1.0));
+        let above = 1.0 - share_below(&pop, 300.0);
+        assert!(db(above) >= -27.0, "{:.1} dBFS over 100 ms above 300 Hz", db(above));
     }
 
     #[test]
@@ -351,12 +373,13 @@ mod tests {
     fn the_mixer_adds_pops_up_in_every_channel_and_forgets_finished_ones() {
         let mut m = Mixer::new(RATE);
         let pop = pop(RATE);
-        m.play(1.0);
+        // Quiet enough that the two together stay under full scale.
         m.play(0.5);
+        m.play(0.25);
         let mut out = vec![9.0; 2 * pop.len()];
         m.fill(&mut out, 2);
         for (i, s) in pop.iter().enumerate() {
-            assert!((out[2 * i] - 1.5 * s).abs() < 1e-6, "sample {i}");
+            assert!((out[2 * i] - 0.75 * s).abs() < 1e-6, "sample {i}");
             assert_eq!(out[2 * i], out[2 * i + 1], "both channels");
         }
         assert!(m.voices.is_empty(), "both ended");
