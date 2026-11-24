@@ -498,7 +498,8 @@ mod tests {
             trainer::play_args("builtin:timed-flicks", true),
             trainer::workout_args("builtin:quick-warmup"),
             trainer::program_args("builtin:core-week", "mon"),
-            trainer::sce_args("C:/Scenarios/VT 1w4ts Novice S5.sce"),
+            trainer::sce_args("C:/Scenarios/VT 1w4ts Novice S5.sce", false),
+            trainer::sce_args("C:/Scenarios/VT 1w4ts Novice S5.sce", true),
         ];
         for a in launches {
             let full: Vec<String> = std::iter::once("AimAdapt.exe".to_string()).chain(a.clone()).collect();

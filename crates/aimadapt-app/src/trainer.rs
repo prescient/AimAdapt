@@ -334,9 +334,14 @@ pub(crate) fn play_args(id: &str, adaptive: bool) -> Vec<String> {
     a
 }
 
-/// A KovaaK's scenario file, played on its own map.
-pub(crate) fn sce_args(path: &str) -> Vec<String> {
-    vec!["--sce".into(), path.into()]
+/// A KovaaK's scenario file, played on its own map: adaptively (on its speed or kill
+/// pace) or as written.
+pub(crate) fn sce_args(path: &str, adaptive: bool) -> Vec<String> {
+    let mut a = vec!["--sce".to_string(), path.to_string()];
+    if adaptive {
+        a.push("--adaptive".into());
+    }
+    a
 }
 
 pub(crate) fn workout_args(id: &str) -> Vec<String> {
@@ -512,9 +517,19 @@ pub struct SceInfo {
     reasons: Vec<String>,
     /// What plays differently from KovaaK's.
     notes: Vec<String>,
+    /// Standard runs in the trainer: how many, the best score and the last finish.
     runs: i64,
     best: Option<f64>,
     last_played: Option<String>,
+    /// What an adaptive run of a playable file is rated on (`time_scale` or `kill_pace`),
+    /// and the real seconds a run lasts.
+    knob: Option<String>,
+    seconds: Option<f64>,
+    /// The latest rating on this version of the file (a changed file starts over).
+    rating: Option<f64>,
+    /// Adaptive runs in the trainer, on any version: how many, and the last finish.
+    adaptive_runs: i64,
+    adaptive_last: Option<String>,
 }
 
 /// The `.sce` file named after a scenario, among these files.
@@ -527,14 +542,36 @@ pub(crate) fn sce_file_for(name: &str, files: &[PathBuf]) -> Option<PathBuf> {
 pub fn sce_info(state: State<'_, AppData>, name: String) -> Result<SceInfo, String> {
     let files = aimadapt_sce::find_files(&aimadapt_core::discover::find_scenario_dirs());
     let path = sce_file_for(&name, &files);
-    let (playable, reasons, notes) = match path.as_deref().map(aimadapt_sce::import) {
-        None => (false, Vec::new(), Vec::new()),
-        Some(Ok(i)) => (true, Vec::new(), i.notes),
-        Some(Err(r)) => (false, r.iter().map(ToString::to_string).collect(), Vec::new()),
+    let (scenario, reasons, notes) = match path.as_deref().map(aimadapt_sce::import) {
+        None => (None, Vec::new(), Vec::new()),
+        Some(Ok(i)) => (Some(i.scenario), Vec::new(), i.notes),
+        Some(Err(r)) => (None, r.iter().map(ToString::to_string).collect(), Vec::new()),
     };
     let db = state.db.lock().map_err(err)?;
     let (runs, best, last_played) = db.imported_played(&name).map_err(err)?;
-    Ok(SceInfo { path: path.map(|p| p.display().to_string()), playable, reasons, notes, runs, best, last_played })
+    let (adaptive_runs, adaptive_last) = db.imported_rated(&name).map_err(err)?;
+    let knob = scenario.as_ref().map(|s| aimadapt_engine::record::knob_id(s.adaptive.resolve(s).knob));
+    let rating = match (&scenario, knob) {
+        (Some(s), Some(knob)) => {
+            db.last_rating_for(&name, &s.fingerprint()).map_err(err)?.filter(|r| r.knob == knob).map(|r| r.rating)
+        }
+        _ => None,
+    };
+    let seconds = scenario.as_ref().map(|s| f64::from(s.real_seconds() - s.timing.countdown_s));
+    Ok(SceInfo {
+        path: path.map(|p| p.display().to_string()),
+        playable: scenario.is_some(),
+        reasons,
+        notes,
+        runs,
+        best,
+        last_played,
+        knob: knob.map(str::to_string),
+        seconds,
+        rating,
+        adaptive_runs,
+        adaptive_last,
+    })
 }
 
 /// One of your KovaaK's scenario files, for Browse on Scenarios.
@@ -591,18 +628,19 @@ pub(crate) fn sce_entries(files: &[PathBuf]) -> Vec<SceEntry> {
     out
 }
 
-/// Starts the trainer on a KovaaK's scenario file.
+/// Starts the trainer on a KovaaK's scenario file: an adaptive run, or a standard one.
 #[tauri::command]
 pub fn play_sce(
     app: AppHandle,
     state: State<'_, AppData>,
     t: State<'_, TrainerState>,
     path: String,
+    adaptive: bool,
 ) -> Result<(), String> {
     aimadapt_sce::import(std::path::Path::new(&path)).map_err(|r| {
         format!("Can't play this yet: {}", r.iter().map(ToString::to_string).collect::<Vec<_>>().join("; "))
     })?;
-    launch(app, &state, &t, &sce_args(&path))
+    launch(app, &state, &t, &sce_args(&path, adaptive))
 }
 
 /// Starts the trainer on a workout.

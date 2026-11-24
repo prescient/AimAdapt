@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use rusqlite::OptionalExtension;
 
-use crate::db::{Db, DbError, MODE_IMPORTED, SOURCE_ENGINE};
+use crate::db::{Db, DbError, MODE_ADAPTIVE, MODE_IMPORTED, SOURCE_ENGINE};
 use crate::knob::Knob;
 
 /// How much a scenario has been played: runs, best score, last finish time.
@@ -41,6 +41,18 @@ impl Db {
             "SELECT COUNT(*), MAX(score), MAX(finished_at) FROM runs WHERE source = ?1 AND mode = ?2 AND scenario = ?3",
             (SOURCE_ENGINE, MODE_IMPORTED, scenario),
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )?)
+    }
+
+    /// Adaptive trainer runs of a scenario imported from a KovaaK's file, on any version of
+    /// the file: how many, and the last finish time. They are stored as a built-in's
+    /// adaptive runs are, under "<name> (Adaptive)" with the KovaaK's name as the base.
+    pub fn imported_rated(&self, scenario: &str) -> Result<(i64, Option<String>), DbError> {
+        Ok(self.conn().query_row(
+            "SELECT COUNT(*), MAX(r.finished_at) FROM runs r JOIN engine_runs e ON e.run_id = r.id
+             WHERE r.source = ?1 AND r.mode = ?2 AND e.base_scenario = ?3",
+            (SOURCE_ENGINE, MODE_ADAPTIVE, scenario),
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )?)
     }
 
@@ -99,6 +111,7 @@ mod tests {
         let db = Db::open_in_memory().unwrap();
         assert!(db.trainer_played().unwrap().is_empty());
         assert_eq!(db.imported_played("x").unwrap(), (0, None, None));
+        assert_eq!(db.imported_rated("x").unwrap(), (0, None));
         assert_eq!(db.best_trainer_score("x", "h").unwrap(), None);
         assert_eq!(db.best_trainer_rating("x", "h", Knob::Lifetime).unwrap(), None);
         assert_eq!(db.latest_game_info().unwrap(), None);

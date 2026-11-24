@@ -14,7 +14,8 @@ async function loadInsightsOverview(force = false) {
   } catch (e) {
     ui.insights.error = String(e);
   }
-  if (["scenarios", "today"].includes(route().view)) render();
+  // Progress shows imported files' ratings on the Viscose Easier card.
+  if (["scenarios", "today", "progress"].includes(route().view)) render();
 }
 
 // What views that need the overview pass to waitFor (app.js).
@@ -181,7 +182,7 @@ const svg = (body, h = CHART.h, w = CHART.w) => `<svg viewBox="0 0 ${w} ${h}" wi
 // or more when the ticks are closer than that: on a run where the rating barely moved
 // the axis used to read "0.54, 0.54, 0.55, 0.55, 0.55".
 const knobTick = (knob, lo, hi, n = 4) => {
-  const usual = knob === "target_speed" ? 1 : knob === "lifetime" || knob === "kill_pace" ? 2 : 3;
+  const usual = knob === "target_speed" ? 1 : knob === "lifetime" || knob === "kill_pace" || knob === "time_scale" ? 2 : 3;
   const step = Math.abs(hi - lo) / n;
   const places = step > 0 ? Math.min(6, Math.max(usual, Math.ceil(-Math.log10(step)))) : usual;
   return (v) => v.toFixed(places);
@@ -214,12 +215,12 @@ function ratingCard(d, adaptive) {
     if (!up) [tlo, thi] = [thi, tlo];
     const tline = tl.map((p, i) => `${i ? "L" : "M"}${sx(p[0], 0, tmax)},${sy(p[1], tlo, thi)}`).join("");
     tchart = `<section class="card grow-1"><div class="card-head"><h2>Last run</h2><span class="small muted">Your rating as the run went on</span></div>
-      ${svg(`${axes(0, tmax, tlo, thi, "seconds", knob === "target_speed" ? "°/s" : knob === "lifetime" || knob === "kill_pace" ? "s" : "m", knobTick(knob, tlo, thi))}<path d="${tline}" fill="none" stroke="var(--blue)" stroke-width="2"/>`)}
+      ${svg(`${axes(0, tmax, tlo, thi, "seconds", knobUnit(knob), knobTick(knob, tlo, thi))}<path d="${tline}" fill="none" stroke="var(--blue)" stroke-width="2"/>`)}
       <div class="small muted">The rating takes in each target or segment as you play. A calibration run moves the difficulty with it; later runs stay at one value and the rating settles as it gets more certain.</div></section>`;
   }
   return `<div class="row">
     <section class="card grow-2"><div class="card-head"><h2>85% ${knobWord(knob)} by run</h2><span class="small muted">Up is better · shaded = likely range</span></div>
-      ${svg(`${axes(1, n + 1, lo, hi, "run", knob === "target_speed" ? "°/s" : knob === "lifetime" || knob === "kill_pace" ? "s" : "m", knobTick(knob, lo, hi), undefined, runTicks)}
+      ${svg(`${axes(1, n + 1, lo, hi, "run", knobUnit(knob), knobTick(knob, lo, hi), undefined, runTicks)}
         <polygon points="${band}" fill="var(--rust)" opacity="0.15"/>
         <path d="${line}" fill="none" stroke="var(--rust)" stroke-width="2.5"/>
         ${adaptive.map((r, i) => `<circle cx="${sx(i, 0, n)}" cy="${sy(r.rating, lo, hi)}" r="3.5" fill="var(--rust)"><title>Run ${i + 1}: ${esc(fmtKnob(knob, r.rating))}</title></circle>`).join("")}`)}
@@ -252,7 +253,7 @@ function curveCard(c) {
       ${mark(c.at95, "95%", 2)}${mark(c.at85, "85%", 1)}${mark(c.at50, "50%", 0)}
       <path d="${line}" fill="none" stroke="var(--rust)" stroke-width="2.5"/>
       ${c.observed.map((o) => `<circle cx="${X(o[0])}" cy="${sy(o[1] * 100, 0, 100)}" r="${3 + Math.min(6, Math.sqrt(o[2]))}" fill="var(--blue)" opacity="0.6"><title>${esc(fmtKnob(knob, o[0]))}: ${Math.round(o[1] * 100)}% of ${o[2]} targets</title></circle>`).join("")}`)}
-    <div class="note-body">The line is your current curve: the chance of hitting a target at each ${({ target_speed: "speed", lifetime: "lifetime", kill_pace: "kill pace" })[knob] ?? "size"}. ${c.observed.length ? "Blue dots are what actually happened in recent runs (bigger = more targets). " : ""}You're reliable (95%) at ${esc(fmtKnob(knob, c.at95))} and it's a coin flip at ${esc(fmtKnob(knob, c.at50))}. A steep drop means you're consistent up to your limit; a gentle slope means misses creep in early.</div>
+    <div class="note-body">The line is your current curve: the chance of hitting a target at each ${({ target_speed: "speed", lifetime: "lifetime", kill_pace: "kill pace", time_scale: "game speed" })[knob] ?? "size"}. ${c.observed.length ? "Blue dots are what actually happened in recent runs (bigger = more targets). " : ""}You're reliable (95%) at ${esc(fmtKnob(knob, c.at95))} and it's a coin flip at ${esc(fmtKnob(knob, c.at50))}. A steep drop means you're consistent up to your limit; a gentle slope means misses creep in early.</div>
   </section>`;
 }
 

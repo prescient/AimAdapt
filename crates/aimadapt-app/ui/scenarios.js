@@ -192,14 +192,13 @@ const starIcon = (filled) => `<svg width="14" height="14" viewBox="0 0 24 24" fi
 const playIcon = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l13 8-13 8z"></path></svg>`;
 const dash = `<span class="dim">–</span>`;
 
-// Play (an adaptive run) for trainer scenarios, Start session for workouts, and
-// Play in AimAdapt (its own file, in standard mode) for a KovaaK's scenario the
-// trainer can play.
+// Play (an adaptive run) for trainer scenarios and for a KovaaK's scenario the
+// trainer can play (of its own file), and Start session for workouts.
 function playButton(x) {
   const playing = ui.trainer.data.playing ? "disabled" : "";
   if (x.kind === "trainer") return `<button class="btn play-btn" type="button" data-action="play" data-id="${esc(x.key)}" data-adaptive="1" ${playing} aria-label="Play ${esc(x.name)}">${playIcon}Play</button>`;
   if (x.kind === "workout") return `<button class="btn play-btn" type="button" data-action="play-workout" data-id="${esc(x.entry.id)}" ${playing} aria-label="Start session ${esc(x.name)}">${playIcon}Start session</button>`;
-  if (x.sce?.playable) return `<button class="btn play-btn" type="button" data-action="play-sce" data-path="${esc(x.sce.path)}" ${playing} aria-label="Play ${esc(x.name)} in AimAdapt" title="Plays this scenario's own file in AimAdapt's trainer">${playIcon}Play in AimAdapt</button>`;
+  if (x.sce?.playable) return `<button class="btn play-btn" type="button" data-action="play-sce" data-path="${esc(x.sce.path)}" data-adaptive="1" ${playing} aria-label="Play ${esc(x.name)} in AimAdapt" title="An adaptive run of this scenario's own file in AimAdapt's trainer">${playIcon}Play</button>`;
   return "";
 }
 
@@ -644,28 +643,47 @@ function trainerDetail(e, askedTab) {
 // Each KovaaK's scenario's .sce file and whether the trainer can play it, by name.
 ui.sceInfo = new Map();
 
-// "Play in AimAdapt" for a KovaaK's scenario whose file the trainer can play.
+// What an imported file's rating means, in a line.
+function sceRatingMeaning(knob, v) {
+  if (knob === "time_scale") return `You hold the 85% goal with the whole game at ${Math.round(v * 100)}% of the file's speed. ×1.00 is the file as written.`;
+  if (knob === "kill_pace") return `85% of your kills come within ${v.toFixed(2)} s of the one before.`;
+  return "";
+}
+
+// A KovaaK's scenario in AimAdapt's trainer: Play (an adaptive run of its file) and
+// Standard run, its rating, and its runs here.
 function sceCard(name) {
   const s = loadCached(ui.sceInfo, name, () => invoke("sce_info", { name }));
   if (!s || s.error || !s.path) return "";
   const playing = ui.trainer.data.playing ? "disabled" : "";
-  const history = s.runs
-    ? `In AimAdapt: ${s.runs} run${s.runs === 1 ? "" : "s"}, best ${num(s.best)}${s.last_played ? `, last ${fmtShort(dt(s.last_played))}` : ""}.`
-    : "";
+  const last = (at) => (at ? `, last ${fmtShort(dt(at))}` : "");
+  const history = [
+    s.adaptive_runs ? `${plural(s.adaptive_runs, "adaptive run")}${last(s.adaptive_last)}` : "",
+    s.runs ? `${plural(s.runs, "standard run")}, best ${num(s.best)}${last(s.last_played)}` : "",
+  ].filter(Boolean).join(" · ");
+  const runs = history ? `<div class="small muted">In AimAdapt: ${esc(history)}.</div>` : "";
   if (!s.playable) {
-    return `<section class="card"><div class="note-body"><strong>Can't play this in AimAdapt yet.</strong> It uses ${esc(s.reasons.join("; "))}. See <a href="#help/kovaaks-play">Playing KovaaK's scenarios</a>.</div>${history ? `<div class="small muted">${esc(history)}</div>` : ""}</section>`;
+    return `<section class="card"><div class="note-body"><strong>Can't play this in AimAdapt yet.</strong> It uses ${esc(s.reasons.join("; "))}. See <a href="#help/kovaaks-play">Playing KovaaK's scenarios</a>.</div>${runs}</section>`;
   }
+  const rated = s.rating !== null && s.rating !== undefined;
+  const on = s.knob === "time_scale" ? "its speed" : "kill pace";
+  const rating = rated
+    ? `<div class="sce-rating"><span class="small muted">Your 85% rating</span> <strong class="num">${esc(fmtKnob(s.knob, s.rating))}</strong><div class="small muted">${esc(sceRatingMeaning(s.knob, s.rating))}</div></div>`
+    : `<div class="small muted">${s.adaptive_runs ? "The file has changed since your last adaptive run, so the next one is a calibration run." : "Your first adaptive run is a calibration run that finds your level as you play."}</div>`;
   return `<section class="card sce-card"><div class="card-head" style="align-items:flex-start">
       <div><h2>In AimAdapt's trainer</h2>
-        <div class="note-body">Plays this scenario's own file on its map in AimAdapt's trainer, in standard mode. Its runs are kept apart from your KovaaK's runs.</div>
+        <div class="note-body">Plays this scenario's own file on its map in AimAdapt's trainer. <strong>Play</strong> is an adaptive run, rated on ${on}; <strong>Standard run</strong> plays it as written. Its runs are kept apart from your KovaaK's runs. See <a href="#help/kovaaks-play">Playing KovaaK's scenarios</a>.</div>
+        ${rating}
         ${s.notes.length ? `<ul class="small muted sce-notes">${s.notes.map((n) => `<li>${esc(n[0].toUpperCase() + n.slice(1))}.</li>`).join("")}</ul>` : ""}
-        ${history ? `<div class="small muted">${esc(history)}</div>` : ""}</div>
-      <button class="btn primary" type="button" data-action="play-sce" data-path="${esc(s.path)}" ${playing}>${playIcon}Play in AimAdapt</button>
+        ${runs}</div>
+      <span class="chips"><button class="btn" type="button" data-action="play-sce" data-path="${esc(s.path)}" data-adaptive="0" ${playing}>Standard run</button>
+        <span class="play-group"><button class="btn primary" type="button" data-action="play-sce" data-path="${esc(s.path)}" data-adaptive="1" ${playing}>${playIcon}Play</button>
+          <span class="small muted">adaptive · ${num(s.seconds)} s</span></span></span>
     </div></section>`;
 }
 
 // A KovaaK's scenario: its score history from KovaaK's stats files, if you've
-// played it there, and Play in AimAdapt if the trainer can play its file.
+// played it there, and Play and Standard run if the trainer can play its file.
 function kovaaksDetail(x, askedTab) {
   const name = x.name;
   const played = Boolean(x.entry);
@@ -696,8 +714,9 @@ function kovaaksDetail(x, askedTab) {
   return `${header}${row}${body}`;
 }
 
-async function startSce(path) {
-  await launchTrainer(() => invoke("play_sce", { path }));
+// Plays a KovaaK's scenario file: adaptively, or as written.
+async function startSce(path, adaptive) {
+  await launchTrainer(() => invoke("play_sce", { path, adaptive }));
   await loadTrainer();
 }
 
@@ -736,7 +755,7 @@ document.addEventListener("click", (e) => {
   else if (a === "hide") toggleMark("hidden", btn.dataset.key);
   else if (a === "browse-skill") openScenariosTab("browse", { skill: btn.dataset.skill ?? "" });
   else if (a === "list-tab-open") openScenariosTab(btn.dataset.tab, btn.dataset.played ? { played: btn.dataset.played } : {});
-  else if (a === "play-sce") startSce(btn.dataset.path);
+  else if (a === "play-sce") startSce(btn.dataset.path, btn.dataset.adaptive !== "0");
   else if (!tab) return;
   else if (a === "clear-list") {
     ui.list.filters[tab] = structuredClone(NO_FILTERS);

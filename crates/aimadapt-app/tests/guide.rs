@@ -79,6 +79,9 @@ fn every_rating_is_explained() {
         let label = o.label.split(" (").next().unwrap();
         assert!(GUIDE.contains(&format!("| {label} |")), "ui/guide.md's rating table needs {label}");
     }
+    // An imported KovaaK's scenario's speed isn't in the editor, but it is a rating (BACKLOG 9 Phase 5).
+    let speed = aimadapt_sim::adaptive::Knob::TimeScale.label();
+    assert!(GUIDE.contains(&format!("| {speed} |")), "ui/guide.md's rating table needs {speed}");
 }
 
 #[test]

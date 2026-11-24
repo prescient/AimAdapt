@@ -68,15 +68,19 @@ function scenarioFacts(s) {
 }
 
 // Adaptive ratings are in real units: seconds of target lifetime, degrees per second
-// of target speed, or meters of target radius.
-const higherIsHarder = (knob) => knob === "target_speed";
+// of target speed, or meters of target radius. An imported KovaaK's file is rated on
+// its speed, a multiple of the file's own (×1.00 is the file as written), or on kill pace.
+const higherIsHarder = (knob) => knob === "target_speed" || knob === "time_scale";
 function fmtKnob(knob, v) {
   if (v === null || v === undefined) return "–";
   if (knob === "lifetime" || knob === "kill_pace") return `${v.toFixed(2)} s`;
   if (knob === "target_speed") return `${v.toFixed(1)} °/s`;
+  if (knob === "time_scale") return `×${v.toFixed(2)}`;
   return `${v.toFixed(3)} m`;
 }
-const knobWord = (knob) => ({ target_speed: "tracking speed", lifetime: "speed", kill_pace: "kill pace" })[knob] ?? "size";
+const knobWord = (knob) => ({ target_speed: "tracking speed", lifetime: "speed", kill_pace: "kill pace", time_scale: "game speed" })[knob] ?? "size";
+// A rating's unit on a chart axis.
+const knobUnit = (knob) => ({ target_speed: "°/s", lifetime: "s", kill_pace: "s", time_scale: "×" })[knob] ?? "m";
 const betterThan = (knob, a, b) => (higherIsHarder(knob) ? a > b : a < b);
 
 const scenarioName = (id) => ui.trainer.data?.scenarios.find((e) => e.id === id)?.scenario?.name ?? id.replace(/^(builtin|user):/, "");

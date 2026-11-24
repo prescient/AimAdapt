@@ -386,6 +386,10 @@ svg text { font-family: var(--font); }
 .link-btn.inline { min-height: 0; display: inline; font-size: inherit; text-decoration: underline; }
 .list-row a.main { display: block; }
 .sce-notes { margin: 6px 0 0; padding-left: 18px; }
+.sce-rating { margin-top: 8px; }
+.sce-rating strong { font-size: 18px; margin-left: 4px; }
+.sce-card .card-head > .chips { align-items: flex-start; flex-wrap: nowrap; }
+.viscose-play { justify-content: flex-end; flex-wrap: nowrap; }
 
 /* Scenarios: the lists, one tab each, across the page */
 .dim { color: var(--faint); }

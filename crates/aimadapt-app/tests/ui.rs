@@ -181,6 +181,9 @@ fn target_speed_shows_one_decimal() {
     let trainer = ui("trainer.js");
     let fmt = decl(&trainer, "fmtKnob");
     assert!(fmt.contains("\"target_speed\"") && fmt.contains("toFixed(1)} °/s"), "{fmt}");
+    // An imported file's speed (Phase 5): "×0.85", higher is harder.
+    assert!(fmt.contains("\"time_scale\"") && fmt.contains("`×${v.toFixed(2)}`"), "{fmt}");
+    assert!(decl(&trainer, "higherIsHarder").contains("\"time_scale\""));
 }
 
 /// Bug: the first render could run before the scripts after app.js had run, so
@@ -526,13 +529,28 @@ fn play_always_means_an_adaptive_run() {
     }
     // The program's one sessionButton (Today and the Program tab share it) and the workout buttons.
     assert!(seen >= 3, "found {seen} session buttons");
-    // A KovaaK's scenario that plays here has one button, "Play in AimAdapt".
-    let play_sce = scenarios.matches("data-action=\"play-sce\"").count();
-    assert!(play_sce >= 2, "{play_sce}");
-    for (at, _) in scenarios.match_indices("data-action=\"play-sce\"") {
-        let rest = &scenarios[at..];
-        assert!(rest[..rest.find("</button>").unwrap()].ends_with("Play in AimAdapt"), "play-sce button");
+    // A KovaaK's scenario that plays here (BACKLOG 9 Phase 5): Play is an adaptive run of its file, as
+    // everywhere, and Standard run plays it as written. Each button says which it is.
+    for file in ["scenarios.js", "app.js"] {
+        let js = ui(file);
+        let mut kinds = std::collections::BTreeSet::new();
+        for (at, _) in js.match_indices("data-action=\"play-sce\"") {
+            let button = &js[at..at + js[at..].find("</button>").unwrap()];
+            let label = button[button.rfind('>').unwrap() + 1..].trim_start_matches("${playIcon}");
+            if button.contains("data-adaptive=\"1\"") {
+                assert_eq!(label, "Play", "{file}: {button}");
+                kinds.insert("play");
+            } else {
+                assert!(button.contains("data-adaptive=\"0\""), "{file}: a play-sce button says neither: {button}");
+                assert!(label.starts_with("Standard"), "{file}: {button}");
+                kinds.insert("standard");
+            }
+        }
+        assert_eq!(kinds.len(), 2, "{file} has both buttons");
     }
+    let click = scenarios.lines().find(|l| l.contains("a === \"play-sce\"")).expect("the play-sce click");
+    assert!(click.contains("btn.dataset.adaptive !== \"0\""), "{click}");
+    assert!(decl(&scenarios, "startSce").contains("invoke(\"play_sce\", { path, adaptive })"));
 }
 
 /// Found checking plan L1 in the browser, before it was committed: the longer
@@ -879,6 +897,21 @@ fn benchmarks_list_viscose_easier_with_play_in_aimadapt() {
     for want in ["data-action=\"play-sce\"", "Not yet", "Not downloaded", "read from your KovaaK's stats", "Workshop"] {
         assert!(card.contains(want), "{want} missing from {card}");
     }
+    // Phase 5: Play (adaptive) and Standard on each playable row, and the rating in AimAdapt, read from the
+    // Insights overview, which the app reloads after every run.
+    for want in [
+        "data-adaptive=\"1\"",
+        "data-adaptive=\"0\"",
+        "<th class=\"r\">Rating</th>",
+        "ui.insights.overview",
+        "fmtKnob(o.knob",
+    ] {
+        assert!(card.contains(want), "{want} missing from {card}");
+    }
+    assert!(
+        decl(&ui("insights.js"), "loadInsightsOverview").contains("\"progress\""),
+        "Progress redraws when it loads"
+    );
     // Bug (Nov 24, 2026, found in the preview before it shipped): opened straight on
     // Progress, the card read the trainer's state before it had loaded and the page
     // couldn't be drawn.

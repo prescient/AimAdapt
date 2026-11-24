@@ -723,10 +723,14 @@ const VISCOSE_EASIER = [
   "WhisphereRawControl Larger + Slowed",
 ];
 
-// Every Viscose Easier scenario: your KovaaK's best, and Play in AimAdapt where the
-// trainer can play its file. One you haven't downloaded is listed with a way to get it.
+// Every Viscose Easier scenario: your KovaaK's best, and where the trainer can play
+// its file, Play (an adaptive run), Standard and your rating in AimAdapt. One you
+// haven't downloaded is listed with a way to get it.
 function viscoseCard() {
   if (ui.sceLibrary === null) loadSceLibrary();
+  // Ratings in AimAdapt, by name: an imported file's adaptive runs are under its KovaaK's name.
+  if (!ui.insights.overview) loadInsightsOverview();
+  const rated = new Map((ui.insights.overview ?? []).filter((o) => o.knob && typeof o.latest_rating === "number").map((o) => [o.scenario.toLowerCase(), o]));
   const reading = ui.sceLibrary === "loading";
   const files = new Map((Array.isArray(ui.sceLibrary) ? ui.sceLibrary : []).map((f) => [f.name.toLowerCase(), f]));
   const stats = new Map(ui.snap.scenarios.map((x) => [x.scenario.toLowerCase(), x]));
@@ -736,17 +740,24 @@ function viscoseCard() {
   // The trainer's state may not be loaded yet on Progress.
   const busy = ui.trainer.data?.playing ? "disabled" : "";
   const here = (r) => {
-    if (r.file?.playable) return `<button class="btn play-btn" type="button" data-action="play-sce" data-path="${esc(r.file.path)}" ${busy} aria-label="Play ${esc(r.name)} in AimAdapt" title="Plays this scenario's own file in AimAdapt's trainer">${playIcon}Play</button>`;
+    if (r.file?.playable) {
+      return `<span class="chips viscose-play"><button class="btn play-btn" type="button" data-action="play-sce" data-path="${esc(r.file.path)}" data-adaptive="0" ${busy} aria-label="Standard run of ${esc(r.name)} in AimAdapt" title="Plays this scenario's own file as written">Standard</button>
+        <button class="btn play-btn primary" type="button" data-action="play-sce" data-path="${esc(r.file.path)}" data-adaptive="1" ${busy} aria-label="Play ${esc(r.name)} in AimAdapt" title="An adaptive run of this scenario's own file in AimAdapt's trainer">${playIcon}Play</button></span>`;
+    }
     if (r.file) return `<a class="small muted" href="${scenarioHref(`kovaaks:${r.name}`)}" title="Its page says what the trainer can't play yet">Not yet</a>`;
     return `<span class="small muted">${reading ? "…" : "Not downloaded"}</span>`;
   };
   const name = (r) => (r.file || r.kv ? `<a href="${scenarioHref(`kovaaks:${r.name}`)}">${esc(r.name)}</a>` : esc(r.name));
+  const rating = (r) => {
+    const o = rated.get(r.name.toLowerCase());
+    return o ? `<span title="Your 85% ${esc(knobWord(o.knob))} in AimAdapt">${esc(fmtKnob(o.knob, o.latest_rating))}</span>` : dash;
+  };
   return `<section class="card"><div class="card-head"><h2>Viscose Easier</h2><span class="small muted">${played} of ${VISCOSE_EASIER.length} played in KovaaK's${reading ? "" : ` · ${playable} play in AimAdapt`}</span></div>
-      <div class="note-body">Your best scores on Viscose's Easier benchmark, read from your KovaaK's stats, and <strong>Play</strong> for each scenario AimAdapt's trainer can play from its own file, in standard mode. Runs in AimAdapt are kept apart from your KovaaK's runs. KovaaK's downloads a scenario when you first play it there, or subscribe to the Workshop collection "Viscose Benchmark Easy Scenarios" in Steam to get them all at once.</div>
+      <div class="note-body">Your best scores on Viscose's Easier benchmark, read from your KovaaK's stats, and for each scenario AimAdapt's trainer can play from its own file, <strong>Play</strong> for an adaptive run and <strong>Standard</strong> to play it as written. Adaptive runs are rated on the file's speed (×1.00 is the file as written) or, for clicking and still targets, on kill pace, and Rating is your latest. Runs in AimAdapt are kept apart from your KovaaK's runs. KovaaK's downloads a scenario when you first play it there, or subscribe to the Workshop collection "Viscose Benchmark Easy Scenarios" in Steam to get them all at once.</div>
       ${reading ? `<div class="small muted">Reading your KovaaK's scenarios…</div>` : ""}
-      <div class="table-wrap"><table><thead><tr><th>Scenario</th><th class="r">Runs</th><th class="r">Best</th><th class="r">Last played</th><th class="r">In AimAdapt</th></tr></thead><tbody>
+      <div class="table-wrap"><table><thead><tr><th>Scenario</th><th class="r">Runs</th><th class="r">Best</th><th class="r">Last played</th><th class="r">Rating</th><th class="r">In AimAdapt</th></tr></thead><tbody>
         ${rows.map((r) => `<tr><td>${name(r)}</td><td class="r mono">${r.kv ? r.kv.runs : dash}</td><td class="r num">${r.kv ? num(r.kv.best_score) : dash}</td>
-          <td class="r">${r.kv ? esc(fmtShort(dt(r.kv.last_played))) : dash}</td><td class="r">${here(r)}</td></tr>`).join("")}</tbody></table></div>
+          <td class="r">${r.kv ? esc(fmtShort(dt(r.kv.last_played))) : dash}</td><td class="r num">${rating(r)}</td><td class="r">${here(r)}</td></tr>`).join("")}</tbody></table></div>
     </section>`;
 }
 

@@ -456,6 +456,7 @@ mod tests {
         assert!(best_rating(&db, &scenario).is_some());
         assert_eq!(best_score(&db, &scenario), Some(f64::from(standard.score)), "the standard best is its own");
         assert_eq!(db.imported_played(&name).unwrap().0, 1, "one standard run counted as played in AimAdapt");
+        assert_eq!(db.imported_rated(&name).unwrap().0, 1, "and one adaptive run");
 
         let mut changed = scenario.clone();
         changed.world.as_mut().unwrap().source_hash = "another file".into();
