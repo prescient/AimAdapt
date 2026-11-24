@@ -159,6 +159,14 @@ Every scenario can be played in **Standard** mode, at the difficulty written in 
 - **Tracking:** each `segment_s`-second segment is one outcome: the share of that time the crosshair was on target, whether or not you're firing. With `engaged_only`, only time while a target is damaged and not yet healed counts, so the trip to a fresh target after a kill isn't off target, but leaving a half-killed target is, until it heals.
 - **Kill pace:** a kill within the pace of the one before is a success. Each full stretch of that length with no kill is a failure, and the late kill that ends it doesn't count as a success. With a hitscan weapon, a kill after more than one miss since the last kill doesn't count either. Speed Switch, Static Grid and Wide Flicks have no target timers. Timed Grid keeps its own 2 s timers, which don't change with the rating.
 
+**Imported KovaaK's scenarios.** A `.sce` file names no knob, so its knob and its rule are picked from what it plays, the first of these that fits (the design is in [docs/plans/2026-11-imported-adaptive.md](docs/plans/2026-11-imported-adaptive.md)):
+
+1. **Timed:** some bot can leave by itself (a lifetime, a drain, its own blast or a volume that kills it). Rated on **speed**, each bot one outcome: a kill is a success and a bot that goes by itself a failure. With a click weapon a kill after more than one miss on that bot fails.
+2. **Kill pace:** a click weapon, or bots that never move. Rated on kill pace (4 s easy to 0.2 s hard, starting at 1.2 s) as above, in real seconds at the file's own speed. A held weapon has no miss rule, because a held trigger fires between targets.
+3. **Tracking:** a held or always-firing weapon on bots that move, kill-limit tracking and switching included. Rated on **speed**, each 2 real seconds one outcome: the share of 60 Hz ticks with the aim on a part of a bot that counts, firing or not. Ticks while no bot is up don't count. In switching the flick to the next bot is part of the share.
+
+**Speed** (`time_scale`, shown as ×0.85, higher is harder) is the rate of the whole game clock as a multiple of the file's own: ×1.0 is the file as written, its `Timescale` included, and ×0.85 plays everything on the game clock at 85%: bot movement, abilities, the weapon's fire rate, regen, respawns and lifetimes. The run's game length scales with it, so a run takes the file's real length at any speed, as KovaaK's 80% files do. A kill limit still ends a run. It goes from ×0.25 (easy) to ×2.5 (hard) and starts at ×1.0, narrowed so the file's `Timescale` times it stays within 0.1–10. In a calibration run it changes every segment, and the saved run's times stay in real seconds. Only an imported scenario can be rated on speed.
+
 **Calibration run, then one difficulty per run.** The first adaptive run on a scenario is a calibration run. It sets each target's (or segment's) difficulty as it goes, between 65% and 90% chance of success, to find your level within the run. The game labels it "Calibration run". The next run after a break is a calibration run too, starting from the old rating: three days or more away, with the rating's uncertainty (which widens by 0.02 log units a day) back at 0.12 or more. A settled rating gets there in about five and a half days. The game says how many days it has been. Every later run plays at one fixed difficulty for the whole run, shown as "This run: …" before you start, and the rating takes in the run as you play. Each run's difficulty is picked from a mix: first a chance of success, then the value with that chance on your current curve.
 
 | Run | Chance of success | Balanced | Steady | Push |
@@ -176,7 +184,7 @@ A stretch run never comes straight after another stretch run, or after a run mor
 | Field | Default | Meaning |
 |---|---|---|
 | `adaptive.goal` | `0.85` | Your rating is the value you succeed at this share of the time (0.6–0.95). |
-| `adaptive.knob` | `"auto"` | `lifetime`, `target_speed`, `radius` or `kill_pace`. `auto` uses lifetime for hitscan, target speed for moving beam targets, and size otherwise. |
+| `adaptive.knob` | `"auto"` | `lifetime`, `target_speed`, `radius` or `kill_pace`. `auto` uses lifetime for hitscan, target speed for moving beam targets, and size otherwise. An imported KovaaK's scenario is rated on speed (`time_scale`) or kill pace, as above. |
 | `adaptive.easy` | `0` | Easiest value it will use, in the knob's units. 0 for a default (3 s lifetime, 3 °/s, 2× the radius, 3 s kill pace). |
 | `adaptive.hard` | `0` | Hardest value it will use. 0 for a default (0.25 s, 180 °/s, 0.3× the radius, 0.3 s kill pace). |
 | `adaptive.start` | `0` | First guess at your rating, for the calibration run. 0 for the scenario's own lifetime, speed or size (1.5 s for kill pace). |

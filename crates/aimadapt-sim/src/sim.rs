@@ -10,7 +10,7 @@ pub use crate::rng::Rng;
 use glam::Vec3;
 use std::collections::HashMap;
 
-use crate::adaptive::{Knob, Mix, Pick, Prior, Rating, planned_kind};
+use crate::adaptive::{ImportedRule, Knob, Mix, Pick, Prior, Rating, imported_rule, planned_kind};
 use crate::collide::Collider;
 use crate::motion::{BotState, Brain, separate};
 use crate::scenario::{Movement, MovementKind, Range, Scenario, Shape, Trigger, WeaponKind};
@@ -389,6 +389,8 @@ impl RunResult {
 struct AdaptiveRun {
     rating: Rating,
     mix: Mix,
+    /// How an imported scenario is rated (`None` for a built-in one).
+    rule: Option<ImportedRule>,
     /// Tracking: the current segment's value, planned chance and pick.
     segment: Option<(f32, f32, Pick)>,
     /// The whole run's value, planned chance and pick. `None` for a calibration
@@ -416,6 +418,58 @@ fn speed_for(s: &Scenario, deg_s: f32) -> Range {
     let d = (sp.distance.0 + sp.distance.1) / 2.0;
     let mps = deg_s.to_radians() * d;
     Range(mps * 0.85, mps)
+}
+
+/// The game clock against real time. A time-scaled import runs it at the file's rate,
+/// and an adaptive speed run changes the rate as it goes. Every change is kept so the
+/// run's times can be reported in real seconds.
+#[derive(Debug, Clone, PartialEq)]
+struct Rate {
+    /// Game seconds per real second now.
+    now: f32,
+    /// Game and real seconds into the run at each change of rate, and the rate from
+    /// there. The first is at the start.
+    changes: Vec<(f32, f32, f32)>,
+}
+
+impl Rate {
+    fn new(rate: f32) -> Rate {
+        Rate { now: rate, changes: vec![(0.0, 0.0, rate)] }
+    }
+
+    /// Whether game and real seconds are the same throughout.
+    fn is_real(&self) -> bool {
+        self.changes.len() == 1 && self.now == 1.0
+    }
+
+    /// The change in force at `game` seconds into the run.
+    fn at(&self, game: f32) -> (f32, f32, f32) {
+        self.changes.iter().rev().find(|c| c.0 <= game).copied().unwrap_or(self.changes[0])
+    }
+
+    /// Real seconds into the run at `game` seconds into it.
+    fn to_real(&self, game: f32) -> f32 {
+        let (g, r, rate) = self.at(game);
+        r + (game - g) / rate
+    }
+
+    /// Real seconds that `len` game seconds from `start` took.
+    fn span(&self, start: f32, len: f32) -> f32 {
+        if self.changes.len() == 1 { len / self.now } else { self.to_real(start + len) - self.to_real(start) }
+    }
+
+    /// The rate from `game` seconds into the run on.
+    fn set(&mut self, game: f32, rate: f32) {
+        if rate == self.now {
+            return;
+        }
+        let real = self.to_real(game);
+        match self.changes.last_mut() {
+            Some(last) if last.0 >= game => *last = (last.0, last.1, rate),
+            _ => self.changes.push((game, real, rate)),
+        }
+        self.now = rate;
+    }
 }
 
 /// Kill-pace rating: the current window between kills.
@@ -446,6 +500,13 @@ pub struct Sim {
     bot_walls: Collider,
     /// Seconds since the countdown began.
     clock: f32,
+    /// The game clock's rate against real time.
+    rate: Rate,
+    /// An adaptive speed run: the real seconds it lasts, whatever its rate (the file's
+    /// game length at the file's own rate). Other runs end on game time.
+    real_len: Option<f32>,
+    /// A speed run has used up its real seconds.
+    out_of_time: bool,
     /// Game time when the frame being stepped began. The fire loop goes by the time left at the start
     /// of a frame, so the healing timers of imported bots are read at the same moment.
     frame_began: f32,
@@ -477,6 +538,8 @@ pub struct Sim {
     beam_acc: f32,
     /// Ticks, on-target ticks and seconds in the current adaptive tracking segment.
     window: (u32, u32, f32),
+    /// A speed run: real seconds not yet ticked (see `speed_ticks`).
+    speed_acc: f32,
     pace: Pace,
     telemetry: Telemetry,
     next_sample: f32,
@@ -523,7 +586,8 @@ impl Sim {
                 None => rating.pick_run(&mut rng, mix),
             }
         });
-        let state = AdaptiveRun { rating, mix, segment: None, run, breakthrough: false, break_days: after_break };
+        let rule = imported_rule(&scenario);
+        let state = AdaptiveRun { rating, mix, rule, segment: None, run, breakthrough: false, break_days: after_break };
         let mut sim = Sim::build(scenario, seed, Some(state));
         if let Some((value, _, _)) = run {
             let t = &mut sim.current.targets;
@@ -531,6 +595,7 @@ impl Sim {
                 Knob::Lifetime => t.lifetime_s = value,
                 Knob::Radius => t.radius = value,
                 Knob::TargetSpeed => t.movement.speed = speed_for(&sim.scenario, value),
+                Knob::TimeScale => sim.rate.set(0.0, sim.file_rate() * value),
                 Knob::KillPace | Knob::Auto => {}
             }
             sim.respawn_all();
@@ -543,6 +608,9 @@ impl Sim {
         let fliers = pushing::fliers(base.world.as_ref());
         let walls = base.world.as_ref().map(|w| Collider::new(&w.meshes)).unwrap_or_default();
         let bot_walls = base.world.as_ref().map(|w| Collider::for_bots(&w.meshes)).unwrap_or_default();
+        let file_rate = base.world.as_ref().map_or(1.0, |w| w.time_scale);
+        let speed = adaptive.as_ref().is_some_and(|a| a.rating.cfg.knob == Knob::TimeScale);
+        let real_len = speed.then(|| base.timing.duration_s / file_rate);
         let mut sim = Sim {
             scenario: base,
             current,
@@ -551,6 +619,9 @@ impl Sim {
             walls,
             bot_walls,
             clock: 0.0,
+            rate: Rate::new(file_rate),
+            real_len,
+            out_of_time: false,
             frame_began: 0.0,
             pushed_to: 0.0,
             fliers,
@@ -570,6 +641,7 @@ impl Sim {
             cooldown: 0.0,
             beam_acc: 0.0,
             window: (0, 0, 0.0),
+            speed_acc: 0.0,
             pace: Pace::default(),
             telemetry: Telemetry::default(),
             next_sample: 0.0,
@@ -613,7 +685,8 @@ impl Sim {
             return None;
         }
         let value = self.pace.window.map(|w| w.0).or(self.run_pick().map(|r| r.0))?;
-        Some((value, value - (self.elapsed() - self.pace.since)))
+        // The window is real seconds, and the pace's clock game seconds.
+        Some((value, value - (self.elapsed() - self.pace.since) / self.rate.now))
     }
 
     /// Adaptive mode: whether each target is one outcome (a kill in time) rather
@@ -661,24 +734,44 @@ impl Sim {
         &self.stats
     }
 
-    /// Seconds of play so far (0 during the countdown).
+    /// Seconds of play so far on the game clock (0 during the countdown). A speed run
+    /// stops its clock when its real seconds are up, so only other runs are cut at the
+    /// scenario's length.
     pub fn elapsed(&self) -> f32 {
-        (self.clock - self.scenario.timing.countdown_s).clamp(0.0, self.scenario.timing.duration_s)
+        let t = (self.clock - self.scenario.timing.countdown_s).max(0.0);
+        if self.real_len.is_some() { t } else { t.min(self.scenario.timing.duration_s) }
     }
 
+    /// Game seconds left: at the clock's rate now, for a speed run.
     pub fn time_left(&self) -> f32 {
-        self.scenario.timing.duration_s - self.elapsed()
+        match self.real_len {
+            Some(_) => self.real_time_left() * self.rate.now,
+            None => self.scenario.timing.duration_s - self.elapsed(),
+        }
     }
 
-    /// The rate of the game clock against real time (1.0 unless the scenario is a
-    /// time-scaled import).
+    /// Real seconds left.
+    pub fn real_time_left(&self) -> f32 {
+        match self.real_len {
+            Some(len) => (len - self.real_elapsed()).max(0.0),
+            None => self.time_left() / self.rate.now,
+        }
+    }
+
+    /// The rate of the game clock against real time now: the file's own for a
+    /// time-scaled import, times the speed for an adaptive speed run, 1.0 otherwise.
     pub fn time_scale(&self) -> f32 {
+        self.rate.now
+    }
+
+    /// The rate an imported file sets (its `Timescale`), 1.0 for a built-in scenario.
+    pub(crate) fn file_rate(&self) -> f32 {
         self.scenario.world.as_ref().map_or(1.0, |w| w.time_scale)
     }
 
     /// Real seconds of play so far: `elapsed()` is game seconds.
     pub fn real_elapsed(&self) -> f32 {
-        self.elapsed() / self.time_scale()
+        self.rate.to_real(self.elapsed())
     }
 
     pub fn countdown_left(&self) -> f32 {
@@ -713,9 +806,10 @@ impl Sim {
         let scale = self.time_scale();
         self.frame_began = self.elapsed();
         if self.phase == Phase::Running {
-            let dt = dt * scale;
+            let real = self.real_step(dt);
+            let dt = real * scale;
             self.clock += dt;
-            return self.run_step(dt, input, events);
+            return self.run_step(dt, real, input, events);
         }
         self.clock += dt;
         if self.phase == Phase::Countdown {
@@ -731,16 +825,29 @@ impl Sim {
             }
             // Only the part of this step past the countdown counts as play, and that
             // part is on the game clock.
-            let over = (self.clock - self.scenario.timing.countdown_s) * scale;
-            if scale != 1.0 {
+            let real = self.real_step(self.clock - self.scenario.timing.countdown_s);
+            let over = real * scale;
+            if scale != 1.0 || self.real_len.is_some() {
                 self.clock = self.scenario.timing.countdown_s + over;
             }
-            return self.run_step(over, input, events);
+            return self.run_step(over, real, input, events);
         }
         events
     }
 
-    fn run_step(&mut self, dt: f32, input: Input, mut events: Vec<Event>) -> Vec<Event> {
+    /// The real seconds of a step of `dt` that are play: all of them, except at the end
+    /// of a speed run, which stops when its real seconds are up.
+    fn real_step(&mut self, dt: f32) -> f32 {
+        let Some(len) = self.real_len else { return dt };
+        let left = len - self.real_elapsed();
+        if dt >= left {
+            self.out_of_time = true;
+            return left.max(0.0);
+        }
+        dt
+    }
+
+    fn run_step(&mut self, dt: f32, real: f32, input: Input, mut events: Vec<Event>) -> Vec<Event> {
         let aim = input.aim.normalize_or(Vec3::NEG_Z);
         self.last_aim = aim;
         let now = self.elapsed();
@@ -757,9 +864,13 @@ impl Sim {
         }
         // Targets with no respawn delay come back in the same frame.
         self.spawn_due(now, &mut events);
+        // A speed run's segments go by real time, and a new one can change the clock's
+        // rate from the next frame on.
+        self.speed_ticks(real, aim);
 
         let limit = self.scenario.timing.kill_limit;
-        if self.time_left() <= 0.0 || (limit > 0 && self.stats.kills >= limit) {
+        let over = if self.real_len.is_some() { self.out_of_time } else { self.time_left() <= 0.0 };
+        if over || (limit > 0 && self.stats.kills >= limit) {
             self.phase = Phase::Finished;
             if let Some(a) = &mut self.adaptive
                 && let Some((value, _, _)) = a.run
@@ -944,6 +1055,8 @@ mod volumes;
 
 #[cfg(test)]
 mod pellet_tests;
+#[cfg(test)]
+mod speed_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

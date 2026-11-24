@@ -50,9 +50,8 @@ impl Sim {
         };
         // The run is played on the game clock but reported in real seconds, as
         // KovaaK's reports it: time played, time to kill, and the replay's timeline.
-        let scale = self.time_scale();
-        if scale != 1.0 {
-            result.convert_to_real_seconds(scale);
+        if !self.rate.is_real() {
+            result.convert_to_real_seconds(&self.rate);
         }
         result
     }
@@ -123,36 +122,43 @@ impl Sim {
 }
 
 impl RunResult {
-    /// Turns every time in the result from game seconds into real seconds, given the
-    /// game clock's rate (`scale` game seconds per real second).
-    fn convert_to_real_seconds(&mut self, scale: f32) {
-        self.duration_s /= scale;
+    /// Turns every time in the result from game seconds into real seconds, by the game
+    /// clock's rate at each moment: times into the run, and spans by when they started.
+    fn convert_to_real_seconds(&mut self, clock: &Rate) {
+        let real = |t: &mut f32| *t = clock.to_real(*t);
+        real(&mut self.duration_s);
         for k in &mut self.kills {
-            k.at_s /= scale;
-            k.ttk_s /= scale;
+            k.ttk_s = clock.span(k.at_s - k.ttk_s, k.ttk_s);
+            real(&mut k.at_s);
+        }
+        if let Some(a) = &mut self.adaptive {
+            for p in &mut a.timeline {
+                real(&mut p.0);
+            }
         }
         let t = &mut self.telemetry;
         for r in &mut t.targets {
-            for v in [&mut r.spawned_at, &mut r.start_at, &mut r.ended_at, &mut r.lifetime_s] {
-                *v /= scale;
-            }
+            r.lifetime_s = clock.span(r.spawned_at, r.lifetime_s);
             for v in [&mut r.reaction_s, &mut r.reach_s].into_iter().flatten() {
-                *v /= scale;
+                *v = clock.span(r.start_at, *v);
+            }
+            for v in [&mut r.spawned_at, &mut r.start_at, &mut r.ended_at] {
+                real(v);
             }
         }
         for s in &mut t.shots {
-            s.t /= scale;
+            real(&mut s.t);
         }
         for s in &mut t.samples {
-            s.t /= scale;
-            s.since_change_s /= scale;
-            s.target_speed_dps *= scale;
+            s.since_change_s = clock.span(s.t - s.since_change_s, s.since_change_s);
+            s.target_speed_dps *= clock.at(s.t).2;
+            real(&mut s.t);
         }
         for p in &mut t.trace {
-            p[0] /= scale;
+            real(&mut p[0]);
         }
         for f in &mut t.frames {
-            f.t /= scale;
+            real(&mut f.t);
         }
     }
 }

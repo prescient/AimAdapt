@@ -23,7 +23,7 @@ fn read(name: &str) -> Sce {
 #[test]
 fn finds_every_fixture() {
     let files = find_files(&[fixtures()]);
-    assert_eq!(files.len(), 27);
+    assert_eq!(files.len(), 30);
     assert!(files.iter().all(|f| f.extension().unwrap() == "sce"));
 }
 
@@ -641,6 +641,9 @@ fn git_keeps_the_fixtures_bytes() {
         "Slab Backdrop",
         "Lantern Row",
         "Slant Walk",
+        "Slow Taps",
+        "Still Hose",
+        "Slow Strafe",
     ] {
         assert!(!crlf(name), "{name} was given CRLF line ends");
     }

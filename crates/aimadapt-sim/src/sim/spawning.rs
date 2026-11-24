@@ -134,6 +134,7 @@ impl Sim {
         let mut value = None;
         if self.per_target()
             && let Some(a) = &mut self.adaptive
+            && a.rating.cfg.knob != Knob::TimeScale
         {
             let (v, chance, pick) = a.next(&mut self.rng);
             match a.rating.cfg.knob {
@@ -143,6 +144,7 @@ impl Sim {
             }
             value = Some((v, chance, pick));
         } else if let Some(seg) = self.adaptive.as_ref().and_then(|a| a.segment) {
+            // A speed run's bot is rated at the clock's speed when it appeared.
             value = Some(seg);
         }
         let own = Movement { speed: speed.unwrap_or(tc.movement.speed), ..tc.movement.clone() };

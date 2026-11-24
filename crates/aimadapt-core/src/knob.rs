@@ -13,10 +13,12 @@ pub enum Knob {
     KillPace,
     /// Meters of target radius: smaller is harder.
     Radius,
+    /// An imported scenario's speed, as a multiple of the file's own: faster is harder.
+    TimeScale,
 }
 
 impl Knob {
-    pub const ALL: [Knob; 4] = [Knob::Lifetime, Knob::TargetSpeed, Knob::KillPace, Knob::Radius];
+    pub const ALL: [Knob; 5] = [Knob::Lifetime, Knob::TargetSpeed, Knob::KillPace, Knob::Radius, Knob::TimeScale];
 
     /// The knob stored as `id`. Anything else is a size, as it always was here.
     pub fn from_id(id: &str) -> Knob {
@@ -24,6 +26,7 @@ impl Knob {
             "lifetime" => Knob::Lifetime,
             "target_speed" => Knob::TargetSpeed,
             "kill_pace" => Knob::KillPace,
+            "time_scale" => Knob::TimeScale,
             _ => Knob::Radius,
         }
     }
@@ -34,12 +37,13 @@ impl Knob {
             Knob::TargetSpeed => "target_speed",
             Knob::KillPace => "kill_pace",
             Knob::Radius => "radius",
+            Knob::TimeScale => "time_scale",
         }
     }
 
     /// Whether a bigger value is harder.
     pub fn higher_is_harder(self) -> bool {
-        self == Knob::TargetSpeed
+        matches!(self, Knob::TargetSpeed | Knob::TimeScale)
     }
 
     /// Log-scale difficulty of a value: higher is harder.
@@ -64,6 +68,7 @@ impl Knob {
             Knob::Lifetime | Knob::KillPace => format!("{v:.2} s"),
             Knob::TargetSpeed => format!("{v:.1} °/s"),
             Knob::Radius => format!("{v:.3} m"),
+            Knob::TimeScale => format!("×{v:.2}"),
         }
     }
 
@@ -74,6 +79,7 @@ impl Knob {
             Knob::TargetSpeed => "tracking speed",
             Knob::KillPace => "kill pace",
             Knob::Radius => "size",
+            Knob::TimeScale => "game speed",
         }
     }
 }
@@ -96,5 +102,6 @@ mod tests {
         assert!(Knob::Lifetime.h(0.5) > Knob::Lifetime.h(1.0));
         assert!((Knob::Radius.value(Knob::Radius.h(0.3)) - 0.3).abs() < 1e-12);
         assert!(Knob::KillPace.better(0.6, 0.8) && Knob::TargetSpeed.better(40.0, 30.0));
+        assert!(Knob::TimeScale.h(1.2) > Knob::TimeScale.h(0.8) && Knob::TimeScale.better(1.1, 0.9));
     }
 }

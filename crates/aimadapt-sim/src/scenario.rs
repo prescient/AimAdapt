@@ -792,6 +792,10 @@ impl Scenario {
         if resolved.knob == crate::adaptive::Knob::TargetSpeed && m.kind == MovementKind::Static {
             p.push("adaptive target speed needs moving targets".into());
         }
+        // The speed knob scales an imported file's own game clock; a built-in scenario rates its own settings.
+        if resolved.knob == crate::adaptive::Knob::TimeScale && self.world.is_none() {
+            p.push("adaptive speed is for imported KovaaK's scenarios".into());
+        }
         // Every number must be a real number. TOML reads `inf` and `nan`, and not every
         // check above catches them (scoring has no limits at all).
         if let Ok(doc) = toml::Value::try_from(self) {

@@ -208,7 +208,7 @@ impl Sim {
             && let Some((value, _, _)) = t.track.value
         {
             // A kill counts as a success unless it took a spray of misses.
-            let ok = if t.misses <= MAX_MISSES_PER_TARGET { 1.0 } else { 0.0 };
+            let ok = if !self.counts_misses() || t.misses <= MAX_MISSES_PER_TARGET { 1.0 } else { 0.0 };
             self.outcome(value, ok, false);
         }
     }

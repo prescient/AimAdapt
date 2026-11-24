@@ -278,6 +278,7 @@ pub fn knob_id(k: Knob) -> &'static str {
         Knob::Lifetime => "lifetime",
         Knob::TargetSpeed => "target_speed",
         Knob::KillPace => "kill_pace",
+        Knob::TimeScale => "time_scale",
         Knob::Radius | Knob::Auto => "radius",
     }
 }

@@ -423,6 +423,15 @@ fn start(rng: &mut Rng, s: Start) -> f32 {
 }
 
 impl Motion {
+    /// Whether the bot can get anywhere by itself: it walks, flies, jumps, has a jetpack or
+    /// has abilities (dashes). A bot with none of these stands where it appeared.
+    pub fn moves(&self) -> bool {
+        self.max_speed > 0.0
+            || self.works_keys()
+            || self.jetpack.is_some()
+            || self.abilities.as_ref().is_some_and(|a| !a.list.is_empty())
+    }
+
     /// Whether the bot flies or its dodge profiles press the jump key: the bots whose play
     /// follows the jump key's rules (see `jump`).
     pub fn works_keys(&self) -> bool {

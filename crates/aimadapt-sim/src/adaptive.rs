@@ -2,8 +2,9 @@
 //! keep play near the speed they hit about 85% of the time.
 //!
 //! Each scenario names one **knob**: target lifetime in seconds (timed clicking),
-//! target speed in degrees per second (tracking), target radius in meters, or kill
-//! pace in seconds between kills (speed switching). The
+//! target speed in degrees per second (tracking), target radius in meters, kill
+//! pace in seconds between kills (speed switching), or, for an imported KovaaK's
+//! scenario, the speed of its whole game clock (see [`ImportedRule`]). The
 //! rating is a curve, the chance of success at each knob value, modeled as
 //!
 //! ```text
@@ -37,7 +38,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::rng::Rng;
-use crate::scenario::{MovementKind, Scenario, WeaponKind};
+use crate::scenario::{MovementKind, Scenario, Trigger, WeaponKind};
 
 /// Chance of a slip (misclick, glance away) even on trivial targets.
 pub const LAPSE: f32 = 0.04;
@@ -99,6 +100,10 @@ pub enum Knob {
     /// success; each stretch of that length with no kill is a failure. Lower is
     /// harder. Rates switching on pace rather than on each target's own timer.
     KillPace,
+    /// An imported scenario's speed: the rate of its whole game clock against the
+    /// file's own, so 1.0 is the file as written and 0.85 plays everything at 85%.
+    /// The run still takes the file's real length. Higher is harder.
+    TimeScale,
 }
 
 impl Knob {
@@ -107,6 +112,7 @@ impl Knob {
             Knob::Lifetime | Knob::KillPace => "s",
             Knob::TargetSpeed => "°/s",
             Knob::Radius | Knob::Auto => "m",
+            Knob::TimeScale => "×",
         }
     }
 
@@ -117,12 +123,13 @@ impl Knob {
             Knob::TargetSpeed => "Target speed",
             Knob::Radius => "Target size",
             Knob::KillPace => "Kill pace",
+            Knob::TimeScale => "Speed",
         }
     }
 
     /// Whether a bigger value is harder.
     pub fn higher_is_harder(self) -> bool {
-        self == Knob::TargetSpeed
+        matches!(self, Knob::TargetSpeed | Knob::TimeScale)
     }
 
     /// Log-scale difficulty of a value: higher is harder.
@@ -140,8 +147,53 @@ impl Knob {
             Knob::Lifetime | Knob::KillPace => format!("{v:.2} s"),
             Knob::TargetSpeed => format!("{v:.1} °/s"),
             Knob::Radius | Knob::Auto => format!("{v:.3} m"),
+            Knob::TimeScale => format!("×{v:.2}"),
         }
     }
+}
+
+/// How an imported KovaaK's scenario (one with a world) is rated in adaptive mode:
+/// the first of these that fits it. See docs/plans/2026-11-imported-adaptive.md.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImportedRule {
+    /// Some bot can leave by itself (a lifetime, a drain, its own blast or a volume
+    /// that kills it). Rated on speed, each bot one outcome: a kill is a success and a
+    /// bot that goes by itself a failure.
+    Timed,
+    /// A click weapon, or bots that never move. Rated on kill pace: a faster clock
+    /// would only speed up the weapon and the respawns, which makes still bots easier.
+    Pace,
+    /// A held or always-firing weapon on bots that move: tracking, kill-limit tracking
+    /// and switching. Rated on speed, each tracking segment the share of time on target.
+    Tracking,
+}
+
+/// The adaptive rule for a scenario with a world, `None` for a built-in one.
+pub fn imported_rule(s: &Scenario) -> Option<ImportedRule> {
+    let w = s.world.as_ref()?;
+    let drains = s.targets.regen_per_s < 0.0 || w.kinds.iter().any(|k| k.regen_per_s < 0.0);
+    let blasts = w.motions().any(|m| {
+        m.abilities.as_ref().is_some_and(|a| a.list.iter().any(|ab| ab.fuse.is_some() || ab.health_cost > 0.0))
+    });
+    let volumes = w.volumes.iter().any(|v| v.kill || v.damage > 0.0);
+    if s.targets.lifetime_s > 0.0 || drains || blasts || volumes {
+        return Some(ImportedRule::Timed);
+    }
+    let click = s.weapon.kind == WeaponKind::Hitscan && s.weapon.trigger == Trigger::Click;
+    if click || !w.motions().any(crate::motion::Motion::moves) {
+        return Some(ImportedRule::Pace);
+    }
+    Some(ImportedRule::Tracking)
+}
+
+/// Speed's range for an imported scenario: ×0.25 (easy) to ×2.5 (hard) of the file's
+/// own rate, narrowed so the rate stays in the sim's [`TIME_SCALE_RANGE`].
+///
+/// [`TIME_SCALE_RANGE`]: crate::world::TIME_SCALE_RANGE
+fn speed_range(file_rate: f32) -> (f32, f32) {
+    let (lo, hi) = crate::world::TIME_SCALE_RANGE;
+    let rate = file_rate.max(1e-3);
+    (0.25f32.max(lo / rate), 2.5f32.min(hi / rate))
 }
 
 /// The knob, range and first guess for a scenario, with defaults filled in.
@@ -166,7 +218,10 @@ impl Adaptive {
     pub fn resolve(&self, s: &Scenario) -> Resolved {
         let beam = s.weapon.kind == WeaponKind::Beam;
         let moving = s.targets.movement.kind != MovementKind::Static;
+        let rule = imported_rule(s);
         let knob = match self.knob {
+            Knob::Auto if rule == Some(ImportedRule::Pace) => Knob::KillPace,
+            Knob::Auto if rule.is_some() => Knob::TimeScale,
             Knob::Auto if !beam => Knob::Lifetime,
             Knob::Auto if moving => Knob::TargetSpeed,
             Knob::Auto => Knob::Radius,
@@ -182,7 +237,13 @@ impl Adaptive {
                 (3.0, 180.0, v)
             }
             Knob::Radius | Knob::Auto => (s.targets.radius * 2.0, s.targets.radius * 0.3, s.targets.radius),
+            // An imported file's windows are wider: its pace is whatever the file is.
+            Knob::KillPace if rule.is_some() => (4.0, 0.2, 1.2),
             Knob::KillPace => (3.0, 0.3, 1.5),
+            Knob::TimeScale => {
+                let (easy, hard) = speed_range(s.world.as_ref().map_or(1.0, |w| w.time_scale));
+                (easy, hard, 1.0)
+            }
         };
         let pick = |v: f32, d: f32| if v > 0.0 { v } else { d };
         Resolved {

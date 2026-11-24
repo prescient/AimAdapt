@@ -364,7 +364,7 @@ mod core_copies {
     #[test]
     fn core_knobs_are_the_sims_knobs() {
         use aimadapt_sim::adaptive::Knob;
-        for k in [Knob::Lifetime, Knob::TargetSpeed, Knob::KillPace, Knob::Radius] {
+        for k in [Knob::Lifetime, Knob::TargetSpeed, Knob::KillPace, Knob::Radius, Knob::TimeScale] {
             let id = crate::record::knob_id(k);
             let core = aimadapt_core::knob::Knob::from_id(id);
             assert_eq!(core.id(), id);

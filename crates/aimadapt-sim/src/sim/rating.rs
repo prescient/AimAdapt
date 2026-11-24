@@ -3,9 +3,10 @@
 use super::*;
 
 impl Sim {
-    /// Whether the adaptive knob is set per target (lifetime, or size or speed when
-    /// clicking) rather than per tracking segment. Tracking segments come from beam
-    /// ticks, so a hitscan scenario has to be rated target by target.
+    /// Whether each target is one outcome (lifetime, size or speed when clicking, or
+    /// an imported scenario whose bots can time out) rather than each tracking segment.
+    /// A built-in scenario's tracking segments come from beam ticks, so a hitscan one
+    /// has to be rated target by target.
     pub(super) fn per_target(&self) -> bool {
         self.adaptive.as_ref().is_some_and(|a| {
             let hitscan = self.scenario.weapon.kind == WeaponKind::Hitscan;
@@ -15,9 +16,17 @@ impl Sim {
                 // With a beam and target lifetimes, each target is a kill to finish in
                 // time (regen makes that a test of unbroken tracking).
                 Knob::TargetSpeed => hitscan || self.scenario.targets.lifetime_s > 0.0,
+                Knob::TimeScale => a.rule == Some(ImportedRule::Timed),
                 Knob::KillPace | Knob::Auto => false,
             }
         })
+    }
+
+    /// Whether a kill after more than [`MAX_MISSES_PER_TARGET`] misses fails. A held
+    /// trigger fires between targets, so on an imported scenario only a click weapon
+    /// has the rule.
+    pub(super) fn counts_misses(&self) -> bool {
+        self.scenario.world.is_none() || self.scenario.weapon.trigger == Trigger::Click
     }
 
     /// Kill pace: the current window's value, picking one if needed.
@@ -32,15 +41,18 @@ impl Sim {
         self.pace.window
     }
 
-    /// Kill pace: each window that runs out with no kill is a failure.
+    /// Kill pace: each window that runs out with no kill is a failure. A window is
+    /// real seconds, so on a time-scaled import it is the clock's rate times as long
+    /// on the game clock (which the pace goes by).
     pub(super) fn pace_tick(&mut self, now: f32) {
         for _ in 0..100 {
             let Some((value, _, _)) = self.pace_window() else { return };
-            if now - self.pace.since < value {
+            let span = value * self.rate.now;
+            if now - self.pace.since < span {
                 return;
             }
             self.outcome(value, 0.0, false);
-            self.pace.since += value;
+            self.pace.since += span;
             self.pace.missed = true;
             self.pace.window = None;
         }
@@ -49,8 +61,8 @@ impl Sim {
     /// Kill pace: a kill inside the window is a success, and starts the next one.
     pub(super) fn pace_kill(&mut self, now: f32) {
         let Some((value, _, _)) = self.pace_window() else { return };
-        if !self.pace.missed && now - self.pace.since <= value {
-            let ok = self.pace.misses <= MAX_MISSES_PER_TARGET;
+        if !self.pace.missed && now - self.pace.since <= value * self.rate.now {
+            let ok = !self.counts_misses() || self.pace.misses <= MAX_MISSES_PER_TARGET;
             self.outcome(value, if ok { 1.0 } else { 0.0 }, false);
         }
         self.pace = Pace { since: now, ..Pace::default() };
@@ -65,11 +77,14 @@ impl Sim {
     }
 
     /// Tracking: picks the next segment's difficulty and applies it to every target.
-    /// In a fixed-difficulty run every segment keeps the run's value.
+    /// In a fixed-difficulty run every segment keeps the run's value. A speed run has
+    /// segments whatever it rates, as its clock's rate is the whole game's.
     pub(super) fn start_segment(&mut self) {
-        if self.per_target() {
+        if self.per_target() && self.knob() != Some(Knob::TimeScale) {
             return;
         }
+        let file_rate = self.file_rate();
+        let now = self.elapsed();
         let Some(a) = &mut self.adaptive else { return };
         if a.rating.cfg.knob == Knob::KillPace || (a.run.is_some() && a.segment.is_some()) {
             return;
@@ -100,14 +115,46 @@ impl Sim {
                     t.base_radius = value;
                 }
             }
+            // Everything on the game clock changes speed from the next frame on.
+            Knob::TimeScale => self.rate.set(now, file_rate * value),
             Knob::Lifetime | Knob::KillPace | Knob::Auto => {}
         }
     }
 
-    pub(super) fn adaptive_tick(&mut self, on: bool, tick: f32) {
-        if self.per_target() || self.knob() == Some(Knob::KillPace) {
+    /// A speed run, after each frame: its segments are real seconds, ticked at
+    /// [`BEAM_TICK_HZ`] whatever the clock's rate. Tracking scores each segment by the
+    /// share of ticks with the aim on a part of a bot that counts, firing or not (a
+    /// held trigger can't game it), and only ticks with a bot up count, so a respawn
+    /// gap isn't the player's. A timed file rates each bot instead, and its segments
+    /// only set the calibration run's speed.
+    pub(super) fn speed_ticks(&mut self, real: f32, aim: Vec3) {
+        if self.knob() != Some(Knob::TimeScale) {
             return;
         }
+        let tick = 1.0 / BEAM_TICK_HZ;
+        let tracking = !self.per_target();
+        let on = self.pick_counted(aim).is_some();
+        self.speed_acc += real;
+        while self.speed_acc >= tick && self.phase == Phase::Running {
+            self.speed_acc -= tick;
+            if tracking && self.targets.is_empty() {
+                continue;
+            }
+            self.segment_tick(on, tick, tracking);
+        }
+    }
+
+    pub(super) fn adaptive_tick(&mut self, on: bool, tick: f32) {
+        // A speed run ticks on real time (`speed_ticks`).
+        if self.per_target() || matches!(self.knob(), Some(Knob::KillPace | Knob::TimeScale)) {
+            return;
+        }
+        self.segment_tick(on, tick, true);
+    }
+
+    /// One tick of a tracking segment. At the segment's end its share of ticks on
+    /// target is an outcome, when `rated`, and the next segment starts.
+    fn segment_tick(&mut self, on: bool, tick: f32, rated: bool) {
         let Some(a) = &self.adaptive else { return };
         let (segment, current) = (a.rating.cfg.segment_s, a.segment);
         self.window.0 += 1;
@@ -116,7 +163,7 @@ impl Sim {
         if self.window.2 >= segment {
             let share = self.window.1 as f32 / self.window.0.max(1) as f32;
             self.window = (0, 0, 0.0);
-            if let Some((value, _, _)) = current {
+            if rated && let Some((value, _, _)) = current {
                 self.outcome(value, share, true);
             }
             self.start_segment();
