@@ -50,7 +50,7 @@ function loadSceLibrary() {
     .catch(() => [])
     .then((list) => {
       ui.sceLibrary = list;
-      if (["scenarios", "today"].includes(route().view)) render();
+      if (["scenarios", "today", "progress"].includes(route().view)) render();
     });
 }
 

@@ -840,6 +840,31 @@ fn benchmarks_say_they_come_from_kovaaks() {
     assert!(app.contains("[\"kovaaks\", \"KovaaK's\"]"), "Settings has a KovaaK's tab for that address");
 }
 
+/// Progress › Benchmarks also lists Viscose's Easier benchmark: its 36 scenarios by
+/// name, your KovaaK's bests, Play in AimAdapt on each file the trainer can play, and
+/// what to do about one that isn't there or doesn't play yet.
+#[test]
+fn benchmarks_list_viscose_easier_with_play_in_aimadapt() {
+    let app = ui("app.js");
+    let list = app.split("const VISCOSE_EASIER = [").nth(1).and_then(|s| s.split("];").next()).expect("VISCOSE_EASIER");
+    let names: Vec<&str> = list.split('"').skip(1).step_by(2).collect();
+    assert_eq!(names.len(), 36, "{names:?}");
+    let unique: std::collections::BTreeSet<String> = names.iter().map(|n| n.to_lowercase()).collect();
+    assert_eq!(unique.len(), names.len(), "a name is listed twice: {names:?}");
+    assert!(decl(&app, "benchmarksTab").contains("${viscoseCard()}"));
+    let card = decl(&app, "viscoseCard");
+    for want in ["data-action=\"play-sce\"", "Not yet", "Not downloaded", "read from your KovaaK's stats", "Workshop"] {
+        assert!(card.contains(want), "{want} missing from {card}");
+    }
+    // Bug (Nov 24, 2026, found in the preview before it shipped): opened straight on
+    // Progress, the card read the trainer's state before it had loaded and the page
+    // couldn't be drawn.
+    assert!(!card.contains("ui.trainer.data.playing"), "{card}");
+    // KovaaK's files are read in the background; Progress draws again once they are.
+    let load = decl(&ui("scenarios.js"), "loadSceLibrary").to_string();
+    assert!(load.contains("\"progress\""), "{load}");
+}
+
 /// Rule (plan L4): Progress › Time keeps the totals, the daily chart, the calendar
 /// and the sessions up top, and folds the other four cards into "More about when you
 /// train", closed to begin with. The fold is a native <details> (the keyboard works),

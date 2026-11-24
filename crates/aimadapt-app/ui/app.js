@@ -703,6 +703,50 @@ function benchmarksTab() {
         ${vt.map((x) => `<tr><td><a href="${scenarioHref(`kovaaks:${x.scenario}`)}">${esc(x.scenario)}</a></td><td class="r mono">${x.runs}</td><td class="r num">${num(x.best_score)}</td>
           <td class="r">${esc(fmtShort(dt(x.last_played)))}</td></tr>`).join("")}</tbody></table></div>`
         : `<div class="note-body">None of them has been played in KovaaK's yet. If you have played them, check where AimAdapt reads your KovaaK's stats in <a href="#settings/kovaaks">Settings › KovaaK's</a>.</div>`}
+    </section>${viscoseCard()}`;
+}
+
+// Viscose's Easier benchmark, by the names KovaaK's gives its scenarios, in the
+// order of the Steam Workshop collection "Viscose Benchmark Easy Scenarios"
+// (Nov 2026). Only the names are here: the files are the player's own downloads.
+const VISCOSE_EASIER = [
+  "voxTargetSwitch Click", "Floating Heads Timing 400% Larger", "1w3ts Pasu Perfected Micro Goated Larger 80%",
+  "1w2ts Pasu Perfected Easy", "Pasu Angelic 20% Larger 80% Speed", "Popcorn MV Novice", "Controlsphere Click Easy",
+  "B180 Voltaic Easy 92%", "1wall5targets_pasu slow", "tamTargetSwitch Smooth Easy", "domiSwitch Easy Slower",
+  "devTS Goated NR Static 5Bot", "waldoTS Novice", "FloatTS Angelic Easy Larger", "beanTS Larger",
+  "voxTargetSwitch 2 Large", "1w3ts reload Larger", "Pokeball Frenzy Auto TE Wide", "Air Voltaic Easy Invincible 4 80%",
+  "Air Pure Intermediate Slower No UFO", "Polarized Hell Easy 40% Slower", "Flicker Plaza rAim Easy Less Blinks",
+  "Controlsphere OW Long Strafes 90%", "Air Voltaic Invincible 7 Easy 80%", "Whisphere Small & Slow 55%",
+  "Air CELESTIAL No UFO Easy Slowed", "PGTI Voltaic Easy 80%", "Controlsphere Far, Far Larger 90%",
+  "cloverRawControl Easy 80% Speed", "Air Angelic 4 Voltaic Easy 80% (Good Version)", "VT Controlsphere Intermediate S5 80%",
+  "Controlsphere rAim Easy 90%", "Leaptrack Goated 60% Larger", "SmoothBot Invincible Goated 75%", "Whisphere 80%",
+  "WhisphereRawControl Larger + Slowed",
+];
+
+// Every Viscose Easier scenario: your KovaaK's best, and Play in AimAdapt where the
+// trainer can play its file. One you haven't downloaded is listed with a way to get it.
+function viscoseCard() {
+  if (ui.sceLibrary === null) loadSceLibrary();
+  const reading = ui.sceLibrary === "loading";
+  const files = new Map((Array.isArray(ui.sceLibrary) ? ui.sceLibrary : []).map((f) => [f.name.toLowerCase(), f]));
+  const stats = new Map(ui.snap.scenarios.map((x) => [x.scenario.toLowerCase(), x]));
+  const rows = VISCOSE_EASIER.map((name) => ({ name, file: files.get(name.toLowerCase()), kv: stats.get(name.toLowerCase()) }));
+  const played = rows.filter((r) => r.kv).length;
+  const playable = rows.filter((r) => r.file?.playable).length;
+  // The trainer's state may not be loaded yet on Progress.
+  const busy = ui.trainer.data?.playing ? "disabled" : "";
+  const here = (r) => {
+    if (r.file?.playable) return `<button class="btn play-btn" type="button" data-action="play-sce" data-path="${esc(r.file.path)}" ${busy} aria-label="Play ${esc(r.name)} in AimAdapt" title="Plays this scenario's own file in AimAdapt's trainer">${playIcon}Play</button>`;
+    if (r.file) return `<a class="small muted" href="${scenarioHref(`kovaaks:${r.name}`)}" title="Its page says what the trainer can't play yet">Not yet</a>`;
+    return `<span class="small muted">${reading ? "…" : "Not downloaded"}</span>`;
+  };
+  const name = (r) => (r.file || r.kv ? `<a href="${scenarioHref(`kovaaks:${r.name}`)}">${esc(r.name)}</a>` : esc(r.name));
+  return `<section class="card"><div class="card-head"><h2>Viscose Easier</h2><span class="small muted">${played} of ${VISCOSE_EASIER.length} played in KovaaK's${reading ? "" : ` · ${playable} play in AimAdapt`}</span></div>
+      <div class="note-body">Your best scores on Viscose's Easier benchmark, read from your KovaaK's stats, and <strong>Play</strong> for each scenario AimAdapt's trainer can play from its own file, in standard mode. Runs in AimAdapt are kept apart from your KovaaK's runs. KovaaK's downloads a scenario when you first play it there, or subscribe to the Workshop collection "Viscose Benchmark Easy Scenarios" in Steam to get them all at once.</div>
+      ${reading ? `<div class="small muted">Reading your KovaaK's scenarios…</div>` : ""}
+      <div class="table-wrap"><table><thead><tr><th>Scenario</th><th class="r">Runs</th><th class="r">Best</th><th class="r">Last played</th><th class="r">In AimAdapt</th></tr></thead><tbody>
+        ${rows.map((r) => `<tr><td>${name(r)}</td><td class="r mono">${r.kv ? r.kv.runs : dash}</td><td class="r num">${r.kv ? num(r.kv.best_score) : dash}</td>
+          <td class="r">${r.kv ? esc(fmtShort(dt(r.kv.last_played))) : dash}</td><td class="r">${here(r)}</td></tr>`).join("")}</tbody></table></div>
     </section>`;
 }
 
