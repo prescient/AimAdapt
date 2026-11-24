@@ -188,7 +188,7 @@ Releases are for Windows only, but the workspace also builds and tests on Linux,
 sudo apt install pkg-config libwayland-dev libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev libdbus-1-dev libasound2-dev
 ```
 
-On Linux the app, the trainer and `aimadapt-cli` keep their files in `$XDG_DATA_HOME/AimAdapt`, normally `~/.local/share/AimAdapt`, instead of `%APPDATA%\AimAdapt`. Setting `APPDATA` moves them there too. The pre-commit hook builds `dist/AimAdapt` instead of `dist/AimAdapt.exe`.
+On Linux the app, the trainer and `aimadapt-cli` keep their files in `$XDG_DATA_HOME/AimAdapt`, normally `~/.local/share/AimAdapt`, instead of `%APPDATA%\AimAdapt`. Setting `APPDATA` moves them there too. KovaaK's, which Steam runs there under Proton, is found in Steam's own folder (`$XDG_DATA_HOME/Steam`, normally `~/.local/share/Steam`, which `~/.steam/steam` links to, or the Flatpak's) and the libraries it lists. The pre-commit hook builds `dist/AimAdapt` instead of `dist/AimAdapt.exe`.
 
 | Crate | Contents |
 |---|---|

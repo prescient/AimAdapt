@@ -29,7 +29,7 @@ These cover pure logic with small, hand-built inputs, one behaviour per test. To
 - **parse:** file names with ` - ` in the scenario, rejecting other files, runs crossing midnight, unknown and bad fields.
 - **training:** session splitting, the 4 AM day boundary, per-scenario restart detection, streaks and goals, weekday averages, pause subtraction.
 - **progress:** cm/360, improvement and best-score counting, plateaus, cold starts, restarted runs excluded, fatigue buckets.
-- **discover:** Steam `libraryfolders.vdf` parsing.
+- **discover:** Steam `libraryfolders.vdf` parsing and the libraries it lists; where Steam is looked for on Windows and on Linux; the stats, scenario and Workshop folders found inside a library on either system (regression test: on Nov 24, 2026 they were joined as Windows paths, one file name with backslashes on Linux, and Steam was only looked for in Program Files, so the Linux build found no KovaaK's at all); a library reached through a link (`~/.steam/steam`) counts once.
 
 **Rule:** every bug fix starts with a failing unit test.
 
