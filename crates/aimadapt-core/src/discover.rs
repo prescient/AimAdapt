@@ -160,21 +160,24 @@ mod tests {
     // Same bug: Steam was only looked for in Program Files.
     #[test]
     fn steam_is_looked_for_where_linux_installs_it() {
+        // Absolute on whichever system runs the test (`/home` has no drive on Windows).
+        let base = std::env::temp_dir();
+        let (home, data) = (base.join("home"), base.join("data"));
         let var = |name: &str| match name {
-            "HOME" => Some(PathBuf::from("/home/me")),
-            "XDG_DATA_HOME" => Some(PathBuf::from("/data")),
+            "HOME" => Some(home.clone()),
+            "XDG_DATA_HOME" => Some(data.clone()),
             _ => None,
         };
         let roots = default_steam_roots(false, var);
         for root in [
-            "/data/Steam",
-            "/home/me/.local/share/Steam",
-            "/home/me/.steam/steam",
-            "/home/me/.var/app/com.valvesoftware.Steam/.local/share/Steam",
+            under(&data, &["Steam"]),
+            under(&home, &[".local", "share", "Steam"]),
+            under(&home, &[".steam", "steam"]),
+            under(&home, &[".var", "app", "com.valvesoftware.Steam", ".local", "share", "Steam"]),
         ] {
-            assert!(roots.contains(&PathBuf::from(root)), "{root} missing from {roots:?}");
+            assert!(roots.contains(&root), "{} missing from {roots:?}", root.display());
         }
-        assert!(!roots.iter().any(|r| r.starts_with(r"C:\")), "{roots:?}");
+        assert!(!roots.iter().any(|r| r.to_string_lossy().contains("Program Files")), "{roots:?}");
 
         let relative = |name: &str| (name == "XDG_DATA_HOME").then(|| PathBuf::from("data"));
         assert!(default_steam_roots(false, relative).is_empty(), "a relative XDG_DATA_HOME is ignored");
