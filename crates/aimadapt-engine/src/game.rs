@@ -65,6 +65,8 @@ pub struct PlayOptions {
     /// The app started the trainer and waits for it: the results screen offers keys
     /// that close the trainer and open a page in the app.
     pub handoff: bool,
+    /// The player's own shot sound; `None` plays the pop.
+    pub shot: Option<crate::sound::Shot>,
 }
 
 /// Where the trainer window opens over the app window: centered across it, with
@@ -125,7 +127,7 @@ pub fn run(opts: PlayOptions) -> AppExit {
     };
     game.begin_step(0);
     // The bot test plays silently.
-    let speaker = if game.smoke.is_some() { Speaker::default() } else { Speaker::open() };
+    let speaker = if game.smoke.is_some() { Speaker::default() } else { Speaker::open(opts.shot) };
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin { primary_window: Some(window), ..default() }))
         .insert_resource(ClearColor(Color::srgb(0.05, 0.06, 0.08)))

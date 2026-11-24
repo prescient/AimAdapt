@@ -12,6 +12,8 @@ pub mod record;
 mod results;
 mod sound;
 
+pub use sound::{Shot, load_shot, shot_path};
+
 use std::path::PathBuf;
 
 use aimadapt_sim::program::{self, Program, Weekday};
@@ -190,6 +192,15 @@ fn parse_and_run(args: &[String]) -> Result<(), String> {
     let seed = seed.unwrap_or_else(|| {
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u64)
     });
+    // The player's own shot sound, or the pop. One that can't be played plays the pop.
+    let shot = match sound::load_shot(&data) {
+        Some(Ok(shot)) => Some(shot),
+        Some(Err(e)) => {
+            eprintln!("aimadapt: {} can't be played ({e}); shots pop instead", shot_path(&data).display());
+            None
+        }
+        None => None,
+    };
     run(PlayOptions {
         steps,
         workout: workout_name,
@@ -200,6 +211,7 @@ fn parse_and_run(args: &[String]) -> Result<(), String> {
         anchor: if smoke.is_some() { None } else { anchor },
         smoke,
         handoff,
+        shot,
     });
     Ok(())
 }

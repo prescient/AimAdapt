@@ -840,6 +840,29 @@ fn benchmarks_say_they_come_from_kovaaks() {
     assert!(app.contains("[\"kovaaks\", \"KovaaK's\"]"), "Settings has a KovaaK's tab for that address");
 }
 
+/// Settings › Sound says which sound a shot makes: the trainer's pop, your own WAV file
+/// (where it goes, and that moving it brings the pop back), or why yours can't be played.
+/// The trainer's data from before this field (the preview's dump) still draws the pop's note.
+#[test]
+fn sound_settings_say_which_shot_sound_plays() {
+    let settings = ui("settings.js");
+    assert!(decl(&settings, "profileEditor").contains("${shotSoundNote(d.shot_sound)}"));
+    let note = decl(&settings, "shotSoundNote");
+    for want in [
+        "shot?.found && !shot.error",
+        "your own sound",
+        "go back to the trainer's pop",
+        "can't be played",
+        "class=\"small error\"",
+        "save a WAV file as",
+        "esc(shot.path)",
+        "esc(shot.error)",
+    ] {
+        assert!(note.contains(want), "{want} missing from {note}");
+    }
+    assert!(note.contains("const where = shot ?"), "a dump without the field still draws: {note}");
+}
+
 /// Progress › Benchmarks also lists Viscose's Easier benchmark: its 36 scenarios by
 /// name, your KovaaK's bests, Play in AimAdapt on each file the trainer can play, and
 /// what to do about one that isn't there or doesn't play yet.

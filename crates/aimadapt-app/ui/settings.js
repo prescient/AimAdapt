@@ -223,6 +223,19 @@ function refreshSettingsBits() {
   if (h2) h2.textContent = selectedProfile().name;
 }
 
+// Which sound a shot makes: the trainer's own pop, or a WAV file of the player's in
+// their data folder, which stays on their computer.
+function shotSoundNote(shot) {
+  const where = shot ? `<span class="mono">${esc(shot.path)}</span>` : "sounds/shot.wav in your AimAdapt data folder";
+  if (shot?.found && !shot.error) {
+    return `<div class="small muted">Every shot plays your own sound, hit or miss: ${where} (${shot.seconds.toFixed(2)} s). Move or rename the file to go back to the trainer's pop. A beam makes no sound.</div>`;
+  }
+  if (shot?.found) {
+    return `<div class="small error">Your shot sound can't be played (${esc(shot.error)}), so shots pop instead: ${where}.</div>`;
+  }
+  return `<div class="small muted">Every shot makes a soft pop, hit or miss, so you know you fired. The trainer makes it itself. A beam makes no sound. To use a sound of your own, save a WAV file as ${where}. It plays at the same peak as the pop, cut to a second at most, and is read when the trainer starts.</div>`;
+}
+
 function profileEditor(p) {
   const d = ui.trainer.data;
   const g = gameOf(p.game);
@@ -265,9 +278,9 @@ function profileEditor(p) {
     </section>
     <section class="card"><h2>Sound</h2>
       <div class="form-grid keep-columns">
-        ${num_("Volume", "settings.sound.volume", 'min="0" max="100" step="5"', "%", "0 turns the pop off.")}
+        ${num_("Volume", "settings.sound.volume", 'min="0" max="100" step="5"', "%", "0 turns the shot sound off.")}
       </div>
-      <div class="small muted">Every shot makes a soft pop, hit or miss, so you know you fired. The trainer makes it itself. A beam makes no sound.</div>
+      ${shotSoundNote(d.shot_sound)}
     </section>
     <section class="card"><h2>Display</h2>
       <div class="form-grid">

@@ -102,6 +102,30 @@ pub struct Trainer {
     marks: Marks,
     /// The mix in use (for every profile) and the daily goal.
     training: Training,
+    /// The player's own shot sound, for Settings › Sound.
+    shot_sound: ShotSound,
+}
+
+/// Where the trainer looks for the player's own shot sound, and how it is.
+#[derive(Debug, PartialEq, Serialize)]
+pub struct ShotSound {
+    path: String,
+    /// A file is there.
+    found: bool,
+    /// Why the file there can't be played; shots pop instead.
+    error: Option<String>,
+    /// How long it plays, in seconds, when it can.
+    seconds: Option<f32>,
+}
+
+pub(crate) fn shot_sound(data_dir: &std::path::Path) -> ShotSound {
+    let loaded = aimadapt_engine::load_shot(data_dir);
+    ShotSound {
+        path: aimadapt_engine::shot_path(data_dir).display().to_string(),
+        found: loaded.is_some(),
+        error: loaded.as_ref().and_then(|r| r.as_ref().err().cloned()),
+        seconds: loaded.and_then(Result::ok).map(|s| s.seconds()),
+    }
 }
 
 #[tauri::command(async)]
@@ -188,6 +212,7 @@ pub fn build_trainer(state: &AppData, t: &TrainerState) -> Result<Trainer, Strin
         playing: t.playing.load(Ordering::SeqCst),
         marks: marks::load(&t.data_dir),
         training,
+        shot_sound: shot_sound(&t.data_dir),
     })
 }
 
@@ -693,6 +718,40 @@ pub fn play_program(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Settings › Sound says where your own shot sound goes, and whether the one there plays.
+    #[test]
+    fn settings_say_which_shot_sound_plays() {
+        let dir = std::env::temp_dir().join(format!("aimadapt-shot-sound-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = aimadapt_engine::shot_path(&dir);
+        let none = shot_sound(&dir);
+        assert_eq!(none, ShotSound { path: path.display().to_string(), found: false, error: None, seconds: None });
+
+        // 0.15 s of a 16-bit mono tone at 48 kHz.
+        let mut data = Vec::new();
+        for i in 0..7200 {
+            data.extend_from_slice(&(((f64::from(i) * 0.05).sin() * 9000.0) as i16).to_le_bytes());
+        }
+        let mut wav = b"RIFF\0\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0".to_vec();
+        wav.extend_from_slice(&48_000u32.to_le_bytes());
+        wav.extend_from_slice(&96_000u32.to_le_bytes());
+        wav.extend_from_slice(&[2, 0, 16, 0]);
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        wav.extend_from_slice(&data);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, &wav).unwrap();
+        let ok = shot_sound(&dir);
+        assert!(ok.found && ok.error.is_none(), "{ok:?}");
+        assert!((ok.seconds.unwrap() - 0.15).abs() < 1e-4, "{ok:?}");
+
+        std::fs::write(&path, b"ID3 an mp3").unwrap();
+        let bad = shot_sound(&dir);
+        assert!(bad.found && bad.seconds.is_none(), "{bad:?}");
+        assert_eq!(bad.error.as_deref(), Some("it isn't a WAV file"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// Bug: the app ignored how the trainer exited, and release builds have no
     /// console, so a scenario that failed to load closed the game with no word why.
