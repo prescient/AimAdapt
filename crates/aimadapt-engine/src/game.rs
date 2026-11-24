@@ -469,31 +469,67 @@ fn world_mesh(m: &aimadapt_sim::world::WorldMesh) -> Mesh {
         .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
 }
 
+/// The grid texture's size in texels; each tile is one 2 m cell.
+const GRID_TEXELS: u32 = 128;
+
 /// A light grid on a transparent background, tiled over the walls so movement is
-/// easy to judge.
+/// easy to judge. It carries every mip level, down to 1 by 1, and is sampled
+/// between them and anisotropically: far away a line is thinner than a pixel, and
+/// read from the full-size texture alone it shows or vanishes depending on which
+/// texel a pixel lands on, so lines broke up and flickered on distant walls.
 fn grid_texture() -> Image {
-    const N: u32 = 128;
-    let mut data = Vec::with_capacity((N * N * 4) as usize);
-    for y in 0..N {
-        for x in 0..N {
-            let line = x < 2 || y < 2;
-            let v = if line { 255 } else { 0 };
-            data.extend_from_slice(&[255, 255, 255, v]);
+    let n = GRID_TEXELS;
+    let mut alpha = Vec::with_capacity((n * n) as usize);
+    for y in 0..n {
+        for x in 0..n {
+            alpha.push(if x < 2 || y < 2 { 255 } else { 0 });
         }
     }
+    let levels = grid_mips(alpha, n);
     let mut image = Image::new(
-        Extent3d { width: N, height: N, depth_or_array_layers: 1 },
+        Extent3d { width: n, height: n, depth_or_array_layers: 1 },
         TextureDimension::D2,
-        data,
+        rgba(&levels[0]),
         TextureFormat::Rgba8UnormSrgb,
         RenderAssetUsages::RENDER_WORLD,
     );
+    // Every level, largest first, as the GPU upload expects them.
+    image.data = Some(levels.iter().flat_map(|level| rgba(level)).collect());
+    image.texture_descriptor.mip_level_count = levels.len() as u32;
     image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
         address_mode_u: ImageAddressMode::Repeat,
         address_mode_v: ImageAddressMode::Repeat,
+        anisotropy_clamp: 16,
         ..ImageSamplerDescriptor::linear()
     });
     image
+}
+
+/// The mip chain of a square alpha mask `size` texels wide, from the mask itself
+/// down to 1 by 1. Each texel is the mean of the four under it, so a line keeps
+/// its share of the area at every level and fades with distance instead of dropping out.
+fn grid_mips(level0: Vec<u8>, size: u32) -> Vec<Vec<u8>> {
+    let mut levels = vec![level0];
+    let mut n = size as usize;
+    while n > 1 {
+        let above = levels.last().expect("starts with one level");
+        let half = n / 2;
+        let at = |x: usize, y: usize| u32::from(above[y * n + x]);
+        let level = (0..half * half)
+            .map(|i| {
+                let (x, y) = (2 * (i % half), 2 * (i / half));
+                ((at(x, y) + at(x + 1, y) + at(x, y + 1) + at(x + 1, y + 1) + 2) / 4) as u8
+            })
+            .collect();
+        levels.push(level);
+        n = half;
+    }
+    levels
+}
+
+/// White texels with these alphas.
+fn rgba(alpha: &[u8]) -> Vec<u8> {
+    alpha.iter().flat_map(|&a| [255, 255, 255, a]).collect()
 }
 
 fn setup_cameras(mut commands: Commands, game: Res<Game>) {
@@ -1609,6 +1645,47 @@ fn rate_word(knob: Knob, per_target: bool) -> &'static str {
 mod tests {
     use super::*;
     use aimadapt_sim::world::{World, WorldVolume};
+
+    /// Playtest (Nov 24, 2026): the grid lines on far walls went missing, broke up and
+    /// came in and out. The texture had only its full-size level, so far away, where a
+    /// line is thinner than a pixel, each pixel read one texel, on a line or not. Now
+    /// it has every level down to 1 by 1, each covered by lines in the same share, and
+    /// is sampled between levels and anisotropically, so a far line fades instead.
+    #[test]
+    fn the_wall_grid_fades_evenly_with_distance() {
+        let image = grid_texture();
+        let n = GRID_TEXELS as usize;
+        let levels = image.texture_descriptor.mip_level_count as usize;
+        assert_eq!(levels, GRID_TEXELS.ilog2() as usize + 1, "every level down to 1 by 1");
+        let data = image.data.as_deref().expect("the texture's texels");
+        let sizes: Vec<usize> = (0..levels).map(|l| n >> l).collect();
+        assert_eq!(data.len(), sizes.iter().map(|s| s * s * 4).sum::<usize>(), "the upload holds every level");
+
+        let ImageSampler::Descriptor(s) = &image.sampler else { panic!("the grid sets its own sampler") };
+        for filter in [s.mag_filter, s.min_filter, s.mipmap_filter] {
+            assert_eq!(filter, bevy::image::ImageFilterMode::Linear);
+        }
+        assert!(s.anisotropy_clamp >= 8, "walls seen at a slant stay sharp: {}", s.anisotropy_clamp);
+        assert_eq!((s.address_mode_u, s.address_mode_v), (ImageAddressMode::Repeat, ImageAddressMode::Repeat));
+
+        // Each level is white, with lines covering the same share of it as at full size.
+        let mut rest = data;
+        let mut shares = Vec::new();
+        for side in sizes {
+            let (level, after) = rest.split_at(side * side * 4);
+            rest = after;
+            assert!(level.chunks(4).all(|t| t[..3] == [255, 255, 255]));
+            shares.push(level.chunks(4).map(|t| f64::from(t[3])).sum::<f64>() / (side * side) as f64);
+        }
+        // Two rows and two columns of 128 are lines.
+        let share = 255.0 * (1.0 - (126.0f64 / 128.0).powi(2));
+        assert!(shares.iter().all(|s| (s - share).abs() < 1.0), "line share by level {shares:?}, want {share:.2}");
+        // Along the top line, away from the corner where it crosses the other: a line two
+        // texels wide is still whole one level down, and half as strong two down.
+        let (second, third) = (n * n * 4, n * n * 4 + (n / 2) * (n / 2) * 4);
+        assert_eq!(data[second + 4 + 3], 255);
+        assert_eq!(data[third + 4 + 3], 128);
+    }
 
     /// The frame's systems in the order Bevy runs them, and why the schedule wouldn't build if it
     /// wouldn't. Ambiguity checks are on, so any two systems that touch the same data without an

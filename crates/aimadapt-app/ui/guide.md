@@ -372,6 +372,7 @@ Nothing is sent anywhere. Deleting one of your scenarios or workouts removes the
 ## What's new {#whats-new}
 
 **November 2026**
+- Fixed: the grid lines on far walls, floors and ceilings no longer break up, go missing or flicker as you move. Far away a line is thinner than a pixel, and the trainer now fades it evenly with distance instead. Ratings and scoring are unchanged.
 - New: a **Viscose Easier** card on Progress › Benchmarks from KovaaK's, with the 36 scenarios of Viscose's Easier benchmark, your best in KovaaK's on each, and **Play** on the 32 that AimAdapt's trainer plays. Ratings and scoring are unchanged.
 - New: every shot in the trainer makes a soft, low pop, hit or miss, so you know you fired. Set its volume under Sound on Settings. Ratings and scoring are unchanged.
 - Timed Grid's targets now come in three colors by time left: the one closest to running out is red, the next blue and the newest white, and when you clear one the others move up a color. Before, they changed color by wave, so once a whole wave was up all three were one color. Ratings and scoring are unchanged.
