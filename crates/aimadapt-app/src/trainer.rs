@@ -532,16 +532,10 @@ pub struct SceInfo {
     adaptive_last: Option<String>,
 }
 
-/// The `.sce` file named after a scenario, among these files.
-pub(crate) fn sce_file_for(name: &str, files: &[PathBuf]) -> Option<PathBuf> {
-    let want = name.trim().to_lowercase();
-    files.iter().find(|f| f.file_stem().is_some_and(|s| s.to_string_lossy().trim().to_lowercase() == want)).cloned()
-}
-
 #[tauri::command(async)]
 pub fn sce_info(state: State<'_, AppData>, name: String) -> Result<SceInfo, String> {
     let files = aimadapt_sce::find_files(&aimadapt_core::discover::find_scenario_dirs());
-    let path = sce_file_for(&name, &files);
+    let path = aimadapt_sce::file_named(&name, &files);
     let (scenario, reasons, notes) = match path.as_deref().map(aimadapt_sce::import) {
         None => (None, Vec::new(), Vec::new()),
         Some(Ok(i)) => (Some(i.scenario), Vec::new(), i.notes),
@@ -596,7 +590,7 @@ pub fn sce_library() -> Vec<SceEntry> {
     sce_entries(&aimadapt_sce::find_files(&aimadapt_core::discover::find_scenario_dirs()))
 }
 
-/// One entry per name (the first file wins, as in [`sce_file_for`]), skipping files
+/// One entry per name (the first file wins, as in [`aimadapt_sce::file_named`]), skipping files
 /// that can't be read. Files are only read.
 pub(crate) fn sce_entries(files: &[PathBuf]) -> Vec<SceEntry> {
     let mut seen = std::collections::HashSet::new();
@@ -643,8 +637,10 @@ pub fn play_sce(
     launch(app, &state, &t, &sce_args(&path, adaptive))
 }
 
-/// Starts the trainer on a workout.
-#[tauri::command]
+/// Starts the trainer on a workout. A KovaaK's scenario in it plays from your own file, and the
+/// trainer leaves out one that isn't there or can't play yet; a workout with nothing left to play is
+/// refused here, with why. Reading the files takes a moment, so this runs off the main thread.
+#[tauri::command(async)]
 pub fn play_workout(
     app: AppHandle,
     state: State<'_, AppData>,
@@ -652,9 +648,7 @@ pub fn play_workout(
     id: String,
 ) -> Result<(), String> {
     let w = workout::resolve(&id, &t.workouts_dir())?;
-    for item in &w.items {
-        library::resolve(&item.scenario, &t.scenarios_dir()).map_err(|e| format!("{}: {e}", item.scenario))?;
-    }
+    aimadapt_engine::workout_steps(&w, &t.scenarios_dir(), &aimadapt_core::discover::find_scenario_dirs())?;
     launch(app, &state, &t, &workout_args(&id))
 }
 
@@ -874,13 +868,5 @@ mod tests {
         // [nl] is a line break in KovaaK's descriptions.
         assert!(wall.description.contains("tests. Three"), "{}", wall.description);
         assert!(list.iter().any(|e| !e.playable), "the moving-bot fixture can't play yet");
-    }
-
-    #[test]
-    fn a_scenarios_file_is_found_by_its_name() {
-        let files = vec![PathBuf::from("C:/S/VT 1w4ts Novice S5.sce"), PathBuf::from("C:/S/vt ww5t novice s5.sce")];
-        assert_eq!(sce_file_for("VT 1w4ts Novice S5", &files), Some(files[0].clone()));
-        assert_eq!(sce_file_for("VT ww5t Novice S5", &files), Some(files[1].clone()));
-        assert_eq!(sce_file_for("VT 1w4ts Novice S5 Hard", &files), None);
     }
 }

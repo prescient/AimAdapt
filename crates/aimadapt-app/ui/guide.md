@@ -237,11 +237,17 @@ Built-in workouts:
 - **Daily Fundamentals:** about eight minutes of clicking, tracking and switching, all adaptive.
 - **Clicking Focus:** timed flicks at every distance, plus reaction and moving targets.
 - **Tracking Focus:** reactive strafes, smooth tracking and switching.
+- **Viscose Easier: Clicking:** the first nine scenarios of Viscose's Easier benchmark, its clicking.
+- **Viscose Easier: Switching:** the next nine, its target switching.
+- **Viscose Easier: Tracking A:** the first nine of its eighteen tracking scenarios.
+- **Viscose Easier: Tracking B:** the last nine.
 - **Core Week: Monday** to **Core Week: Friday:** the program's days. They're played from Today and Scenarios › Program, so they aren't in the Workouts list.
+
+The four Viscose Easier workouts split the benchmark in its order, so you can train all of it over four days instead of playing it in one go. Each plays two adaptive runs of each of its scenarios from your own KovaaK's files, about 20 minutes. A scenario you haven't downloaded, or that AimAdapt can't play yet, is left out, and the workout's page says which and why (see [Playing KovaaK's scenarios](#help/kovaaks-play)). Four of the 36 can't play yet: Popcorn MV Novice in Clicking, Whisphere Small & Slow 55% in Tracking A, and Leaptrack Goated 60% Larger and Whisphere 80% in Tracking B.
 
 Workouts have their own tab on Scenarios.
 
-**Editing a workout:** add scenarios, set runs and mode for each, and reorder them with the arrows. **Save & start** saves it and plays it straight away. Built-ins are copied before editing, so the originals stay as they are. **Cancel** throws away your changes and goes back to the workout's page.
+**Editing a workout:** add scenarios, set runs and mode for each, and reorder them with the arrows. Your KovaaK's scenarios that AimAdapt can play are in the scenario list too, under their own heading, and play from your own files like the Viscose Easier workouts do. **Save & start** saves it and plays it straight away. Built-ins are copied before editing, so the originals stay as they are. **Cancel** throws away your changes and goes back to the workout's page.
 
 ## Scenario editor {#edit}
 
@@ -267,7 +273,7 @@ Progress shows how you're doing across all your scenarios, in three tabs.
 
 **Benchmarks from KovaaK's** lists your best scores on the Voltaic Season 5 benchmark scenarios, read from your KovaaK's stats files. Each opens the scenario on Scenarios. AimAdapt's own scenarios aren't here: they're rated on their own pages and on Skills. If you haven't played any of them in KovaaK's, the tab says so and links to Settings › KovaaK's, where the stats folder is set up.
 
-Below it, **Viscose Easier** lists the 36 scenarios of Viscose's Easier benchmark, with your runs, best and last day played in KovaaK's. On each one AimAdapt's trainer can play from its own file, **Play** starts an adaptive run and **Standard** plays it as written, and **Rating** is your latest adaptive rating in AimAdapt (see [Playing KovaaK's scenarios](#help/kovaaks-play)). Runs in AimAdapt are kept apart from your KovaaK's runs. One the trainer can't play yet says **Not yet** and opens its page, which says why. One that isn't in your KovaaK's folders says **Not downloaded**: KovaaK's downloads a scenario when you first play it there, or subscribe to the Steam Workshop collection "Viscose Benchmark Easy Scenarios" to get them all at once.
+Below it, **Viscose Easier** lists the 36 scenarios of Viscose's Easier benchmark, with your runs, best and last day played in KovaaK's. On each one AimAdapt's trainer can play from its own file, **Play** starts an adaptive run and **Standard** plays it as written, and **Rating** is your latest adaptive rating in AimAdapt (see [Playing KovaaK's scenarios](#help/kovaaks-play)). Runs in AimAdapt are kept apart from your KovaaK's runs. One the trainer can't play yet says **Not yet** and opens its page, which says why. One that isn't in your KovaaK's folders says **Not downloaded**: KovaaK's downloads a scenario when you first play it there, or subscribe to the Steam Workshop collection "Viscose Benchmark Easy Scenarios" to get them all at once. The card links to the four Viscose Easier workouts (see [Workouts](#help/workout)), which train the benchmark a quarter at a time.
 
 **Time** shows when and how much you train, counting KovaaK's runs and trainer runs together: totals (active time, session time, days trained, days the daily goal was met), daily time for the last seven days, a calendar of daily time (use the arrows to change month) and every session newest first. **More about when you train** opens four more cards: the last seven days as session blocks, time by day of the week, runs by hour of day, and active against idle time. It starts closed, and stays open or closed as you use the page. How time is counted is in [Settings › Training](#help/settings).
 
@@ -381,6 +387,8 @@ Nothing is sent anywhere. Deleting one of your scenarios or workouts removes the
 ## What's new {#whats-new}
 
 **November 2026**
+- New: four **Viscose Easier** workouts (Clicking, Switching, Tracking A and Tracking B) split Viscose's Easier benchmark into sessions of about 20 minutes, with two adaptive runs of each scenario, played from your own KovaaK's files. A scenario you haven't downloaded or that can't play yet is left out, and the workout's page says which. Your own workouts can hold your KovaaK's scenarios too: the editor lists the ones that play. Ratings and scoring are unchanged.
+- Fixed: in a session with several KovaaK's scenarios, the field of view of the first one's locked range was used for every run, and later scenarios' ranges were ignored. Each run now keeps your field of view inside its own scenario's range. Ratings and scoring are unchanged.
 - New: play KovaaK's scenarios adaptively. On a KovaaK's scenario that plays here, and on each row of the Viscose Easier card, **Play** now starts an adaptive run of its file, rated on the scenario's speed (×1.00 is the file as written) or, for clicking and targets that never move, on kill pace. **Standard run** plays it as written, as Play in AimAdapt did. The card on the scenario's page and the Viscose Easier card show your rating. Standard runs and their bests are unchanged, and your KovaaK's history is untouched.
 - Fixed: tracking with a KovaaK's weapon you hold down no longer buzzes. It fires up to 100 shots a second, and each one started a sound. Held fire now sounds when you press and then four times a second; every click still sounds. A weapon that fires without the button makes no sound, like a beam. Ratings and scoring are unchanged.
 - New: use a shot sound of your own. Save a WAV file as `sounds\shot.wav` in your AimAdapt data folder and every shot plays it instead of the pop. Settings › Sound shows where it goes and whether yours plays. Ratings and scoring are unchanged.

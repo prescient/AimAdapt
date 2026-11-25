@@ -1,0 +1,48 @@
+name = "Viscose Easier: Tracking B"
+description = "The last nine tracking scenarios of Viscose's Easier benchmark: two adaptive runs of each, from your own KovaaK's files. A scenario you haven't downloaded, or that AimAdapt can't play yet, is left out."
+author = "AimAdapt"
+
+[[items]]
+scenario = "kovaaks:Controlsphere Far, Far Larger 90%"
+runs = 2
+mode = "adaptive"
+
+[[items]]
+scenario = "kovaaks:cloverRawControl Easy 80% Speed"
+runs = 2
+mode = "adaptive"
+
+[[items]]
+scenario = "kovaaks:Air Angelic 4 Voltaic Easy 80% (Good Version)"
+runs = 2
+mode = "adaptive"
+
+[[items]]
+scenario = "kovaaks:VT Controlsphere Intermediate S5 80%"
+runs = 2
+mode = "adaptive"
+
+[[items]]
+scenario = "kovaaks:Controlsphere rAim Easy 90%"
+runs = 2
+mode = "adaptive"
+
+[[items]]
+scenario = "kovaaks:Leaptrack Goated 60% Larger"
+runs = 2
+mode = "adaptive"
+
+[[items]]
+scenario = "kovaaks:SmoothBot Invincible Goated 75%"
+runs = 2
+mode = "adaptive"
+
+[[items]]
+scenario = "kovaaks:Whisphere 80%"
+runs = 2
+mode = "adaptive"
+
+[[items]]
+scenario = "kovaaks:WhisphereRawControl Larger + Slowed"
+runs = 2
+mode = "adaptive"

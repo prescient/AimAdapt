@@ -1,0 +1,48 @@
+name = "Viscose Easier: Switching"
+description = "The next nine scenarios of Viscose's Easier benchmark, its target switching: two adaptive runs of each, from your own KovaaK's files. A scenario you haven't downloaded, or that AimAdapt can't play yet, is left out."
+author = "AimAdapt"
+
+[[items]]
+scenario = "kovaaks:tamTargetSwitch Smooth Easy"
+runs = 2
+mode = "adaptive"
+
+[[items]]
+scenario = "kovaaks:domiSwitch Easy Slower"
+runs = 2
+mode = "adaptive"
+
+[[items]]
+scenario = "kovaaks:devTS Goated NR Static 5Bot"
+runs = 2
+mode = "adaptive"
+
+[[items]]
+scenario = "kovaaks:waldoTS Novice"
+runs = 2
+mode = "adaptive"
+
+[[items]]
+scenario = "kovaaks:FloatTS Angelic Easy Larger"
+runs = 2
+mode = "adaptive"
+
+[[items]]
+scenario = "kovaaks:beanTS Larger"
+runs = 2
+mode = "adaptive"
+
+[[items]]
+scenario = "kovaaks:voxTargetSwitch 2 Large"
+runs = 2
+mode = "adaptive"
+
+[[items]]
+scenario = "kovaaks:1w3ts reload Larger"
+runs = 2
+mode = "adaptive"
+
+[[items]]
+scenario = "kovaaks:Pokeball Frenzy Auto TE Wide"
+runs = 2
+mode = "adaptive"

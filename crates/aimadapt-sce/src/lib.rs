@@ -44,3 +44,24 @@ pub fn find_files(dirs: &[PathBuf]) -> Vec<PathBuf> {
     out.dedup();
     out
 }
+
+/// The file of a scenario among these files: the first whose name without `.sce` is the scenario's,
+/// ignoring case and spaces at the ends. KovaaK's names its stats after the file, so this is how a
+/// name in your history or a workout finds its file.
+pub fn file_named(name: &str, files: &[PathBuf]) -> Option<PathBuf> {
+    let want = name.trim().to_lowercase();
+    files.iter().find(|f| f.file_stem().is_some_and(|s| s.to_string_lossy().trim().to_lowercase() == want)).cloned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_scenarios_file_is_found_by_its_name() {
+        let files = vec![PathBuf::from("C:/S/VT 1w4ts Novice S5.sce"), PathBuf::from("C:/S/vt ww5t novice s5.sce")];
+        assert_eq!(file_named("VT 1w4ts Novice S5", &files), Some(files[0].clone()));
+        assert_eq!(file_named(" VT ww5t Novice S5", &files), Some(files[1].clone()));
+        assert_eq!(file_named("VT 1w4ts Novice S5 Hard", &files), None);
+    }
+}

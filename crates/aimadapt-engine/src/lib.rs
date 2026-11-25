@@ -102,22 +102,13 @@ fn parse_and_run(args: &[String]) -> Result<(), String> {
         Some(p) => p,
         None => aimadapt_core::db::default_path().map_err(|e| e.to_string())?,
     };
+    // KovaaK's scenarios in a workout are found in your KovaaK's folders; one that can't play is left out.
     let to_steps = |w: &Workout| {
-        w.steps()
-            .into_iter()
-            .map(|s| {
-                let scenario = aimadapt_sim::library::resolve(&s.scenario, &scen_dir)?;
-                let label = (s.of > 1).then(|| format!("run {} of {}", s.run, s.of));
-                Ok(PlayStep {
-                    scenario,
-                    adaptive: s.mode == Mode::Adaptive,
-                    label,
-                    rep: s.run,
-                    reps: s.of,
-                    block: s.block,
-                })
-            })
-            .collect::<Result<Vec<_>, String>>()
+        let (steps, skipped) = workout_steps(w, &scen_dir, &aimadapt_core::discover::find_scenario_dirs())?;
+        for s in &skipped {
+            eprintln!("aimadapt: left out of {}: {s}", w.name);
+        }
+        Ok::<_, String>(steps)
     };
     let mut program_day = None;
     let (mut steps, workout_name) = match (program_id, workout_id, id) {
@@ -154,12 +145,9 @@ fn parse_and_run(args: &[String]) -> Result<(), String> {
         }
     };
     let db_handle = aimadapt_core::Db::open(&db_path).ok();
+    // An imported scenario can keep the field of view within a range; each run applies its own (see `game`).
     let mut settings = load_settings(&data, db_handle.as_ref(), profile.as_deref())?;
     drop(db_handle);
-    // An imported scenario can keep the field of view within a range, as KovaaK's does.
-    if let Some([lo, hi]) = steps.first().and_then(|s| s.scenario.world.as_ref()).and_then(|w| w.fov_range) {
-        settings.fov = settings.fov.clamp(lo, hi);
-    }
     if windowed || smoke.is_some() {
         settings.display.mode = DisplayMode::Windowed;
         if smoke.is_some() {
@@ -199,6 +187,54 @@ fn parse_and_run(args: &[String]) -> Result<(), String> {
         shot,
     });
     Ok(())
+}
+
+/// A workout's runs, in order, and what was left out of it. An item `kovaaks:<name>` plays your own
+/// KovaaK's file of that name from these folders. One that isn't there, or that the trainer can't play
+/// yet, is left out and named in the second list, so the rest of the workout still plays. Any other
+/// scenario that can't be found is an error, and so is a workout with nothing left to play.
+pub fn workout_steps(
+    w: &Workout,
+    scenarios: &std::path::Path,
+    kovaaks_dirs: &[PathBuf],
+) -> Result<(Vec<PlayStep>, Vec<String>), String> {
+    // The folders are only read when an item needs them.
+    let mut files: Option<Vec<PathBuf>> = None;
+    let mut steps = Vec::new();
+    let mut skipped = Vec::new();
+    for item in &w.items {
+        let scenario = match workout::kovaaks_name(&item.scenario) {
+            None => aimadapt_sim::library::resolve(&item.scenario, scenarios)?,
+            Some(name) => {
+                let files = files.get_or_insert_with(|| aimadapt_sce::find_files(kovaaks_dirs));
+                let Some(path) = aimadapt_sce::file_named(name, files) else {
+                    skipped.push(format!("{name}: not in your KovaaK's folders"));
+                    continue;
+                };
+                match sce_step(&path, false) {
+                    Ok(step) => step.scenario,
+                    Err(e) => {
+                        skipped.push(format!("{name}: {e}"));
+                        continue;
+                    }
+                }
+            }
+        };
+        for run in 1..=item.runs {
+            steps.push(PlayStep {
+                scenario: scenario.clone(),
+                adaptive: item.mode == Mode::Adaptive,
+                label: (item.runs > 1).then(|| format!("run {run} of {}", item.runs)),
+                rep: run,
+                reps: item.runs,
+                block: item.block,
+            });
+        }
+    }
+    if steps.is_empty() {
+        return Err(format!("nothing in {} can play here ({})", w.name, skipped.join("; ")));
+    }
+    Ok((steps, skipped))
 }
 
 /// The run of a KovaaK's scenario file: standard, or adaptive on the knob its kind gets (speed or kill
@@ -324,6 +360,61 @@ mod tests {
         let standard = sce_step(&dir.join("AimAdapt Test - Slow Strafe.sce"), false).unwrap();
         assert!(!standard.adaptive);
         assert!(sce_step(&dir.join("AimAdapt Test - Slow Gate.sce"), true).is_err(), "a file that can't play");
+    }
+
+    /// A workout can list KovaaK's scenarios by name (the Viscose Easier workouts do). Each plays your own
+    /// file, and one you haven't downloaded or that can't play yet is left out, so the rest still play.
+    #[test]
+    fn a_workout_plays_your_kovaaks_files_and_leaves_out_the_rest() {
+        let dirs = [std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../aimadapt-sce/tests/fixtures")];
+        let none = std::path::Path::new("");
+        let w = Workout::from_toml(
+            r#"name = "Mixed"
+[[items]]
+scenario = "builtin:timed-flicks"
+[[items]]
+scenario = "kovaaks:aimadapt test - slow strafe"
+runs = 2
+[[items]]
+scenario = "kovaaks:AimAdapt Test - Slow Gate"
+[[items]]
+scenario = "kovaaks:Not Downloaded"
+mode = "standard""#,
+        )
+        .unwrap();
+        let (steps, skipped) = workout_steps(&w, none, &dirs).unwrap();
+        let names: Vec<&str> = steps.iter().map(|s| s.scenario.name.as_str()).collect();
+        let strafe = aimadapt_sce::import(&dirs[0].join("AimAdapt Test - Slow Strafe.sce")).unwrap().scenario;
+        assert_eq!(names, ["Timed Flicks", strafe.name.as_str(), strafe.name.as_str()]);
+        assert_eq!(steps[1].scenario, strafe, "the file as imported");
+        assert!(steps[1].adaptive && steps[2].adaptive);
+        assert_eq!((steps[2].rep, steps[2].reps, steps[2].label.as_deref()), (2, 2, Some("run 2 of 2")));
+        assert_eq!(skipped.len(), 2, "{skipped:?}");
+        assert!(skipped[0].starts_with("AimAdapt Test - Slow Gate: can't play this yet"), "{skipped:?}");
+        assert_eq!(skipped[1], "Not Downloaded: not in your KovaaK's folders");
+
+        // With nothing left to play it says why; an unknown built-in is still an error.
+        let only = Workout::from_toml("name = \"Gone\"\n[[items]]\nscenario = \"kovaaks:Not Downloaded\"").unwrap();
+        let err = workout_steps(&only, none, &dirs).unwrap_err();
+        assert_eq!(err, "nothing in Gone can play here (Not Downloaded: not in your KovaaK's folders)");
+        let bad = Workout::from_toml("name = \"Bad\"\n[[items]]\nscenario = \"builtin:no-such\"").unwrap();
+        assert!(workout_steps(&bad, none, &dirs).is_err());
+    }
+
+    /// Every built-in workout's runs resolve, KovaaK's ones included (all left out with no folders).
+    #[test]
+    fn every_built_in_workout_resolves() {
+        for e in workout::builtins() {
+            let w = e.workout.unwrap();
+            match workout_steps(&w, std::path::Path::new(""), &[]) {
+                Ok((steps, skipped)) => {
+                    assert!(skipped.is_empty() && steps.len() == w.total_runs() as usize, "{}", w.name)
+                }
+                Err(err) => {
+                    assert!(w.name.starts_with("Viscose Easier") && err.starts_with("nothing in"), "{}: {err}", w.name)
+                }
+            }
+        }
     }
 
     /// Bot runs must never land in a player's history, so `--smoke` needs `--db`.

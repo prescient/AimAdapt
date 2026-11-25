@@ -36,7 +36,7 @@ use crate::sound::{self, Speaker};
 mod results_panel;
 
 /// One run to play.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct PlayStep {
     pub scenario: Scenario,
     pub adaptive: bool,
@@ -76,7 +76,7 @@ pub fn window_position(anchor: [i32; 3], window_width: u32) -> [i32; 2] {
     [x + (w - window_width as i32) / 2, y]
 }
 
-pub fn run(opts: PlayOptions) -> AppExit {
+pub fn run(mut opts: PlayOptions) -> AppExit {
     let d = &opts.settings.display;
     let title = match &opts.workout {
         Some(w) => format!("AimAdapt — {w}"),
@@ -103,32 +103,10 @@ pub fn run(opts: PlayOptions) -> AppExit {
         },
         ..default()
     };
-    let mut game = Game {
-        session: Session {
-            steps: opts.steps,
-            index: 0,
-            seed: opts.seed,
-            workout: opts.workout,
-            program: opts.program,
-            settings: opts.settings,
-            db_path: opts.db_path,
-            handoff: opts.handoff,
-            done: Vec::new(),
-        },
-        sim: Sim::new(Scenario::default(), opts.seed),
-        look: Look::default(),
-        run: Run::default(),
-        fps: 0.0,
-        world_dirty: true,
-        display_note: None,
-        pacer: sound::Pacer::default(),
-        video_mode_set: false,
-        smoke: opts.smoke.map(|dir| Smoke { dir, taken: 0, after_finish: 0.0 }),
-        bot: crate::bot::Bot::new(opts.seed),
-    };
-    game.begin_step(0);
+    let shot = opts.shot.take();
+    let game = Game::new(opts);
     // The bot test plays silently.
-    let speaker = if game.smoke.is_some() { Speaker::default() } else { Speaker::open(opts.shot) };
+    let speaker = if game.smoke.is_some() { Speaker::default() } else { Speaker::open(shot) };
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin { primary_window: Some(window), ..default() }))
         .insert_resource(ClearColor(Color::srgb(0.05, 0.06, 0.08)))
@@ -187,7 +165,10 @@ struct Session {
     seed: u64,
     workout: Option<String>,
     program: Option<(String, String)>,
+    /// The player's settings, with the current run's field of view.
     settings: PlayerSettings,
+    /// The player's own field of view, before any scenario's range.
+    own_fov: f32,
     db_path: Option<PathBuf>,
     /// The app is waiting for the trainer (see [`PlayOptions::handoff`]).
     handoff: bool,
@@ -243,7 +224,46 @@ struct Smoke {
     after_finish: f32,
 }
 
+/// The field of view a scenario plays at: yours, kept inside the range an imported scenario can lock
+/// it to, as KovaaK's does.
+fn fov_for(own: f32, scenario: &Scenario) -> f32 {
+    match scenario.world.as_ref().and_then(|w| w.fov_range) {
+        Some([lo, hi]) => own.clamp(lo, hi),
+        None => own,
+    }
+}
+
 impl Game {
+    /// The trainer at its first run.
+    fn new(opts: PlayOptions) -> Game {
+        let mut game = Game {
+            session: Session {
+                steps: opts.steps,
+                index: 0,
+                seed: opts.seed,
+                workout: opts.workout,
+                program: opts.program,
+                own_fov: opts.settings.fov,
+                settings: opts.settings,
+                db_path: opts.db_path,
+                handoff: opts.handoff,
+                done: Vec::new(),
+            },
+            sim: Sim::new(Scenario::default(), opts.seed),
+            look: Look::default(),
+            run: Run::default(),
+            fps: 0.0,
+            world_dirty: true,
+            display_note: None,
+            pacer: sound::Pacer::default(),
+            video_mode_set: false,
+            smoke: opts.smoke.map(|dir| Smoke { dir, taken: 0, after_finish: 0.0 }),
+            bot: crate::bot::Bot::new(opts.seed),
+        };
+        game.begin_step(0);
+        game
+    }
+
     fn step_info(&self) -> &PlayStep {
         &self.session.steps[self.session.index]
     }
@@ -259,6 +279,8 @@ impl Game {
         self.session.index = i;
         self.session.seed = self.session.seed.wrapping_add(1);
         let step = self.session.steps[i].clone();
+        // Each run keeps to its own scenario's range; the camera follows when the world is rebuilt.
+        self.session.settings.fov = fov_for(self.session.own_fov, &step.scenario);
         let db = self.session.db_path.as_deref().and_then(|p| aimadapt_core::Db::open(p).ok());
         let s = step.scenario.clone();
         self.run = Run::default();
@@ -561,11 +583,17 @@ fn rebuild_world(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
     old: RoomEntities,
+    mut camera: Query<&mut Projection, With<PlayerCamera>>,
 ) {
     if !game.world_dirty {
         return;
     }
     game.world_dirty = false;
+    for mut projection in &mut camera {
+        if let Projection::Perspective(p) = &mut *projection {
+            p.fov = game.session.settings.vertical_fov();
+        }
+    }
     for e in &old {
         commands.entity(e).despawn();
     }
@@ -1660,6 +1688,45 @@ fn rate_word(knob: Knob, per_target: bool) -> &'static str {
 mod tests {
     use super::*;
     use aimadapt_sim::world::{World, WorldVolume};
+
+    /// A workout can play several KovaaK's scenarios, each with its own field-of-view range. The range
+    /// of the first run was applied to the whole session, so later runs played at its FOV, and saved it,
+    /// whatever their own range. Each run now keeps your FOV inside its own range, or plays it as set.
+    #[test]
+    fn each_run_keeps_to_its_own_fov_range() {
+        let ranged = |lo: f32, hi: f32| Scenario {
+            name: format!("{lo}-{hi}"),
+            world: Some(World { fov_range: Some([lo, hi]), ..World::default() }),
+            ..Scenario::default()
+        };
+        let step = |scenario| PlayStep {
+            scenario,
+            adaptive: false,
+            label: None,
+            rep: 1,
+            reps: 1,
+            block: aimadapt_sim::workout::Block::None,
+        };
+        let settings = PlayerSettings { fov: 90.0, ..PlayerSettings::default() };
+        let mut game = Game::new(PlayOptions {
+            steps: vec![step(ranged(100.0, 120.0)), step(Scenario::default()), step(ranged(60.0, 80.0))],
+            workout: Some("Mixed".into()),
+            program: None,
+            settings,
+            db_path: None,
+            seed: 1,
+            smoke: None,
+            anchor: None,
+            handoff: false,
+            shot: None,
+        });
+        assert_eq!(game.session.settings.fov, 100.0, "raised into the first run's range");
+        game.begin_step(1);
+        assert_eq!(game.session.settings.fov, 90.0, "your own FOV where the scenario sets none");
+        game.begin_step(2);
+        assert_eq!(game.session.settings.fov, 80.0, "lowered into the third run's range");
+        assert_eq!(game.session.own_fov, 90.0);
+    }
 
     /// Playtest (Nov 24, 2026): the grid lines on far walls went missing, broke up and
     /// came in and out. The texture had only its full-size level, so far away, where a

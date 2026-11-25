@@ -723,6 +723,9 @@ const VISCOSE_EASIER = [
   "WhisphereRawControl Larger + Slowed",
 ];
 
+// The built-in workouts that split the benchmark in four, in its order (crates/aimadapt-sim/workouts).
+const VISCOSE_WORKOUTS = [["clicking", "Clicking"], ["switching", "Switching"], ["tracking-a", "Tracking A"], ["tracking-b", "Tracking B"]];
+
 // Every Viscose Easier scenario: your KovaaK's best, and where the trainer can play
 // its file, Play (an adaptive run), Standard and your rating in AimAdapt. One you
 // haven't downloaded is listed with a way to get it.
@@ -754,6 +757,7 @@ function viscoseCard() {
   };
   return `<section class="card"><div class="card-head"><h2>Viscose Easier</h2><span class="small muted">${played} of ${VISCOSE_EASIER.length} played in KovaaK's${reading ? "" : ` · ${playable} play in AimAdapt`}</span></div>
       <div class="note-body">Your best scores on Viscose's Easier benchmark, read from your KovaaK's stats, and for each scenario AimAdapt's trainer can play from its own file, <strong>Play</strong> for an adaptive run and <strong>Standard</strong> to play it as written. Adaptive runs are rated on the file's speed (×1.00 is the file as written) or, for clicking and still targets, on kill pace, and Rating is your latest. Runs in AimAdapt are kept apart from your KovaaK's runs. KovaaK's downloads a scenario when you first play it there, or subscribe to the Workshop collection "Viscose Benchmark Easy Scenarios" in Steam to get them all at once.</div>
+      <div class="note-body">To train it, play it in four workouts of about 20 minutes, two adaptive runs of each scenario: ${VISCOSE_WORKOUTS.map(([id, label]) => `<a href="${scenarioHref(`workout:builtin:viscose-easier-${id}`)}">${label}</a>`).join(", ").replace(/, ([^,]*)$/, " and $1")}.</div>
       ${reading ? `<div class="small muted">Reading your KovaaK's scenarios…</div>` : ""}
       <div class="table-wrap"><table><thead><tr><th>Scenario</th><th class="r">Runs</th><th class="r">Best</th><th class="r">Last played</th><th class="r">Rating</th><th class="r">In AimAdapt</th></tr></thead><tbody>
         ${rows.map((r) => `<tr><td>${name(r)}</td><td class="r mono">${r.kv ? r.kv.runs : dash}</td><td class="r num">${r.kv ? num(r.kv.best_score) : dash}</td>

@@ -83,7 +83,7 @@ const knobWord = (knob) => ({ target_speed: "tracking speed", lifetime: "speed",
 const knobUnit = (knob) => ({ target_speed: "°/s", lifetime: "s", kill_pace: "s", time_scale: "×" })[knob] ?? "m";
 const betterThan = (knob, a, b) => (higherIsHarder(knob) ? a > b : a < b);
 
-const scenarioName = (id) => ui.trainer.data?.scenarios.find((e) => e.id === id)?.scenario?.name ?? id.replace(/^(builtin|user):/, "");
+const scenarioName = (id) => ui.trainer.data?.scenarios.find((e) => e.id === id)?.scenario?.name ?? id.replace(/^(builtin|user|kovaaks):/, "");
 const minutes = (s) => `${Math.max(1, Math.round(s / 60))} min`;
 
 // ---------- Scenario editor ----------
@@ -293,6 +293,13 @@ function workout(id) {
   const e = tr.wedit;
   const w = e.workout;
   const options = tr.data.scenarios.filter((s) => s.scenario).map((s) => [s.id, s.scenario.name]);
+  // Your KovaaK's scenarios that play here, and any the workout already has, under their own heading.
+  if (ui.sceLibrary === null) loadSceLibrary();
+  const kovaaks = new Map((Array.isArray(ui.sceLibrary) ? ui.sceLibrary : []).filter((f) => f.playable).map((f) => [`kovaaks:${f.name}`, f.name]));
+  for (const it of w.items) if (it.scenario.startsWith("kovaaks:") && !kovaaks.has(it.scenario)) kovaaks.set(it.scenario, scenarioName(it.scenario));
+  const kovaaksOptions = [...kovaaks].sort((a, b) => a[1].localeCompare(b[1]));
+  const choices = (it) => options.map(([v, l]) => `<option value="${esc(v)}" ${v === it.scenario ? "selected" : ""}>${esc(l)}</option>`).join("")
+    + (kovaaksOptions.length ? `<optgroup label="Your KovaaK's scenarios">${kovaaksOptions.map(([v, l]) => `<option value="${esc(v)}" ${v === it.scenario ? "selected" : ""}>${esc(l)}</option>`).join("")}</optgroup>` : "");
   const total = w.items.reduce((a, i) => {
     const s = tr.data.scenarios.find((x) => x.id === i.scenario)?.scenario;
     return a + (s ? s.timing.duration_s + s.timing.countdown_s : 60) * (i.runs || 1);
@@ -315,7 +322,7 @@ function workout(id) {
       <div class="card-head"><h2>Runs, in order</h2><span class="small muted">About ${minutes(total)} · ${w.items.reduce((a, i) => a + (i.runs || 1), 0)} runs</span></div>
       <div class="workout-items">${w.items.map((it, i) => `<div class="knob-row">
         <span class="small muted mono">${i + 1}</span>
-        <select class="select" data-witem="${i}" data-part="scenario" aria-label="Scenario">${options.map(([v, l]) => `<option value="${esc(v)}" ${v === it.scenario ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>
+        <select class="select" data-witem="${i}" data-part="scenario" aria-label="Scenario">${choices(it)}</select>
         <span class="field"><input type="number" min="1" max="20" step="1" data-witem="${i}" data-part="runs" value="${it.runs}" aria-label="Runs"><span class="muted small">runs</span></span>
         <select class="select" data-witem="${i}" data-part="mode" aria-label="Mode"><option value="adaptive" ${it.mode !== "standard" ? "selected" : ""}>Adaptive</option><option value="standard" ${it.mode === "standard" ? "selected" : ""}>Standard</option></select>
         <button class="icon-btn" type="button" data-action="witem-up" data-index="${i}" aria-label="Move up" ${i === 0 ? "disabled" : ""}>↑</button>

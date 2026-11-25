@@ -1539,6 +1539,48 @@ fn the_last_hour_tick_is_kept_inside_the_axis() {
     assert!(css.contains(".tl-axis span.end { transform: translateX(-100%); }"));
 }
 
+/// The Viscose Easier card lists the benchmark in the order of the four built-in Viscose workouts, which
+/// split it, and links to each of them.
+#[test]
+fn the_viscose_card_and_workouts_list_the_same_scenarios() {
+    let app = ui("app.js");
+    let list = app.split("const VISCOSE_EASIER = [").nth(1).and_then(|s| s.split("];").next()).expect("VISCOSE_EASIER");
+    let card_names: Vec<&str> = list.split('"').skip(1).step_by(2).collect();
+    let mut workout_names = Vec::new();
+    for id in ["clicking", "switching", "tracking-a", "tracking-b"] {
+        let w = aimadapt_sim::workout::resolve(&format!("builtin:viscose-easier-{id}"), std::path::Path::new(""))
+            .unwrap_or_else(|e| panic!("{id}: {e}"));
+        for item in &w.items {
+            workout_names
+                .push(aimadapt_sim::workout::kovaaks_name(&item.scenario).expect("a KovaaK's scenario").to_string());
+        }
+        assert!(app.contains(&format!("[\"{id}\", ")), "the card links to {id}");
+    }
+    assert_eq!(card_names, workout_names);
+    assert!(decl(&app, "viscoseCard").contains("VISCOSE_WORKOUTS.map("));
+}
+
+/// A workout can hold your KovaaK's scenarios (`kovaaks:<name>`). Its page names each and says which are
+/// left out (not downloaded, or can't play yet), and the editor offers the ones that play.
+#[test]
+fn workouts_show_and_offer_your_kovaaks_scenarios() {
+    let scenarios = ui("scenarios.js");
+    let detail = decl(&scenarios, "workoutDetail");
+    for want in ["leftOut(it.scenario)", "left out", "loadSceLibrary()"] {
+        assert!(detail.contains(want), "{want} missing from {detail}");
+    }
+    let left_out = decl(&scenarios, "leftOut");
+    assert!(left_out.contains("Not downloaded") && left_out.contains("Can't play yet"), "{left_out}");
+    assert!(decl(&scenarios, "loadSceLibrary").contains("\"workout\""), "the editor redraws when your files are read");
+    let trainer = ui("trainer.js");
+    assert!(trainer.contains("id.replace(/^(builtin|user|kovaaks):/, \"\")"), "a KovaaK's item is shown by its name");
+    let editor = decl(&trainer, "workout");
+    assert!(
+        editor.contains("<optgroup label=\"Your KovaaK's scenarios\">") && editor.contains("f.playable"),
+        "{editor}"
+    );
+}
+
 /// Cleanup: a workout's page looks drills up with the shared `drillLookup()`, not its own map.
 #[test]
 fn a_workouts_page_uses_the_shared_drill_lookup() {

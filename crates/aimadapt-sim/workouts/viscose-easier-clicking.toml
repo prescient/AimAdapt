@@ -1,0 +1,50 @@
+# Viscose's Easier benchmark, in the order of its Steam Workshop collection, split in four.
+# Each item plays the player's own .sce file of that name (see kovaaks_name in src/workout.rs).
+name = "Viscose Easier: Clicking"
+description = "The first nine scenarios of Viscose's Easier benchmark, its clicking: two adaptive runs of each, from your own KovaaK's files. A scenario you haven't downloaded, or that AimAdapt can't play yet, is left out."
+author = "AimAdapt"
+
+[[items]]
+scenario = "kovaaks:voxTargetSwitch Click"
+runs = 2
+mode = "adaptive"
+
+[[items]]
+scenario = "kovaaks:Floating Heads Timing 400% Larger"
+runs = 2
+mode = "adaptive"
+
+[[items]]
+scenario = "kovaaks:1w3ts Pasu Perfected Micro Goated Larger 80%"
+runs = 2
+mode = "adaptive"
+
+[[items]]
+scenario = "kovaaks:1w2ts Pasu Perfected Easy"
+runs = 2
+mode = "adaptive"
+
+[[items]]
+scenario = "kovaaks:Pasu Angelic 20% Larger 80% Speed"
+runs = 2
+mode = "adaptive"
+
+[[items]]
+scenario = "kovaaks:Popcorn MV Novice"
+runs = 2
+mode = "adaptive"
+
+[[items]]
+scenario = "kovaaks:Controlsphere Click Easy"
+runs = 2
+mode = "adaptive"
+
+[[items]]
+scenario = "kovaaks:B180 Voltaic Easy 92%"
+runs = 2
+mode = "adaptive"
+
+[[items]]
+scenario = "kovaaks:1wall5targets_pasu slow"
+runs = 2
+mode = "adaptive"

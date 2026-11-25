@@ -222,7 +222,7 @@ name = "Morning"
 description = "Clicking, then tracking."
 
 [[items]]
-scenario = "builtin:timed-flicks"   # or user:<file name>
+scenario = "builtin:timed-flicks"   # or user:<file name>, or kovaaks:<scenario name>
 runs = 2                            # 1–20, default 1
 mode = "adaptive"                   # or "standard"; default adaptive
 variants = ["builtin:timed-wide-flicks"]  # optional: rotate week by week
@@ -232,6 +232,8 @@ scenario = "builtin:strafe-track"
 ```
 
 Each run is saved on its own, with the workout's name attached.
+
+`kovaaks:<scenario name>` plays one of your own KovaaK's scenarios: the `.sce` file of that name (without `.sce`, any case) in your KovaaK's and Workshop folders, as **Play** on its page does. One that isn't there, or that the trainer can't play yet, is left out of the session, and the trainer prints why; a workout with nothing left to play is refused. Each run keeps your field of view inside its own scenario's locked range, if it has one. The four Viscose Easier workouts (`viscose-easier-clicking`, `-switching`, `-tracking-a` and `-tracking-b`) are built this way, from the benchmark's Steam Workshop collection in its order.
 
 `variants` lists other scenarios that train the same thing. In weeks where the ISO week number is even the item plays `scenario`; in other weeks it plays the variants in turn. The training day starts at 4 AM, like the rest of the program.
 

@@ -50,7 +50,7 @@ function loadSceLibrary() {
     .catch(() => [])
     .then((list) => {
       ui.sceLibrary = list;
-      if (["scenarios", "today", "progress"].includes(route().view)) render();
+      if (["scenarios", "today", "progress", "workout"].includes(route().view)) render();
     });
 }
 
@@ -566,23 +566,39 @@ function itemTabs(key, have, asked) {
   return { current, row: tabs(`scenarios/${encodeURIComponent(key)}`, list, current, "overview") };
 }
 
+// Why a workout leaves out a KovaaK's scenario: its file isn't in your folders, or the trainer can't
+// play it yet. "" when it plays, isn't a KovaaK's scenario, or your files are still being read.
+function leftOut(id) {
+  if (!id.startsWith("kovaaks:") || !Array.isArray(ui.sceLibrary)) return "";
+  const name = id.slice("kovaaks:".length).trim().toLowerCase();
+  const file = ui.sceLibrary.find((f) => f.name.toLowerCase() === name);
+  return !file ? "Not downloaded" : file.playable ? "" : "Can't play yet";
+}
+
 function workoutDetail(e) {
   const w = e.workout;
   const playing = ui.trainer.data.playing ? "disabled" : "";
   const drill = drillLookup();
+  if (ui.sceLibrary === null && w.items.some((it) => it.scenario.startsWith("kovaaks:"))) loadSceLibrary();
+  const all = w.items.reduce((a, i) => a + i.runs, 0);
+  const runs = w.items.reduce((a, i) => a + (leftOut(i.scenario) ? 0 : i.runs), 0);
+  const out = w.items.filter((i) => leftOut(i.scenario)).length;
   return `<section class="card detail-head">
       <div class="card-head" style="align-items:flex-start">
         <div><div class="eyebrow">Workout${e.builtin ? "" : " · yours"}${isHidden(`workout:${e.id}`) ? " · hidden" : ""}</div><h2 class="detail-title">${esc(w.name)}</h2>
           <div class="note-body">${esc(w.description)}</div>
-          <div class="small muted" style="margin-top:4px">About ${minutes(e.seconds)} · ${w.items.reduce((a, i) => a + i.runs, 0)} runs${e.last_played ? ` · last played ${esc(fmtShort(dt(e.last_played)))}` : ""}</div></div>
+          <div class="small muted" style="margin-top:4px">About ${minutes(e.seconds * (all ? runs / all : 1))} · ${runs} runs${out ? ` · ${out} of ${w.items.length} scenarios left out` : ""}${e.last_played ? ` · last played ${esc(fmtShort(dt(e.last_played)))}` : ""}</div></div>
         <span class="chips">${markButtons(`workout:${e.id}`)}<a class="btn" href="#workout/${encodeURIComponent(e.id)}">${e.builtin ? "Copy &amp; edit" : "Edit"}</a>
           <button class="btn primary" type="button" data-action="play-workout" data-id="${esc(e.id)}" ${playing} aria-label="Start session ${esc(w.name)}">${playIcon}Start session</button></span>
       </div>
       <div class="steps">${w.items.map((it, i) => {
         const { entry: s, name } = drill(it);
-        return `<div class="step"><span class="mono muted">${i + 1}</span>
-          ${s?.scenario ? `<a href="${scenarioHref(s.id)}">${esc(name)}</a>` : `<span>${esc(name)}</span>`}
-          <span>${it.runs} run${it.runs === 1 ? "" : "s"}</span><span class="muted">${it.mode === "standard" ? "Standard" : "Adaptive"}</span></div>`;
+        // A KovaaK's scenario opens its own page, which says why one is left out.
+        const why = leftOut(it.scenario);
+        const link = s?.scenario || it.scenario.startsWith("kovaaks:") ? `<a href="${scenarioHref(s?.id ?? it.scenario)}">${esc(name)}</a>` : `<span>${esc(name)}</span>`;
+        return `<div class="step${why ? " muted" : ""}"><span class="mono muted">${i + 1}</span>
+          ${link}
+          <span>${it.runs} run${it.runs === 1 ? "" : "s"}</span><span class="muted">${why ? `${why}, left out` : it.mode === "standard" ? "Standard" : "Adaptive"}</span></div>`;
       }).join("")}</div>
     </section>`;
 }

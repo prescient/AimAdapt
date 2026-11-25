@@ -1,0 +1,48 @@
+name = "Viscose Easier: Tracking A"
+description = "The first nine tracking scenarios of Viscose's Easier benchmark: two adaptive runs of each, from your own KovaaK's files. A scenario you haven't downloaded, or that AimAdapt can't play yet, is left out."
+author = "AimAdapt"
+
+[[items]]
+scenario = "kovaaks:Air Voltaic Easy Invincible 4 80%"
+runs = 2
+mode = "adaptive"
+
+[[items]]
+scenario = "kovaaks:Air Pure Intermediate Slower No UFO"
+runs = 2
+mode = "adaptive"
+
+[[items]]
+scenario = "kovaaks:Polarized Hell Easy 40% Slower"
+runs = 2
+mode = "adaptive"
+
+[[items]]
+scenario = "kovaaks:Flicker Plaza rAim Easy Less Blinks"
+runs = 2
+mode = "adaptive"
+
+[[items]]
+scenario = "kovaaks:Controlsphere OW Long Strafes 90%"
+runs = 2
+mode = "adaptive"
+
+[[items]]
+scenario = "kovaaks:Air Voltaic Invincible 7 Easy 80%"
+runs = 2
+mode = "adaptive"
+
+[[items]]
+scenario = "kovaaks:Whisphere Small & Slow 55%"
+runs = 2
+mode = "adaptive"
+
+[[items]]
+scenario = "kovaaks:Air CELESTIAL No UFO Easy Slowed"
+runs = 2
+mode = "adaptive"
+
+[[items]]
+scenario = "kovaaks:PGTI Voltaic Easy 80%"
+runs = 2
+mode = "adaptive"

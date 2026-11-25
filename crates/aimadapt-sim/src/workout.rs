@@ -9,6 +9,9 @@
 //! runs = 2
 //! mode = "adaptive"
 //! ```
+//!
+//! An item can also be one of the player's own KovaaK's scenarios, `kovaaks:<name>`, which plays
+//! from the `.sce` file of that name in their KovaaK's folders (see [`kovaaks_name`]).
 
 use std::path::Path;
 
@@ -39,7 +42,7 @@ impl Default for Workout {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Item {
-    /// Scenario id (`builtin:…` or `user:…`).
+    /// Scenario id (`builtin:…`, `user:…` or `kovaaks:<scenario name>`).
     pub scenario: String,
     #[serde(default = "one")]
     pub runs: u32,
@@ -97,6 +100,16 @@ fn one() -> u32 {
     1
 }
 
+/// How a workout names one of the player's own KovaaK's scenarios: `kovaaks:` and the scenario's
+/// name, which is its file's name without `.sce`.
+pub const KOVAAKS: &str = "kovaaks:";
+
+/// The KovaaK's scenario an item plays, for an id `kovaaks:<name>`. The file is found when the workout
+/// is played, so a workout can list scenarios the player hasn't downloaded yet.
+pub fn kovaaks_name(id: &str) -> Option<&str> {
+    id.strip_prefix(KOVAAKS).map(str::trim).filter(|n| !n.is_empty())
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Mode {
@@ -136,7 +149,9 @@ impl Workout {
             p.push("a workout needs 1–50 scenarios".into());
         }
         for (i, item) in self.items.iter().enumerate() {
-            if item.scenario.trim().is_empty() {
+            if item.scenario.trim().is_empty()
+                || (item.scenario.starts_with(KOVAAKS) && kovaaks_name(&item.scenario).is_none())
+            {
                 p.push(format!("item {} has no scenario", i + 1));
             }
             if !(1..=20).contains(&item.runs) {
@@ -191,6 +206,10 @@ const BUILTIN: &[(&str, &str)] = &[
     ("core-wed", include_str!("../workouts/core-wed.toml")),
     ("core-thu", include_str!("../workouts/core-thu.toml")),
     ("core-fri", include_str!("../workouts/core-fri.toml")),
+    ("viscose-easier-clicking", include_str!("../workouts/viscose-easier-clicking.toml")),
+    ("viscose-easier-switching", include_str!("../workouts/viscose-easier-switching.toml")),
+    ("viscose-easier-tracking-a", include_str!("../workouts/viscose-easier-tracking-a.toml")),
+    ("viscose-easier-tracking-b", include_str!("../workouts/viscose-easier-tracking-b.toml")),
 ];
 
 #[derive(Debug, Clone)]
@@ -252,15 +271,48 @@ mod tests {
         assert_eq!(names.len(), n, "two built-in workouts share a name");
     }
 
+    /// A built-in item is a built-in scenario, or a KovaaK's scenario by name (its file is the player's
+    /// own, so it can't be checked here).
     #[test]
     fn builtin_workouts_are_valid_and_use_real_scenarios() {
         let scenarios: Vec<String> = crate::library::builtins().into_iter().map(|e| e.id).collect();
         for e in builtins() {
             let w = e.workout.unwrap_or_else(|err| panic!("{}: {err}", e.id));
             for item in &w.items {
-                assert!(scenarios.contains(&item.scenario), "{} uses unknown {}", e.id, item.scenario);
+                let known = scenarios.contains(&item.scenario) || kovaaks_name(&item.scenario).is_some();
+                assert!(known, "{} uses unknown {}", e.id, item.scenario);
             }
         }
+    }
+
+    /// The Viscose Easier workouts are the benchmark split in four, in its order: each of its 36
+    /// scenarios once, two adaptive runs each, so one workout is about 20 minutes.
+    #[test]
+    fn the_viscose_workouts_cover_the_benchmark_once() {
+        let ids = ["clicking", "switching", "tracking-a", "tracking-b"];
+        let mut names = Vec::new();
+        for id in ids {
+            let w = resolve(&format!("builtin:viscose-easier-{id}"), Path::new("")).unwrap();
+            assert!(w.name.starts_with("Viscose Easier: "), "{}", w.name);
+            assert_eq!(w.items.len(), 9, "{}", w.name);
+            for item in &w.items {
+                assert_eq!((item.runs, item.mode), (2, Mode::Adaptive), "{}", item.scenario);
+                names.push(kovaaks_name(&item.scenario).expect("a KovaaK's scenario").to_lowercase());
+            }
+        }
+        let n = names.len();
+        names.sort();
+        names.dedup();
+        assert_eq!((n, names.len()), (36, 36), "36 scenarios, none twice");
+    }
+
+    #[test]
+    fn a_kovaaks_item_names_its_scenario() {
+        assert_eq!(kovaaks_name("kovaaks:B180 Voltaic Easy 92%"), Some("B180 Voltaic Easy 92%"));
+        assert_eq!(kovaaks_name("builtin:timed-flicks"), None);
+        let w = |id: &str| Workout::from_toml(&format!("name = \"x\"\n[[items]]\nscenario = \"{id}\""));
+        assert!(w("kovaaks:Whisphere 80%").is_ok());
+        assert_eq!(w("kovaaks: ").unwrap_err(), "item 1 has no scenario");
     }
 
     #[test]
